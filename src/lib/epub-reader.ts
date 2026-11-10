@@ -18,7 +18,10 @@ import {
 // server, from the book's own EPUB:
 //   - "sample": the readers' sample. Front matter (everything before the
 //     book's own "start of the text" landmark) is shown and is free up to
-//     3% of the book; past that it counts. Then ~10% of the readable text.
+//     3% of the book; past that it counts. Then ~10% of the readable text,
+//     but never more than SAMPLE_MAX_WORDS words (SC1: ~30 printed pages
+//     at the page estimate's 250 words a page), so a long book does not
+//     give away 80+ pages.
 //     Nothing past the cut is ever put in the response: no text, no
 //     picture, no chapter title.
 //   - "full": the author's own whole book, with a marker where the
@@ -41,6 +44,23 @@ export type ReaderContent =
 
 export const SAMPLE_FRACTION = 0.1;
 export const FRONT_MATTER_FREE_FRACTION = 0.03;
+// SC1 (owner pick 11-10): 10%, but at most ~30 printed pages.
+export const SAMPLE_MAX_WORDS = 7500;
+// Owner pick 11-10 (card a): front matter is free for the word cap only
+// up to ~5 printed pages; past that it counts toward the 30.
+export const FRONT_MATTER_FREE_MAX_WORDS = 1250;
+
+// Same word rule as the page estimate (countEpubWords): a run of
+// non-space that holds a letter or a digit. Chunk text is still
+// XML-escaped, so entities are removed first ("p&#235;r" is one word,
+// a lone "&amp;" is none).
+export function countWords(text: string): number {
+  let words = 0;
+  for (const token of text.replace(/&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, "").split(/\s+/)) {
+    if (/[\p{L}\p{N}]/u.test(token)) words += 1;
+  }
+  return words;
+}
 const MAX_SPINE_ITEMS = 1000;
 
 // Picture budgets: count, and total inline bytes after re-encoding.
@@ -243,34 +263,49 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   const total = docs.reduce((s, d) => s + d.chunks.reduce((t, c) => t + length(c), 0), 0);
   if (total === 0) return { available: false };
   const frontLength = docs.filter((d) => d.front).reduce((s, d) => s + d.chunks.reduce((t, c) => t + length(c), 0), 0);
-  const target =
-    Math.max(1, Math.ceil(total * SAMPLE_FRACTION)) + Math.min(frontLength, Math.floor(total * FRONT_MATTER_FREE_FRACTION));
+  const frontFree = Math.min(frontLength, Math.floor(total * FRONT_MATTER_FREE_FRACTION));
+  const target = Math.max(1, Math.ceil(total * SAMPLE_FRACTION)) + frontFree;
+  // The word cap gets the same free front matter, in words: the front
+  // documents' words, at most 3% of the book's words and at most
+  // FRONT_MATTER_FREE_MAX_WORDS.
+  const words = (c: ReaderChunk) => countWords(c.text);
+  const totalWords = docs.reduce((s, d) => s + d.chunks.reduce((t, c) => t + words(c), 0), 0);
+  const frontWords = docs.filter((d) => d.front).reduce((s, d) => s + d.chunks.reduce((t, c) => t + words(c), 0), 0);
+  const wordTarget =
+    SAMPLE_MAX_WORDS + Math.min(frontWords, Math.floor(totalWords * FRONT_MATTER_FREE_FRACTION), FRONT_MATTER_FREE_MAX_WORDS);
 
-  // The cut: the first chunk that reaches the target ends the sample.
+  // The cut is made on "units": a whole chunk, or (SC1) one block of a
+  // chunk that lists its inner blocks (a chapter wrapped in one
+  // container). The first unit that reaches either target ends the sample.
+  type Unit = { d: number; c: number; p: number; text: string; heading: boolean };
+  const units: Unit[] = [];
+  docs.forEach((doc, d) =>
+    doc.chunks.forEach((chunk, c) => {
+      if (chunk.parts) chunk.parts.forEach((part, p) => units.push({ d, c, p, text: part.text, heading: part.heading }));
+      else units.push({ d, c, p: -1, text: chunk.text, heading: /^<h[1-6][\s>]/.test(chunk.html) });
+    }),
+  );
   let included = 0;
-  let cutDoc = docs.length - 1;
-  let cutChunk = docs[cutDoc].chunks.length - 1;
-  outer: for (let d = 0; d < docs.length; d++) {
-    for (let c = 0; c < docs[d].chunks.length; c++) {
-      included += length(docs[d].chunks[c]);
-      if (included >= target) {
-        cutDoc = d;
-        cutChunk = c;
-        break outer;
-      }
+  let includedWords = 0;
+  let cut = units.length - 1;
+  for (let u = 0; u < units.length; u++) {
+    included += units[u].text.length;
+    includedWords += countWords(units[u].text);
+    if (included >= target || includedWords >= wordTarget) {
+      cut = u;
+      break;
     }
   }
   // Never end the sample on a lone chapter title: step back past
   // trailing headings (they are the next chapter's, not this one's).
-  while (/^<h[1-6][\s>]/.test(docs[cutDoc].chunks[cutChunk].html) && (cutDoc > 0 || cutChunk > 0)) {
-    if (cutChunk > 0) cutChunk -= 1;
-    else {
-      cutDoc -= 1;
-      cutChunk = docs[cutDoc].chunks.length - 1;
-    }
-  }
-  const sampleTextShare = Math.min(100, Math.max(1, Math.round((Math.max(0, included - Math.min(frontLength, Math.floor(total * FRONT_MATTER_FREE_FRACTION))) / total) * 100)));
+  while (units[cut].heading && cut > 0) cut -= 1;
+  const { d: cutDoc, c: cutChunk } = units[cut];
+  const cutPart = docs[cutDoc].chunks[cutChunk].parts;
+  // A block inside a chunk, not its last one: the chunk is trimmed there.
+  const trimAt = cutPart && units[cut].p < cutPart.length - 1 ? cutPart[units[cut].p] : null;
+  const sampleTextShare = Math.min(100, Math.max(1, Math.round((Math.max(0, included - frontFree) / total) * 100)));
 
+  const SAMPLE_END = '<div class="lb-sample-end" id="lb-sample-end"></div>';
   const sections: string[] = [];
   const usedImages = new Set<number>();
   for (let d = 0; d < docs.length; d++) {
@@ -278,11 +313,22 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     const parts: string[] = [];
     docs[d].chunks.forEach((chunk, c) => {
       if (mode === "sample" && d === cutDoc && c > cutChunk) return;
+      const atCut = d === cutDoc && c === cutChunk;
+      if (atCut && trimAt && mode === "sample") {
+        // Everything before trimAt.end is byte-for-byte the chunk's own
+        // html; then the wrappers still open there are closed.
+        parts.push(chunk.html.slice(0, trimAt.end) + trimAt.close);
+        for (const part of chunk.parts!.slice(0, units[cut].p + 1)) part.images.forEach((n) => usedImages.add(n));
+        return;
+      }
+      if (atCut && trimAt && mode === "full") {
+        parts.push(chunk.html.slice(0, trimAt.end) + SAMPLE_END + chunk.html.slice(trimAt.end));
+        chunk.images.forEach((n) => usedImages.add(n));
+        return;
+      }
       parts.push(chunk.html);
       chunk.images.forEach((n) => usedImages.add(n));
-      if (mode === "full" && d === cutDoc && c === cutChunk) {
-        parts.push('<div class="lb-sample-end" id="lb-sample-end"></div>');
-      }
+      if (mode === "full" && atCut) parts.push(SAMPLE_END);
     });
     sections.push(`<section class="lb-sec">${parts.join("")}</section>`);
   }
