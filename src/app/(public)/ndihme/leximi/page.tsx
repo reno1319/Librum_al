@@ -65,7 +65,7 @@ export default function ReadingHelpPage() {
               <li key={device.id}>
                 <a
                   href={`#${device.id}`}
-                  className="focus-ring inline-flex min-h-11 items-center rounded-[3px] border border-primary-foreground/40 px-4 text-sm font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover"
+                  className="focus-ring inline-flex min-h-11 items-center rounded-full border border-primary-foreground/40 px-4 text-sm font-semibold text-primary-foreground transition-colors hover:border-primary-foreground hover:bg-primary-hover"
                 >
                   {device.heading}
                 </a>

@@ -71,8 +71,16 @@ describe("POLICY PAGES: /privatesia", () => {
   });
 
   it("names the emails about new books from followed authors", () => {
-    expect(text).toContain("si dhe për librat e rinj të autorëve që ndiqni.");
+    expect(text).toContain("si dhe për librat e rinj të autorëve që ndiqni dhe për librat në parapublikim për të cilët keni kërkuar njoftim.");
     expect(text).toContain("Nuk dërgojmë emaile marketingu");
+  });
+
+  // PL1: the "Më njofto kur të dalë" requests (BD16 pre-orders).
+  it("names the pre-order notice requests, who sees them and how long they are kept", () => {
+    expect(text).toContain("autorët që ndiqni, kërkesat «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,");
+    expect(text).toContain("Për një libër në parapublikim, autori sheh vetëm sa lexues presin njoftimin, jo kush janë.");
+    expect(text).toContain("Kërkesat «Më njofto»: derisa ta hiqni kërkesën ose ta fshini llogarinë.");
+    expect(text).toContain("por e ruajmë bashkë me shënimin që emaili u dërgua, derisa ta fshini llogarinë.");
   });
 
   it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {
@@ -112,8 +120,8 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
     expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
-    // BD15: the Production release day of the D2 Privacy text (7 November 2026).
-    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 7 nëntor 2026");
+    // Release 21: the Production release day of the PL1 Privacy text (11 November 2026).
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 11 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

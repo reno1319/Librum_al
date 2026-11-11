@@ -77,7 +77,7 @@ export function LibraryBookCard({
       {downloadable && (
         <a
           href={`/api/books/${bookId}/download`}
-          className="focus-ring mt-1 w-fit rounded-control border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+          className="focus-ring mt-1 w-fit rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
         >
           Shkarkoni EPUB
         </a>

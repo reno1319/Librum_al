@@ -2,7 +2,7 @@
 
 // PHONE PASS (D3): `className` lets the Dashboard row's ··· menu show
 // it as a menu item; the Edit page's Danger zone keeps the default look.
-const DEFAULT_CLASS_NAME = "focus-ring rounded-control border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50";
+const DEFAULT_CLASS_NAME = "focus-ring rounded-full border border-border px-3 py-1.5 text-sm text-red-600 hover:bg-red-50";
 
 export function DeleteBookButton({ title, className = DEFAULT_CLASS_NAME }: { title: string; className?: string }) {
   return (

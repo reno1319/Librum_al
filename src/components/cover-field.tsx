@@ -18,7 +18,7 @@ const PICKER_BOX_CLASSES =
 // chosen" / file-name text beside the styled button (the field's own
 // "Cover ready — name" line says what was picked); the input itself,
 // its label and its keyboard focus are unchanged.
-const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-[3px] file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
+const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-full file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
 
 // LIBRUM 2.0 PRODUCT-5 COVER-1 CORRECTION: a cover between ~4.5MB and
 // the app's own advertised 5MB limit could 413 through the old

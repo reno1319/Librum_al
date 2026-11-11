@@ -21,7 +21,9 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // BD15 (Renato 11-05, release day "a"): BD15 ships the D2 Privacy text
 // to Production on Saturday 7 November 2026; if it moves, this line
 // moves with it.
-export const PRIVACY_LAST_UPDATED = "7 nëntor 2026";
+// PL1 (Release 21): the pre-order «Më njofto» text ships to Production
+// on Wednesday 11 November 2026; if it moves, this line moves with it.
+export const PRIVACY_LAST_UPDATED = "11 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
 
@@ -38,6 +40,9 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // dates of the text that is live on Production.
 // BD15 (Renato 11-05, release day "a"): release day Saturday 7 November
 // 2026; if it moves, this line moves with it.
-export const TERMS_LAST_UPDATED = "7 nëntor 2026";
+// PL1 (Release 21): the Terms §5 "Parapublikimi" text ships to
+// Production on Wednesday 11 November 2026; if it moves, this line
+// moves with it.
+export const TERMS_LAST_UPDATED = "11 nëntor 2026";
 
 export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;

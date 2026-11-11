@@ -29,6 +29,7 @@ export function BookSampleReader({
   mode = "sample",
   coverUrl = null,
   endLink = null,
+  triggerClassName,
 }: {
   bookId: string;
   bookTitle: string;
@@ -39,6 +40,9 @@ export function BookSampleReader({
   // The end page's main button: scroll to an element on this page (the
   // price card) or follow a link.
   endLink?: SampleEndLink | null;
+  // P1 book page (design B): the opening button's own look (the pill on
+  // the cover, the outline pill in the price box), in place of `variant`.
+  triggerClassName?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pushedRef = useRef(false);
@@ -125,9 +129,10 @@ export function BookSampleReader({
         type="button"
         onClick={open}
         className={
-          variant === "button"
+          triggerClassName ??
+          (variant === "button"
             ? buttonClasses("outline", "md")
-            : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+            : "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2")
         }
       >
         {label}

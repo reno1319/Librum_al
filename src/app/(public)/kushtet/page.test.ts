@@ -71,6 +71,20 @@ describe("POLICY PAGES: /kushtet", () => {
     expect(text).toContain("Librum e shqyrton çdo libër para se të dalë në Librari, por nuk garanton atë që autorët shkruajnë në librat e tyre.");
   });
 
+  // PL1: the author pre-order rules, as built (src/lib/preorders.ts), at the
+  // end of section 5; no section is renumbered.
+  it("states the pre-order rules in section 5 and promises no sale", () => {
+    expect(section(5)).toContain("<strong>Parapublikimi.</strong>");
+    expect(text).toContain("Parapublikimi. Mund ta shfaqni një libër në Librari para se të dalë, me një datë daljeje të paktën 14 ditë dhe jo më shumë se 6 muaj përpara.");
+    expect(text).toContain("Gjatë parapublikimit libri nuk shitet: lexuesit mund të kërkojnë vetëm të njoftohen me email.");
+    expect(text).not.toContain("vetëm një email");
+    expect(text).toContain("të paktën 3 ditë para datës së daljes.");
+    expect(text).toContain("Data e daljes shtyhet vetëm një herë: ose e shtyni ju, deri në 30 ditë, ose, nëse dorëshkrimi final nuk vjen në kohë, Librum e shtyn vetë me 30 ditë.");
+    expect(text).toContain("Një libër mund të ketë të shumtën 2 parapublikime");
+    expect(text).toContain("lexuesit që kërkuan njoftim marrin një email.");
+    expect(section(17)).toContain("Ndryshimet e këtyre Kushteve");
+  });
+
   it("no longer promises 30 days' notice", () => {
     expect(text).not.toContain("30 ditë para");
   });
@@ -78,8 +92,8 @@ describe("POLICY PAGES: /kushtet", () => {
   // BD2 (3a): the Terms have their own date; Refunds keep the shared one.
   it("takes its date from its own line (BD2, 3. a)", () => {
     expect(text).toContain(TERMS_LAST_UPDATED_LINE);
-    // BD15: the Production release day of the D2 Terms (7 November 2026).
-    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 7 nëntor 2026");
+    // Release 21: the Production release day of the PL1 Terms (11 November 2026).
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 11 nëntor 2026");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 

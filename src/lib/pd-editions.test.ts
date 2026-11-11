@@ -131,7 +131,7 @@ describe("the book page", () => {
     const page = read("app/(public)/libra/[id]/page.tsx");
     expect(page.match(/return notFoundOrPickedEdition\(\);/g)).toHaveLength(2);
     expect(page).toContain("if (picked) redirect(`/libra/${picked}`);");
-    expect(page).toContain("{book.pen && (\n      <section className=\"mt-14\">");
+    expect(page).toContain("{book.pen && (\n      <section className={PAGE_SECTION_CLASSES}>");
     expect(page).toContain("{showsPreparedBy(book) && authorName && (");
     // No `.eq("pen_name_id", null)` for an edition without a pen name.
     expect(page).toContain("book.pen_name_id\n      ? supabase");

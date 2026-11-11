@@ -37,6 +37,7 @@ import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
 import { PAGE_ESTIMATE_LABEL, pageEstimateText } from "@/lib/page-estimate";
+import { READING_TIME_LABEL, readingTimeText } from "@/lib/reading-time";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { formatTransactionAmount, provenanceFromStoredCurrency } from "@/lib/transaction-money";
 import { formatCatalogPriceLabel } from "@/lib/catalog-price";
@@ -55,12 +56,12 @@ import {
   resolveBookPenName,
   resolveOriginalAuthor,
   resolveTranslatorLine,
-  TRANSLATED_BY,
 } from "@/lib/book-byline";
 import { PD_PREPARED_BY, readPdEditionRedirect, showsPreparedBy } from "@/lib/pd-editions";
 import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import {
   authorPagePath,
+  penNameLinkKind,
   penNameLinkLabel,
   readPenNameLinks,
   type PenNameRef,
@@ -89,6 +90,16 @@ import {
   readingAgeValue,
 } from "@/lib/book-reader-details";
 import { BookDescriptionView } from "@/components/book-description-view";
+import { CopyLinkButton, CoverZoom, ExpandableText } from "@/components/book-page-extras";
+import {
+  IconCalendar,
+  IconClock,
+  IconDevice,
+  IconFacebook,
+  IconGlobe,
+  IconInstagram,
+  IconPage,
+} from "@/components/icons";
 import {
   ANONYMOUS_REVIEWER_NAME,
   AUTHOR_REVIEWER_LABEL,
@@ -486,6 +497,7 @@ export default async function BookDetailPage({
     { data: moreByAuthor },
     { data: youMightLikeData },
     { data: followRow },
+    { count: penBookCount },
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -584,6 +596,17 @@ export default async function BookDetailPage({
           .eq("pen_name_id", book.pen_name_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // P1 (design B): "N libra në Librum" under the author's name -- a
+    // count only (no rows) of the very books "More by" may list: this
+    // pen name's listed books with an authored ALL price, this one too.
+    book.pen_name_id
+      ? supabase
+          .from("public_books")
+          .select("id", { count: "exact", head: true })
+          .in("status", LISTED_BOOK_STATUSES)
+          .not("price_all", "is", null)
+          .eq("pen_name_id", book.pen_name_id)
+      : Promise.resolve({ count: null }),
     // A basic view count, not deduplicated unique visitors — a reload
     // or a repeat visit counts again. Only published books, and never
     // the author's own visits (so previewing/editing doesn't inflate
@@ -833,8 +856,30 @@ export default async function BookDetailPage({
       )
     : null;
 
+  // P1 book page (design B): the price box's "Lexoni një pjesë" and the
+  // "Shikoni brenda" pill on the cover open the same sample reader, by
+  // the same showSample rule as before.
+  const sampleReader = (label: string, triggerClassName: string) => (
+    <BookSampleReader
+      bookId={book.id}
+      bookTitle={book.title}
+      label={label}
+      triggerClassName={triggerClassName}
+      coverUrl={coverUrl}
+      endLink={sampleEndLink}
+    />
+  );
+  const boxSample = showSample ? sampleReader("Lexoni një pjesë", SECONDARY_ACTION_CLASSES) : null;
+  // P1 (Renato 11-10): pages and reading time come from the same count.
+  const pagesText = pageEstimateText(book.word_count);
+  const readingTime = readingTimeText(book.word_count);
+  const publishedOnLibrum =
+    book.status === "published" && book.published_at ? formatTimestampAsDate(book.published_at) : null;
+
   return (
-    <main className="page-container flex-1 pt-5 pb-16 sm:pt-6">
+    // P1 (design B): a white page, on this page only.
+    <div className="flex flex-1 flex-col bg-surface">
+    <main className="page-container flex-1 pt-4 pb-16 sm:pt-5">
       {bookJsonLd && (
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: bookJsonLd }} />
       )}
@@ -851,7 +896,7 @@ export default async function BookDetailPage({
         </p>
       )}
       {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
-      <nav aria-label="Rruga e navigimit" className="text-sm text-muted">
+      <nav aria-label="Rruga e navigimit" className="text-[0.8125rem] text-muted">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <li>
             <Link href="/librari" className={BREADCRUMB_LINK_CLASSES}>
@@ -878,106 +923,229 @@ export default async function BookDetailPage({
         </ol>
       </nav>
 
-      {/* ============================================================
-          Main Book Hero -- REDESIGN STEP 3 (P2): two columns, stacked on
-          phones. Left: the large cover and Read sample. Right: the
-          title block, the white price card, and the book's own text.
-          ============================================================ */}
-      <div className="mt-6 flex flex-col gap-8 md:flex-row md:items-start md:gap-12">
-        <div className="mx-auto flex w-56 shrink-0 flex-col gap-4 sm:w-64 md:mx-0 md:w-72 lg:w-80">
-          {coverUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={coverUrl}
-              alt={`Ballina e librit ${book.title}`}
-              fetchPriority="high"
-              className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
-            />
+      {/* P1 (design B): the result of what the reader just did (bought,
+          got, followed a notice, reported, a held or lapsed checkout, an
+          error) sits above the book, where the page opens after the
+          redirect. Same texts and the same conditions as before. */}
+      {purchase === "success" && (
+        <p className={`${NOTICE_CLASSES} bg-green-50 text-green-700`}>
+          {owned ? (
+            <>
+              Blerja u krye. Faleminderit!{" "}
+              <Link href="/library" className="focus-ring rounded-sm font-medium underline">
+                Shkoni te Biblioteka juaj
+              </Link>{" "}
+              për ta shkarkuar kurdo.
+            </>
           ) : (
-            <CoverPlaceholder
-              title={book.title}
-              authorName={bookByline}
-              className="aspect-[5/8] w-full rounded-[3px] shadow-[0_18px_36px_rgba(30,58,50,0.25)]"
+            "Blerja u krye. Faleminderit! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
+          )}
+        </p>
+      )}
+      {freeStatus === "success" && (
+        <p className={`${NOTICE_CLASSES} bg-green-50 text-green-700`}>
+          {owned ? (
+            <>
+              U shtua në Bibliotekën tuaj!{" "}
+              <Link href="/library" className="focus-ring rounded-sm font-medium underline">
+                Shkoni te Biblioteka juaj
+              </Link>{" "}
+              për ta shkarkuar kurdo.
+            </>
+          ) : (
+            "U shtua në Bibliotekën tuaj! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
+          )}
+        </p>
+      )}
+      {notifyStatus && (
+        <p
+          role="status"
+          className={`${NOTICE_CLASSES} ${
+            notifyStatus === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+          }`}
+        >
+          {NOTIFY_STATUS_MESSAGES[notifyStatus]}
+        </p>
+      )}
+      {reportStatus === "success" && (
+        <p className={`${NOTICE_CLASSES} bg-green-50 text-green-700`}>
+          Faleminderit! E morëm raportimin tuaj dhe do ta shqyrtojmë.
+        </p>
+      )}
+      {/* STALE-CHECKOUT-1: the held-quote conflict notice. It states
+          the frozen amount, says plainly that today's price and any
+          code just entered are NOT applied to it, and offers the
+          deliberate resume as its own separate form -- never as a
+          silent continuation of the buy button, which is how a
+          reader would otherwise be charged an amount they never
+          agreed to. */}
+      {heldQuote && canResumePaidCheckout && (
+        <div className={`${NOTICE_CLASSES} bg-amber-50 text-amber-800`}>
+          <p className="font-medium">
+            Keni tashmë një pagesë të nisur për këtë libër.
+          </p>
+          <p className="mt-1">
+            Shuma e saj e ruajtur është{" "}
+            <strong>
+              {/* ALL-TXN-CURRENCY-4: a FROZEN checkout amount, in the
+                  intent's own frozen currency -- never "any non-ALL
+                  currency is dollars". */}
+              {formatTransactionAmount(
+                heldQuote.price_cents_at_checkout,
+                provenanceFromStoredCurrency(heldQuote.currency),
+              )}
+            </strong>
+            . Kjo është shuma që do të paguanit. Çmimi i sotëm dhe kodi
+            promocional që sapo vendosët <strong>nuk</strong> zbatohen për
+            të.
+          </p>
+          <p className="mt-1">
+            Mund ta përfundoni atë pagesë, ose të prisni t&apos;i kalojë afati
+            dhe të nisni një të re me çmimin aktual.
+          </p>
+          <form
+            action={buyBook.bind(null, book.id)}
+            className="mt-2 flex flex-wrap items-center gap-2"
+          >
+            <input type="hidden" name="resume_existing" value="1" />
+            <input
+              type="hidden"
+              name="expected_intent_id"
+              value={heldQuote.intent_id}
             />
-          )}
-          {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
-              omitted for "owned", who already have Download EPUB. */}
-          {showSample && (
-            <div className="flex flex-col [&>button]:w-full [&>button]:rounded-[3px] [&>button]:border-primary [&>button]:py-3 [&>button]:font-semibold [&>button]:text-primary">
-              <BookSampleReader
-                bookId={book.id}
-                bookTitle={book.title}
-                coverUrl={coverUrl}
-                endLink={sampleEndLink}
+            <button type="submit" className={buttonClasses("primary", "sm")}>
+              Vazhdoni atë pagesë
+            </button>
+          </form>
+        </div>
+      )}
+      {/* The accepted quote lapsed between the notice being rendered
+          and the reader pressing Continue. Deliberately NOT
+          auto-minted into a fresh one: that would silently move the
+          reader onto a different price they never saw. */}
+      {/* ALL-WIRING-2 CORRECTION: gated on the same condition. This
+          notice ends with "You can start a new one at the current
+          price", which is simply false on a book that has no current
+          purchasable price -- and on an unavailable book it would also
+          be an invitation to start a checkout the page refuses to
+          offer. */}
+      {checkoutExpired === "1" && canResumePaidCheckout && (
+        <p className={`${NOTICE_CLASSES} bg-amber-50 text-amber-800`}>
+          Afati i asaj pagese kaloi para se ta vazhdonit, prandaj nuk u
+          tarifua asgjë. Mund të nisni një pagesë të re me çmimin aktual.
+        </p>
+      )}
+      {/* QA-FIX-2: POK sends both a cancel and a failed payment here,
+          so the text claims neither a charge nor its absence. Hidden
+          once the book is owned (e.g. a later retry succeeded), where
+          it would contradict the page. */}
+      {canceled === "true" && !owned && (
+        <p
+          role="status"
+          className={`${NOTICE_CLASSES} bg-amber-50 text-amber-800`}
+        >
+          Pagesa u anulua ose nuk u krye. Mund të provoni përsëri
+          kur të jeni gati.
+        </p>
+      )}
+      {error && (
+        <p className={`${NOTICE_CLASSES} bg-red-50 text-red-700`}>
+          {error}
+        </p>
+      )}
+
+      {/* ============================================================
+          Main Book Hero -- P1 (design B): three columns on a computer
+          (cover | title and text | a small price box), two on a tablet
+          (the price box under the text), stacked on phones.
+          ============================================================ */}
+      <div className="mt-5 flex flex-col gap-8 md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-x-8 md:gap-y-6 lg:grid-cols-[15rem_minmax(0,1fr)_15.625rem]">
+        <div className="mx-auto flex w-56 shrink-0 flex-col items-center gap-2 sm:w-60 md:row-span-2 md:mx-0 md:w-full lg:row-span-1">
+          <div className="relative w-full pt-3">
+            {coverUrl ? (
+              // P1 (design B): the cover opens large (a plain link to the
+              // image without JavaScript).
+              <CoverZoom src={coverUrl} alt={`Ballina e librit ${book.title}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={coverUrl}
+                  alt={`Ballina e librit ${book.title}`}
+                  fetchPriority="high"
+                  className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_2px_8px_rgba(0,0,0,0.18)]"
+                />
+              </CoverZoom>
+            ) : (
+              <CoverPlaceholder
+                title={book.title}
+                authorName={bookByline}
+                className="aspect-[5/8] w-full rounded-[3px] shadow-[0_2px_8px_rgba(0,0,0,0.18)]"
               />
-            </div>
-          )}
+            )}
+            {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
+                omitted for "owned", who already have Download EPUB. */}
+            {showSample && (
+              <div className="absolute top-0 left-1/2 z-10 -translate-x-1/2">
+                {sampleReader("Shikoni brenda", COVER_PILL_CLASSES)}
+              </div>
+            )}
+          </div>
+          {coverUrl && <p className="text-xs text-muted">Klikoni ballinën për ta parë të madhe</p>}
         </div>
 
-        <div className="min-w-0 flex-1">
-          {/* Upload notes 3a (Enkelejd 11-06): the format is "EPUB" in
-              Formati below. Upload notes C: the book's type, then the
-              genre ("ROMAN · HORROR"); the genre only while it has none. */}
-          {bookEyebrow(book) && (
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#806510]">{bookEyebrow(book)}</p>
-          )}
-          <h1 className="mt-3 font-serif text-4xl leading-[1.08] font-normal text-primary sm:text-5xl">
+        <div className="min-w-0">
+          <h1 className="font-serif text-[1.75rem] leading-[1.2] font-normal text-foreground sm:text-[1.875rem]">
             {book.title}
           </h1>
           {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: rendered as its own,
               visually secondary element -- never joined into the h1's
               own text -- so a screen reader's page-title/heading
-              structure stays exactly "book.title," matching every
-              existing consumer of this page's <h1> (generateMetadata's
-              own title is unaffected too; see this file's own note on
-              why that's deliberately left alone). Omitted entirely
-              when null, same "render nothing, not an empty row" rule
-              every other optional field on this page already follows. */}
+              structure stays exactly "book.title". Omitted entirely
+              when null. */}
           {book.subtitle && (
-            <p className="mt-2 font-serif text-xl text-muted italic">{book.subtitle}</p>
+            <p className="mt-1 font-serif text-lg text-muted italic">{book.subtitle}</p>
           )}
           {/* BD16 P4 (D1, D7): "Del më 12 dhjetor 2026". */}
           {releaseLabel && (
-            <p data-preorder-release="" className="mt-3">
+            <p data-preorder-release="" className="mt-2">
               <span className={PREORDER_BADGE_CLASSES}>{releaseLabel}</span>
             </p>
           )}
 
-          {/* REDESIGN STEP 3: author and series on one line, as in the
-              mockup ("by <author> · Book 1 of <series>"). */}
-          <p className="mt-4 text-foreground">
-            nga{" "}
-            {originalAuthor ? (
-              <span className="font-semibold">{originalAuthor}</span>
-            ) : penNamePath ? (
-              <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
-                {bookByline}
-              </Link>
-            ) : (
-              <span className="font-semibold">{bookByline}</span>
-            )}
-            {seriesInfo && (
-              <>
-                {" · "}
-                {book.series_position ? `Libri ${book.series_position} i serisë ` : "Pjesë e serisë "}
-                <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
-                  {seriesInfo.title}
+          {/* P1 (design B): "nga <name> (Autor)". BD3 patch 4: with an
+              "Autori origjinal" that is the name, now a link to the
+              Libraria search for it (search matches original_author);
+              the translator follows as "(Përkthyes)". */}
+          {(originalAuthor || bookByline) && (
+            <p className="mt-2 text-[0.9375rem] text-foreground">
+              nga{" "}
+              {originalAuthor ? (
+                <Link href={buildBookstoreHref({}, { q: originalAuthor })} className={INLINE_LINK_CLASSES}>
+                  {originalAuthor}
                 </Link>
-              </>
-            )}
-          </p>
-
-          {originalAuthor && translatorLine && (
-            <p className="mt-1 text-foreground">
-              {TRANSLATED_BY}{" "}
-              {!penIsTranslator ? (
-                translatorLine
               ) : penNamePath ? (
                 <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
-                  {authorName}
+                  {bookByline}
                 </Link>
               ) : (
-                <span className="font-semibold">{authorName}</span>
+                <span className="font-semibold">{bookByline}</span>
+              )}{" "}
+              <span className="text-muted">(Autor)</span>
+              {/* 1a (16:05Z): the Translator contributors, else the pen
+                  name (linked to its page). */}
+              {originalAuthor && translatorLine && (
+                <>
+                  {" · "}
+                  {!penIsTranslator ? (
+                    <span className="font-semibold">{translatorLine}</span>
+                  ) : penNamePath ? (
+                    <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
+                      {authorName}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold">{authorName}</span>
+                  )}{" "}
+                  <span className="text-muted">{TRANSLATOR_ROLE}</span>
+                </>
               )}
             </p>
           )}
@@ -986,7 +1154,7 @@ export default async function BookDetailPage({
               when Librum gave the editor mention (otherwise no pen name
               reaches this page at all). */}
           {showsPreparedBy(book) && authorName && (
-            <p className="mt-1 text-foreground">
+            <p className="mt-1 text-[0.9375rem] text-foreground">
               {PD_PREPARED_BY}{" "}
               {penNamePath ? (
                 <Link href={penNamePath} className={INLINE_LINK_CLASSES}>
@@ -1009,7 +1177,22 @@ export default async function BookDetailPage({
             </p>
           )}
 
-          <div className="mt-3 flex items-center gap-2.5 text-[0.9375rem]">
+          {/* Upload notes C: the book's type, then the genre; P1: plain
+              words, no capitals. (Upload notes 3a: no "ebook" word here.) */}
+          {bookEyebrow(book) && (
+            <p className="mt-1 text-[0.8125rem] text-muted">{bookEyebrow(book)}</p>
+          )}
+
+          {seriesInfo && (
+            <p className="mt-1 text-sm text-foreground">
+              {book.series_position ? `Libri ${book.series_position} i serisë ` : "Pjesë e serisë "}
+              <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
+                {seriesInfo.title}
+              </Link>
+            </p>
+          )}
+
+          <div className="mt-2 flex items-center gap-2.5 text-sm">
             {/* FIX1 (X4): no star row (and no "0 out of 5 stars" for
                 screen readers) until the first review; the words stay. */}
             {reviewCount > 0 && <StarRating rating={averageRating} />}
@@ -1020,19 +1203,139 @@ export default async function BookDetailPage({
             </span>
           </div>
 
-          {/* REDESIGN STEP 3 (P2): the purchase panel as a white card --
-              a large price, a full-width primary action, the secondary
-              action under it, and the purchase sentence as a footnote. */}
-          {/* PREVIEW-READER-1: id="blerja" is where the sample's end page
-              button takes the reader. */}
-          <div id="blerja" className="mt-6 flex max-w-[32.5rem] scroll-mt-24 flex-col gap-4 rounded-[4px] border border-border bg-surface p-5 sm:p-6">
-            <span className="font-serif text-4xl text-primary">{formattedPrice}</span>
+          <hr className="my-4 border-0 border-t border-border" />
+
+          {/* LIBRUM 2.0 PRODUCT-1: only the real description. BD15 P8:
+              the rich description (bold, italic, lists), parsed -- never
+              rendered as HTML. P1 (design B): serif, folded after four
+              lines with "Lexo më shumë" (the whole text without
+              JavaScript). */}
+          {book.description && (
+            <section aria-labelledby="rreth-librit">
+              <h2 id="rreth-librit" className="sr-only">Rreth librit</h2>
+              <ExpandableText lines={4} className="max-w-[42.5rem] font-serif text-base leading-[1.6] text-foreground/90">
+                <BookDescriptionView stored={book.description} />
+              </ExpandableText>
+            </section>
+          )}
+
+          {/* ============================================================
+              Book Details -- P1 (design B): a row of tiles for the five
+              quick facts, then the rest as plain "Label: value" lines
+              (no capital-letter labels). As before, every row but
+              Formati renders only when the book carries a real value;
+              nothing is guessed, defaulted or substituted (Publisher
+              never falls back to "Librum" or the author's own name).
+              ============================================================ */}
+          <section aria-labelledby="te-dhenat" className="mt-5">
+            <h2 id="te-dhenat" className="sr-only">Të dhënat e librit</h2>
+            <dl data-detail-tiles="" className="grid grid-cols-[repeat(auto-fit,minmax(4.25rem,1fr))] overflow-hidden rounded-[8px] border border-border [&>div]:-mr-px [&>div]:border-r [&>div]:border-border">
+              {/* Upload notes D: words / 250, only once the file is counted. */}
+              {pagesText && (
+                <DetailTile label={PAGE_ESTIMATE_LABEL} icon={<IconPage className={TILE_ICON_CLASSES} />}>
+                  {pagesText}
+                </DetailTile>
+              )}
+              {/* Renato 11-10 (a): minutes under an hour, else hours. */}
+              {readingTime && (
+                <DetailTile label={READING_TIME_LABEL} icon={<IconClock className={TILE_ICON_CLASSES} />}>
+                  {readingTime}
+                </DetailTile>
+              )}
+              {book.language && (
+                <DetailTile label="Gjuha" icon={<IconGlobe className={TILE_ICON_CLASSES} />}>
+                  {getLanguageLabel(book.language)}
+                </DetailTile>
+              )}
+              {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: published_at only --
+                  never created_at/updated_at. Requires BOTH a published
+                  book AND a real published_at (a legacy book published
+                  before migration 044 has none, and gets no tile). */}
+              {publishedOnLibrum && (
+                <DetailTile label="Botuar" icon={<IconCalendar className={TILE_ICON_CLASSES} />}>
+                  {publishedOnLibrum}
+                </DetailTile>
+              )}
+              <DetailTile label="Formati" icon={<IconDevice className={TILE_ICON_CLASSES} />}>
+                <Acronym>EPUB</Acronym>
+              </DetailTile>
+            </dl>
+
+            <dl data-detail-rows="" className="mt-4 flex flex-col gap-1 text-[0.9375rem] leading-relaxed">
+              {/* Upload notes C: the book's type, before its genres. */}
+              {bookTypeOf(book) && (
+                <DetailRow label={BOOK_TYPE_LABEL}>{bookTypeOf(book)}</DetailRow>
+              )}
+              {/* BD15 P8 (Q3 a): every category, each a link to that
+                  category in Libraria; then 18+ or the reading age. */}
+              {bookCategories(book).length > 0 && (
+                <DetailRow label={categoriesLabel(bookCategories(book).length)}>
+                  {bookCategories(book).map((category, index) => (
+                    <Fragment key={category}>
+                      {index > 0 && ", "}
+                      <Link
+                        href={buildBookstoreHref({}, { genre: category })}
+                        className={INLINE_LINK_CLASSES}
+                      >
+                        {category}
+                      </Link>
+                    </Fragment>
+                  ))}
+                </DetailRow>
+              )}
+              {book.is_adult && (
+                <DetailRow label={ADULT_DETAIL_LABEL}>{ADULT_DETAIL_VALUE}</DetailRow>
+              )}
+              {readingAgeValue(book) && (
+                <DetailRow label={READING_AGE_LABEL}>{readingAgeValue(book)}</DetailRow>
+              )}
+              {seriesInfo && (
+                <DetailRow label="Seria">
+                  {book.series_position ? `Libri ${book.series_position} i serisë ` : ""}
+                  <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
+                    {seriesInfo.title}
+                  </Link>
+                </DetailRow>
+              )}
+              {book.publisher && (
+                <DetailRow label="Botuesi">{book.publisher}</DetailRow>
+              )}
+              {/* BD15 P8: the edition number, else the old free text. */}
+              {editionValue(book) && (
+                <DetailRow label={EDITION_LABEL}>{editionValue(book)}</DetailRow>
+              )}
+              {book.original_publication_date && (
+                <DetailRow label="Botuar për herë të parë">
+                  {formatDateOnly(book.original_publication_date)}
+                </DetailRow>
+              )}
+              {releaseLabel && (
+                <DetailRow label="Parapublikim">{releaseLabel}</DetailRow>
+              )}
+              {book.isbn && (
+                <DetailRow label="ISBN">{book.isbn}</DetailRow>
+              )}
+            </dl>
+          </section>
+        </div>
+
+        {/* REDESIGN STEP 3 (P2) -> P1 (design B): the purchase panel as a
+            small box -- the price, the main action as a gold pill, the
+            sample as an outline pill, save for later, then sharing.
+            Which controls show, and every form and action, are exactly
+            as before. */}
+        {/* PREVIEW-READER-1: id="blerja" is where the sample's end page
+            button takes the reader. */}
+        <aside aria-label="Çmimi dhe marrja e librit" className="w-full md:col-start-2 lg:col-start-3 lg:row-start-1">
+          <div id="blerja" className="flex scroll-mt-24 flex-col gap-3 rounded-[8px] border border-[#d9d3c3] p-4">
+            <span className="text-2xl font-semibold text-foreground">{formattedPrice}</span>
 
             {showPreorderPanel ? (
               <PreorderPanel
                 bookId={book.id}
                 signedIn={!!user}
                 notifyOn={notifyOn}
+                sampleSlot={boxSample}
               />
             ) : (
               <PurchasePanel
@@ -1041,9 +1344,10 @@ export default async function BookDetailPage({
                 formattedPrice={formattedPrice}
                 wishlisted={wishlisted}
                 downloadNote={downloadNote}
+                sampleSlot={boxSample}
               />
             )}
-            {preorder && <p className="text-sm text-muted">{PREORDER_PRICE_NOTE}</p>}
+            {preorder && <p className={BOX_NOTE_CLASSES}>{PREORDER_PRICE_NOTE}</p>}
 
             {showPurchaseNote &&
               (purchaseState === "anonymous-unavailable" ||
@@ -1052,12 +1356,12 @@ export default async function BookDetailPage({
                 // purchase state above used. The unavailable copy makes
                 // no promise about acquiring the book, because there is
                 // no acquisition form on the page in that state.
-                <p className="text-sm text-muted">
+                <p className={BOX_NOTE_CLASSES}>
                   Ky libër nuk ka ende çmim, prandaj nuk mund të blihet ose të shkarkohet tani.
                 </p>
               ) : book.price_all === 0 ? (
-                <p className="text-sm text-muted">
-                  Falas, pa pagesë. Do të merrni një EPUB pa DRM që mund ta shkarkoni kurdo nga Biblioteka juaj në Librum.
+                <p className={BOX_NOTE_CLASSES}>
+                  Falas, pa pagesë. Do të merrni një <Acronym>EPUB</Acronym> pa <Acronym>DRM</Acronym> që mund ta shkarkoni kurdo nga Biblioteka juaj në Librum.
                   {checkoutSecurityNote}
                 </p>
               ) : (
@@ -1065,8 +1369,8 @@ export default async function BookDetailPage({
                 // for a paid book. The third line said "or with the POK
                 // app" until Renato's C1 answer (b): it comes back only once
                 // paying with the POK app is proven in our checkout.
-                <ul className="flex flex-col gap-1.5 text-sm text-muted">
-                  <li>EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.</li>
+                <ul className={`flex flex-col gap-1 ${BOX_NOTE_CLASSES}`}>
+                  <li><Acronym>EPUB</Acronym>, pa <Acronym>DRM</Acronym>. Lexojeni në telefon, tablet ose lexues elektronik.</li>
                   <li>Shkarkojeni kurdo nga Biblioteka juaj në Librum.</li>
                   <li>Paguani me kartë.</li>
                   {checkoutSecurityNote && <li>{checkoutSecurityNote.trim()}</li>}
@@ -1074,423 +1378,145 @@ export default async function BookDetailPage({
               ))}
 
             {purchaseState === "owned" && book.status === "draft" && (
-              <p className="text-sm font-medium text-amber-700">
+              <p className="text-[0.8125rem] font-medium text-amber-700">
                 Ky libër nuk shitet më. Kopjen tuaj mund ta shkarkoni
                 përsëri kurdo.
               </p>
             )}
+
+            {/* TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded
+                from WhatsApp. P1: plus "Kopjo lidhjen" (this page's own
+                address, copied in the browser). */}
+            {whatsappShareHref && (
+              <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-t border-border pt-3 text-xs">
+                <span className="text-muted">Ndajeni:</span>
+                <a
+                  href={whatsappShareHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Ndajeni në WhatsApp"
+                  className={SHARE_LINK_CLASSES}
+                >
+                  WhatsApp
+                </a>
+                <span aria-hidden="true" className="text-muted">·</span>
+                <CopyLinkButton path={bookPagePath(book.id)} className={SHARE_LINK_CLASSES} />
+              </p>
+            )}
           </div>
-
-          {whatsappShareHref && (
-            <p className="mt-3">
-              <a
-                href={whatsappShareHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${INLINE_LINK_CLASSES} text-sm`}
-              >
-                Ndajeni në WhatsApp
-              </a>
-            </p>
-          )}
-
-          {purchase === "success" && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              {owned ? (
-                <>
-                  Blerja u krye. Faleminderit!{" "}
-                  <Link href="/library" className="focus-ring rounded-sm font-medium underline">
-                    Shkoni te Biblioteka juaj
-                  </Link>{" "}
-                  për ta shkarkuar kurdo.
-                </>
-              ) : (
-                "Blerja u krye. Faleminderit! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
-              )}
-            </p>
-          )}
-          {freeStatus === "success" && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              {owned ? (
-                <>
-                  U shtua në Bibliotekën tuaj!{" "}
-                  <Link href="/library" className="focus-ring rounded-sm font-medium underline">
-                    Shkoni te Biblioteka juaj
-                  </Link>{" "}
-                  për ta shkarkuar kurdo.
-                </>
-              ) : (
-                "U shtua në Bibliotekën tuaj! Mund të duhen disa sekonda që libri të shfaqet më poshtë si i juaji."
-              )}
-            </p>
-          )}
-          {notifyStatus && (
-            <p
-              role="status"
-              className={`mt-4 max-w-[32.5rem] rounded-[3px] px-3 py-2 text-sm ${
-                notifyStatus === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
-              }`}
-            >
-              {NOTIFY_STATUS_MESSAGES[notifyStatus]}
-            </p>
-          )}
-          {reportStatus === "success" && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700">
-              Faleminderit! E morëm raportimin tuaj dhe do ta shqyrtojmë.
-            </p>
-          )}
-          {/* STALE-CHECKOUT-1: the held-quote conflict notice. It states
-              the frozen amount, says plainly that today's price and any
-              code just entered are NOT applied to it, and offers the
-              deliberate resume as its own separate form -- never as a
-              silent continuation of the buy button, which is how a
-              reader would otherwise be charged an amount they never
-              agreed to. */}
-          {heldQuote && canResumePaidCheckout && (
-            <div className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              <p className="font-medium">
-                Keni tashmë një pagesë të nisur për këtë libër.
-              </p>
-              <p className="mt-1">
-                Shuma e saj e ruajtur është{" "}
-                <strong>
-                  {/* ALL-TXN-CURRENCY-4: a FROZEN checkout amount, in the
-                      intent's own frozen currency -- never "any non-ALL
-                      currency is dollars". */}
-                  {formatTransactionAmount(
-                    heldQuote.price_cents_at_checkout,
-                    provenanceFromStoredCurrency(heldQuote.currency),
-                  )}
-                </strong>
-                . Kjo është shuma që do të paguanit. Çmimi i sotëm dhe kodi
-                promocional që sapo vendosët <strong>nuk</strong> zbatohen për
-                të.
-              </p>
-              <p className="mt-1">
-                Mund ta përfundoni atë pagesë, ose të prisni t&apos;i kalojë afati
-                dhe të nisni një të re me çmimin aktual.
-              </p>
-              <form
-                action={buyBook.bind(null, book.id)}
-                className="mt-2 flex flex-wrap items-center gap-2"
-              >
-                <input type="hidden" name="resume_existing" value="1" />
-                <input
-                  type="hidden"
-                  name="expected_intent_id"
-                  value={heldQuote.intent_id}
-                />
-                <button type="submit" className={buttonClasses("primary", "sm")}>
-                  Vazhdoni atë pagesë
-                </button>
-              </form>
-            </div>
-          )}
-          {/* The accepted quote lapsed between the notice being rendered
-              and the reader pressing Continue. Deliberately NOT
-              auto-minted into a fresh one: that would silently move the
-              reader onto a different price they never saw. */}
-          {/* ALL-WIRING-2 CORRECTION: gated on the same condition. This
-              notice ends with "You can start a new one at the current
-              price", which is simply false on a book that has no current
-              purchasable price -- and on an unavailable book it would also
-              be an invitation to start a checkout the page refuses to
-              offer. */}
-          {checkoutExpired === "1" && canResumePaidCheckout && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Afati i asaj pagese kaloi para se ta vazhdonit, prandaj nuk u
-              tarifua asgjë. Mund të nisni një pagesë të re me çmimin aktual.
-            </p>
-          )}
-          {/* QA-FIX-2: POK sends both a cancel and a failed payment here,
-              so the text claims neither a charge nor its absence. Hidden
-              once the book is owned (e.g. a later retry succeeded), where
-              it would contradict the page. */}
-          {canceled === "true" && !owned && (
-            <p
-              role="status"
-              className="mt-4 max-w-[32.5rem] rounded-[3px] bg-amber-50 px-3 py-2 text-sm text-amber-800"
-            >
-              Pagesa u anulua ose nuk u krye. Mund të provoni përsëri
-              kur të jeni gati.
-            </p>
-          )}
-          {error && (
-            <p className="mt-4 max-w-[32.5rem] rounded-[3px] bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </p>
-          )}
-
-          {/* ============================================================
-              About this book
-              ============================================================ */}
-          {/* LIBRUM 2.0 PRODUCT-1: the old preview_text "Look inside"
-              accordion and the raw keywords pill list are both retired from
-              this reader-facing section -- see the PRODUCT-1 audit. Neither
-              field is dropped from the schema or from the Publishing
-              Studio's own edit form; preview_text remains internally/
-              backward-compatibly available (still editable there, still
-              part of the pre-publish recommended checklist), and keywords
-              still drive bookstore/author search exactly as before. This
-              section now shows only the real description, plus a quiet
-              Read Sample entry point (independent of, and in addition to,
-              the hero CTA) when the reader doesn't already have full
-              access. */}
-          {book.description && (
-            <section className="mt-10">
-              <h2 className={SECTION_HEADING}>Rreth librit</h2>
-              {/* BD15 P8: the rich description (bold, italic, lists),
-                  parsed -- never rendered as HTML. */}
-              <BookDescriptionView
-                stored={book.description}
-                className="mt-4 max-w-[42.5rem] leading-relaxed text-foreground/90"
-              />
-              {showSample && (
-                <div className="mt-4">
-                  <BookSampleReader
-                    bookId={book.id}
-                    bookTitle={book.title}
-                    variant="text"
-                    coverUrl={coverUrl}
-                    endLink={sampleEndLink}
-                  />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* ============================================================
-              Book Details
-              ============================================================ */}
-          <section className="mt-10">
-            <h2 className={SECTION_HEADING}>Të dhënat e librit</h2>
-            {/* REDESIGN STEP 3 (P3/D5): a light grid card, as in the
-                mockup. Every row is unchanged: Format and Genre remain
-                always/near-always present (genre is required at
-                creation); every other row -- Series, ISBN, and
-                (LIBRUM 2.0 PUBLISHING-UX-1 PART D) Language/Publisher/
-                Edition/Originally published/Published on Librum --
-                renders only when the book actually carries a real,
-                authoritative value. No field here is ever guessed,
-                defaulted, or substituted -- e.g. Publisher never falls
-                back to "Librum" or the author's own name; it renders
-                only book.publisher itself, or not at all. */}
-            <dl className="mt-4 grid max-w-[42.5rem] grid-cols-2 gap-x-6 gap-y-5 rounded-[4px] border border-border bg-surface p-5 sm:grid-cols-3">
-              <div>
-                <dt className={DETAIL_LABEL_CLASSES}>Formati</dt>
-                <dd className={DETAIL_VALUE_CLASSES}>EPUB</dd>
-              </div>
-              {/* Upload notes D: words / 250, only once the file is counted. */}
-              {pageEstimateText(book.word_count) && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{PAGE_ESTIMATE_LABEL}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{pageEstimateText(book.word_count)}</dd>
-                </div>
-              )}
-              {book.language && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Gjuha</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{getLanguageLabel(book.language)}</dd>
-                </div>
-              )}
-              {/* Upload notes C: the book's type, before its genres. */}
-              {bookTypeOf(book) && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{BOOK_TYPE_LABEL}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{bookTypeOf(book)}</dd>
-                </div>
-              )}
-              {/* BD15 P8 (Q3 a): every category, each a link to that
-                  category in Libraria; then 18+ or the reading age. */}
-              {bookCategories(book).length > 0 && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{categoriesLabel(bookCategories(book).length)}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>
-                    {bookCategories(book).map((category, index) => (
-                      <Fragment key={category}>
-                        {index > 0 && ", "}
-                        <Link
-                          href={buildBookstoreHref({}, { genre: category })}
-                          className={INLINE_LINK_CLASSES}
-                        >
-                          {category}
-                        </Link>
-                      </Fragment>
-                    ))}
-                  </dd>
-                </div>
-              )}
-              {book.is_adult && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{ADULT_DETAIL_LABEL}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{ADULT_DETAIL_VALUE}</dd>
-                </div>
-              )}
-              {readingAgeValue(book) && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{READING_AGE_LABEL}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{readingAgeValue(book)}</dd>
-                </div>
-              )}
-              {seriesInfo && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Seria</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>
-                    {book.series_position ? `Libri ${book.series_position} i serisë ` : ""}
-                    <Link href={`/seri/${seriesInfo.id}`} className={INLINE_LINK_CLASSES}>
-                      {seriesInfo.title}
-                    </Link>
-                  </dd>
-                </div>
-              )}
-              {book.publisher && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Botuesi</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.publisher}</dd>
-                </div>
-              )}
-              {/* BD15 P8: the edition number, else the old free text. */}
-              {editionValue(book) && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>{EDITION_LABEL}</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{editionValue(book)}</dd>
-                </div>
-              )}
-              {book.original_publication_date && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Botuar për herë të parë</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>
-                    {formatDateOnly(book.original_publication_date)}
-                  </dd>
-                </div>
-              )}
-              {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: published_at only --
-                  never created_at/updated_at, which mean something entirely
-                  different (row creation/last edit, not "first went live").
-                  Requires BOTH a published book AND a real published_at --
-                  a legacy book published before migration 044 existed has
-                  status="published" but published_at=null (performPublish()
-                  only ever sets it going forward, no backfill -- see that
-                  migration's own comment), and this row is omitted for
-                  exactly that book rather than guessing a date it doesn't
-                  actually have. */}
-              {releaseLabel && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Parapublikim</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{releaseLabel}</dd>
-                </div>
-              )}
-              {book.status === "published" && book.published_at && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>Botuar në Librum</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>
-                    {formatTimestampAsDate(book.published_at)}
-                  </dd>
-                </div>
-              )}
-              {book.isbn && (
-                <div>
-                  <dt className={DETAIL_LABEL_CLASSES}>ISBN</dt>
-                  <dd className={DETAIL_VALUE_CLASSES}>{book.isbn}</dd>
-                </div>
-              )}
-            </dl>
-          </section>
-        </div>
+        </aside>
       </div>
 
       {/* ============================================================
-          About the Author -- REDESIGN STEP 3 (P3/B5): a white card with
-          the photo, name, bio and the Follow button from the author's
-          own page.
+          About the Author -- P1 (design B): no big card. The photo,
+          name, how many of its books are in Librum, Follow, the
+          author's own links as icons, the bio (folded), and "More by"
+          under it.
           ============================================================ */}
       {/* BD15 P7: not on a public-domain edition without the editor
           mention -- the page has no pen name for it. */}
       {book.pen && (
-      <section className="mt-14">
+      <section className={PAGE_SECTION_CLASSES}>
         <h2 className={SECTION_HEADING}>Rreth autorit</h2>
-        <div className="mt-4 flex flex-wrap items-center gap-6 rounded-[4px] border border-border bg-surface p-6 sm:p-7">
-          {authorAvatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={authorAvatarUrl}
-              alt=""
-              className="size-20 shrink-0 rounded-full object-cover sm:size-[5.5rem]"
-            />
-          ) : (
-            // iPhone step (I4): the author's initials, as on the author's
-            // own page, instead of an empty circle. aria-hidden: the name
-            // is the very next element.
-            <div
-              aria-hidden="true"
-              className="flex size-20 shrink-0 items-center justify-center rounded-full bg-[#d9e2dc] text-lg font-semibold text-foreground/70 sm:size-[5.5rem] sm:text-xl"
-            >
-              {getAuthorInitials(authorName ?? "")}
-            </div>
-          )}
-          <div className="min-w-0 flex-[1_1_20rem]">
-            <p className="font-serif text-[1.375rem] text-primary">{authorName}</p>
-            {book.pen?.bio && (
-              <p className="mt-2 max-w-prose whitespace-pre-line leading-relaxed text-muted">
-                {book.pen.bio}
+        <div className="mt-4 flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
+          <div className="flex shrink-0 flex-col items-center gap-2 text-center sm:w-48">
+            {authorAvatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={authorAvatarUrl}
+                alt=""
+                className="size-24 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              // iPhone step (I4): the author's initials, as on the author's
+              // own page, instead of an empty circle. aria-hidden: the name
+              // is the very next element.
+              <div
+                aria-hidden="true"
+                className="flex size-24 shrink-0 items-center justify-center rounded-full bg-[#d9e2dc] text-2xl font-semibold text-foreground/70"
+              >
+                {getAuthorInitials(authorName ?? "")}
+              </div>
+            )}
+            {penNamePath ? (
+              <Link href={penNamePath} className="focus-ring rounded-sm text-base font-semibold text-primary hover:underline">
+                {authorName}
+              </Link>
+            ) : (
+              <p className="text-base font-semibold text-foreground">{authorName}</p>
+            )}
+            {/* P1: only the books readers can already find under this pen
+                name (the same listed, priced rows as "More by"). */}
+            {typeof penBookCount === "number" && penBookCount > 0 && (
+              <p className="text-[0.8125rem] text-muted">
+                {penBookCount} {penBookCount === 1 ? "libër" : "libra"} në Librum
               </p>
             )}
+            {!isAuthor &&
+              penNamePath &&
+              (user ? (
+                <form
+                  action={(isFollowingAuthor ? unfollowAuthorFromBook : followAuthorFromBook).bind(
+                    null,
+                    book.pen_name_id!,
+                    book.id,
+                  )}
+                >
+                  <button
+                    type="submit"
+                    className={isFollowingAuthor ? FOLLOWING_PILL_CLASSES : FOLLOW_PILL_CLASSES}
+                  >
+                    {isFollowingAuthor ? "Po e ndiqni" : "Ndiqni"}
+                  </button>
+                </form>
+              ) : (
+                // The author page's own "Log in to follow" link, unchanged:
+                // after logging in the reader follows from that page.
+                <Link href={`/login?next=${penNamePath}`} className={FOLLOWING_PILL_CLASSES}>
+                  Hyr për ta ndjekur
+                </Link>
+              ))}
             {penNameLinks.length > 0 && (
-              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <ul className="mt-1 flex flex-wrap justify-center gap-1">
                 {penNameLinks.map((link) => (
-                  <li key={link} className="min-w-0 max-w-full">
+                  <li key={link}>
                     <a
                       href={link}
                       rel="nofollow ugc noopener noreferrer"
                       target="_blank"
-                      className="focus-ring break-all rounded-sm text-primary underline underline-offset-2 hover:decoration-2"
+                      aria-label={penNameLinkName(link)}
+                      title={penNameLinkLabel(link)}
+                      className="focus-ring flex size-10 items-center justify-center rounded-full text-primary hover:bg-surface-hover"
                     >
-                      {penNameLinkLabel(link)}
+                      <PenNameLinkIcon link={link} />
                     </a>
                   </li>
                 ))}
               </ul>
             )}
+          </div>
+          <div className="min-w-0 flex-1">
+            {book.pen?.bio && (
+              <ExpandableText lines={3} className="max-w-[42.5rem] text-[0.9375rem] leading-relaxed text-foreground/90">
+                <p className="whitespace-pre-line">{book.pen.bio}</p>
+              </ExpandableText>
+            )}
             {penNamePath && (
               <Link
                 href={penNamePath}
-                className="focus-ring mt-3 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+                className="focus-ring mt-2 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
               >
-                Shikoni profilin e autorit &rarr;
+                Shikoni profilin e autorit &rsaquo;
               </Link>
             )}
+            {/* 3a: "More by" = only books under this book's pen name. */}
+            <BookShelf
+              inline
+              title={authorName ? `Më shumë nga ${authorName}` : "Më shumë nga ky autor"}
+              books={moreByAuthor ?? []}
+              supabase={supabase}
+            />
           </div>
-          {!isAuthor &&
-            penNamePath &&
-            (user ? (
-              <form
-                action={(isFollowingAuthor ? unfollowAuthorFromBook : followAuthorFromBook).bind(
-                  null,
-                  book.pen_name_id!,
-                  book.id,
-                )}
-              >
-                <button
-                  type="submit"
-                  className={buttonClasses(
-                    isFollowingAuthor ? "outline" : "primary",
-                    "md",
-                    "rounded-[3px] px-5 py-3 font-semibold",
-                  )}
-                >
-                  {isFollowingAuthor ? "Po e ndiqni" : "Ndiqni"}
-                </button>
-              </form>
-            ) : (
-              // The author page's own "Log in to follow" link, unchanged:
-              // after logging in the reader follows from that page.
-              <Link
-                href={`/login?next=${penNamePath}`}
-                className={buttonClasses("outline", "md", "rounded-[3px] border-primary px-5 py-3 font-semibold")}
-              >
-                Hyr për ta ndjekur
-              </Link>
-            ))}
         </div>
       </section>
       )}
@@ -1500,7 +1526,7 @@ export default async function BookDetailPage({
           ============================================================ */}
       {/* BD13: id="vleresimet" is where the end page's review link
           (BD4b) and the after-save redirect land. */}
-      <section id="vleresimet" className="mt-14 scroll-mt-24">
+      <section id="vleresimet" className={`${PAGE_SECTION_CLASSES} scroll-mt-24`}>
         <h2 className={SECTION_HEADING}>Vlerësimet</h2>
 
         {(reviewStatus === "pending" || reviewStatus === "unchanged") && (
@@ -1515,7 +1541,7 @@ export default async function BookDetailPage({
         {owned && (
           <form
             action={submitReview.bind(null, book.id)}
-            className="mt-4 flex max-w-[42.5rem] flex-col gap-3 rounded-[4px] border border-border bg-surface p-5"
+            className="mt-4 flex max-w-[42.5rem] flex-col gap-3 rounded-[8px] border border-border p-5"
           >
             <p className="text-sm font-medium">
               {myReview ? "Përditësoni vlerësimin tuaj" : "Lini një vlerësim"}
@@ -1583,7 +1609,7 @@ export default async function BookDetailPage({
             )}
             <button
               type="submit"
-              className={buttonClasses("primary", "md", "w-fit rounded-[3px]")}
+              className={buttonClasses("primary", "md", "w-fit rounded-full")}
             >
               {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
             </button>
@@ -1643,7 +1669,7 @@ export default async function BookDetailPage({
           differently-ordered query.
           ============================================================ */}
       {seriesInfo && seriesEntries.length > 1 && (
-        <section className="mt-14 max-w-[42.5rem]">
+        <section className={`${PAGE_SECTION_CLASSES} max-w-[42.5rem]`}>
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <h2 className={SECTION_HEADING}>{seriesInfo.title}</h2>
             <Link
@@ -1660,7 +1686,7 @@ export default async function BookDetailPage({
               section already requires seriesEntries.length > 1) and
               renders nothing on whichever side has no neighbor. */}
           {(previousInSeries || nextInSeries) && (
-            <div className="mt-4 flex flex-col gap-3 rounded-[4px] border border-border bg-surface p-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="mt-4 flex flex-col gap-3 rounded-[8px] border border-border p-4 sm:flex-row sm:items-start sm:justify-between">
               {previousInSeries ? (
                 <Link
                   href={`/libra/${previousInSeries.id}`}
@@ -1721,11 +1747,7 @@ export default async function BookDetailPage({
           More by this author / You might also like
           ============================================================ */}
       <BookShelf
-        title={authorName ? `Më shumë nga ${authorName}` : "Më shumë nga ky autor"}
-        books={moreByAuthor ?? []}
-        supabase={supabase}
-      />
-      <BookShelf
+        headingClassName={SECTION_HEADING}
         title="Mund t'ju pëlqejnë edhe"
         books={youMightLike}
         supabase={supabase}
@@ -1745,18 +1767,81 @@ export default async function BookDetailPage({
         </p>
       )}
     </main>
+    </div>
   );
 }
 
-// REDESIGN STEP 3: shared A2 classes for this page. Thin serif headings
-// (Renato D6); links inside sentences underlined at rest (C1).
-const SECTION_HEADING = "font-serif text-[1.625rem] leading-tight font-normal text-primary";
+// REDESIGN STEP 3 -> P1 (design B, 2026-11-10): shared classes for this
+// page. Plain section headings with a thin rule above each section; links
+// inside sentences underlined at rest (C1).
+const SECTION_HEADING = "text-xl font-semibold text-foreground";
+const PAGE_SECTION_CLASSES = "mt-12 border-t border-border pt-6";
 const INLINE_LINK_CLASSES =
   "focus-ring rounded-sm font-semibold text-primary underline underline-offset-2 hover:decoration-2";
 const BREADCRUMB_LINK_CLASSES =
   "focus-ring rounded-sm underline underline-offset-2 hover:text-primary hover:decoration-2";
-const DETAIL_LABEL_CLASSES = "text-xs font-medium uppercase tracking-wide text-muted";
-const DETAIL_VALUE_CLASSES = "mt-1 font-semibold text-foreground";
+const NOTICE_CLASSES = "mt-4 max-w-[32.5rem] rounded-[8px] px-3 py-2 text-sm";
+const BOX_NOTE_CLASSES = "text-[0.8125rem] text-muted";
+const SHARE_LINK_CLASSES =
+  "focus-ring rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
+const TILE_ICON_CLASSES = "size-[1.375rem]";
+// BD3 patch 4 -> P1: the role after the translator's name.
+const TRANSLATOR_ROLE = "(Përkthyes)";
+
+// P1 (Renato 12:47): "EPUB" and "DRM" stay capitals, a little smaller.
+function Acronym({ children }: { children: string }) {
+  return <span className="text-[0.82em] tracking-[0.03em]">{children}</span>;
+}
+
+// P1 (design B): one quick-fact tile -- label, picture, value.
+function DetailTile({ label, icon, children }: { label: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center px-1.5 py-3 text-center">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="flex flex-col items-center">
+        <span aria-hidden="true" className="my-1.5 text-primary">
+          {icon}
+        </span>
+        <span className="text-sm font-semibold text-foreground">{children}</span>
+      </dd>
+    </div>
+  );
+}
+
+// P1 (design B): one plain "Label: value" line (no capital-letter label).
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="inline text-muted">{label}:</dt>{" "}
+      <dd className="inline text-foreground">{children}</dd>
+    </div>
+  );
+}
+
+// P1 (design B): the author's own links as icons (Instagram, Facebook,
+// else a globe), named for screen readers.
+function penNameLinkName(link: string): string {
+  const kind = penNameLinkKind(link);
+  if (kind === "instagram") return `Instagram: ${penNameLinkLabel(link)}`;
+  if (kind === "facebook") return `Facebook: ${penNameLinkLabel(link)}`;
+  return penNameLinkLabel(link);
+}
+
+function PenNameLinkIcon({ link }: { link: string }) {
+  const kind = penNameLinkKind(link);
+  const className = "size-5";
+  return (
+    <span aria-hidden="true">
+      {kind === "instagram" ? (
+        <IconInstagram className={className} />
+      ) : kind === "facebook" ? (
+        <IconFacebook className={className} />
+      ) : (
+        <IconGlobe className={className} />
+      )}
+    </span>
+  );
+}
 
 // REDESIGN STEP 3 (B5): the author page's own follow/unfollow actions,
 // unchanged, plus a refresh of this book page so the button shows the
@@ -1779,19 +1864,22 @@ async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
 // while paid checkout is closed. Deliberately says nothing about why.
 const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Ky libër nuk mund të blihet ende.";
 
-// REDESIGN STEP 3 (P2): full-width actions inside the price card -- the
-// primary one large, the secondary one outlined under it.
-const PRIMARY_ACTION_CLASSES = buttonClasses(
-  "primary",
-  "lg",
-  "w-full rounded-[3px] py-4 text-[1.0625rem] font-semibold",
-);
-const SECONDARY_ACTION_CLASSES = buttonClasses(
-  "outline",
-  "md",
-  "w-full rounded-[3px] border-[#8c8472] py-3 font-semibold",
-);
-const STATUS_PILL_CLASSES = "rounded-[3px] bg-surface-hover px-4 py-3 text-sm font-medium";
+// REDESIGN STEP 3 (P2) -> P1 (design B): full-width pills inside the
+// price box -- the main one gold, the secondary one outlined under it,
+// save for later as a quiet text button.
+const PRIMARY_ACTION_CLASSES =
+  "focus-ring inline-flex w-full items-center justify-center rounded-full bg-accent px-3 py-2.5 text-center text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#c9a42c] disabled:cursor-not-allowed disabled:opacity-50";
+const SECONDARY_ACTION_CLASSES =
+  "focus-ring inline-flex w-full items-center justify-center rounded-full border border-primary bg-surface px-3 py-2 text-center text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
+const WISHLIST_ACTION_CLASSES =
+  "focus-ring w-full rounded-sm py-1 text-center text-[0.8125rem] font-medium text-primary underline underline-offset-2 hover:decoration-2";
+const COVER_PILL_CLASSES =
+  "focus-ring inline-flex items-center whitespace-nowrap rounded-full border border-[#d9d3c3] bg-surface px-3 py-1 text-xs font-semibold text-primary shadow-sm hover:bg-surface-hover";
+const FOLLOW_PILL_CLASSES =
+  "focus-ring inline-flex items-center justify-center rounded-full bg-accent px-5 py-1.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#c9a42c]";
+const FOLLOWING_PILL_CLASSES =
+  "focus-ring inline-flex items-center justify-center rounded-full border border-primary px-4 py-1.5 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
+const STATUS_PILL_CLASSES = "rounded-[8px] bg-surface-hover px-3 py-2.5 text-center text-sm font-medium";
 const PREORDER_BADGE_CLASSES =
   "inline-block rounded-[3px] border border-[#806510] bg-[#fbf6e8] px-2.5 py-1 text-sm font-semibold text-[#5c480b]";
 
@@ -1802,10 +1890,13 @@ function PreorderPanel({
   bookId,
   signedIn,
   notifyOn,
+  sampleSlot,
 }: {
   bookId: string;
   signedIn: boolean;
   notifyOn: boolean;
+  // P1: the sample button, right after the main action.
+  sampleSlot: React.ReactNode;
 }) {
   if (!signedIn) {
     return (
@@ -1813,6 +1904,7 @@ function PreorderPanel({
         <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
           {NOTIFY_SIGN_IN_LABEL}
         </Link>
+        {sampleSlot}
         <p className="text-xs text-muted">{NOTIFY_HELP}</p>
       </div>
     );
@@ -1826,6 +1918,7 @@ function PreorderPanel({
             {NOTIFY_REMOVE_LABEL}
           </button>
         </form>
+        {sampleSlot}
       </div>
     );
   }
@@ -1836,6 +1929,7 @@ function PreorderPanel({
           {NOTIFY_ME_LABEL}
         </button>
       </form>
+      {sampleSlot}
       <p className="text-xs text-muted">{NOTIFY_HELP}</p>
     </div>
   );
@@ -1857,6 +1951,7 @@ function PurchasePanel({
   formattedPrice,
   wishlisted,
   downloadNote,
+  sampleSlot,
 }: {
   state: BookPurchaseState;
   bookId: string;
@@ -1864,10 +1959,13 @@ function PurchasePanel({
   wishlisted: boolean;
   // DOWNLOADS-1: the buyer's line under Download EPUB ("owned" only).
   downloadNote: string | null;
+  // P1 (design B): the sample button, after the main action and before
+  // save for later (null where the sample is not shown, as before).
+  sampleSlot: React.ReactNode;
 }) {
   const wishlistForm = (
     <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
-      <button type="submit" className={SECONDARY_ACTION_CLASSES}>
+      <button type="submit" className={WISHLIST_ACTION_CLASSES}>
         {wishlisted ? "Hiqeni nga Lista e dëshirave" : "Ruajeni për më vonë"}
       </button>
     </form>
@@ -1881,8 +1979,9 @@ function PurchasePanel({
           Menaxhoni librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>
-          Shkarkoni EPUB
+          Shkarkoni <Acronym>EPUB</Acronym>
         </a>
+        {sampleSlot}
       </div>
     );
   }
@@ -1892,7 +1991,7 @@ function PurchasePanel({
       <div className="flex flex-col gap-3">
         <span className={STATUS_PILL_CLASSES}>Ky libër është i juaji</span>
         <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
-          Shkarkoni EPUB
+          Shkarkoni <Acronym>EPUB</Acronym>
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
         {/* D13 2a / BD4: the sharing reminder next to Download. */}
@@ -1918,6 +2017,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <span className={`${STATUS_PILL_CLASSES} text-muted`}>Nuk mund të blihet tani</span>
+        {sampleSlot}
       </div>
     );
   }
@@ -1926,6 +2026,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <span className={`${STATUS_PILL_CLASSES} text-muted`}>Nuk mund të blihet tani</span>
+        {sampleSlot}
         {wishlistForm}
       </div>
     );
@@ -1943,6 +2044,7 @@ function PurchasePanel({
         <p data-checkout-unavailable-notice="" className={`${STATUS_PILL_CLASSES} text-muted`}>
           {PAID_CHECKOUT_UNAVAILABLE_NOTICE}
         </p>
+        {sampleSlot}
 
         {state === "paid-unowned-checkout-closed" && wishlistForm}
       </div>
@@ -1955,6 +2057,7 @@ function PurchasePanel({
         <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
           {state === "anonymous-free" ? "Hyr për ta marrë këtë libër" : "Hyr për ta blerë"}
         </Link>
+        {sampleSlot}
       </div>
     );
   }
@@ -1977,7 +2080,7 @@ function PurchasePanel({
             type="text"
             aria-label="Kodi promocional (opsional)"
             placeholder="Kodi promocional (opsional)"
-            className="focus-ring w-full rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2.5 text-sm"
+            className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-3 py-2 text-sm"
           />
           <button type="submit" className={PRIMARY_ACTION_CLASSES}>
             Blini e-librin — {formattedPrice}
@@ -1985,6 +2088,7 @@ function PurchasePanel({
         </form>
       )}
 
+      {sampleSlot}
       {wishlistForm}
     </div>
   );

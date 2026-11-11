@@ -870,7 +870,7 @@ describe("signup: AUTHOR-AGE-1 18+ tick", () => {
     expect(attributes.app_metadata.author_age_statement_version).toBe("author-age-v2");
     expect(Number.isNaN(Date.parse(String(attributes.app_metadata.author_age_confirmed_at)))).toBe(false);
     // SECURITY-9A: the same write carries the Terms record.
-    expect(attributes.app_metadata.terms_version).toBe("terms-sq-3");
+    expect(attributes.app_metadata.terms_version).toBe("terms-sq-4");
     expect(attributes.app_metadata.terms_accepted_at).toBe(attributes.app_metadata.author_age_confirmed_at);
   });
 

@@ -8,6 +8,7 @@ import {
   parsePenNameLinks,
   parsePenNameName,
   penNameErrorMessage,
+  penNameLinkKind,
   penNameLinkLabel,
   readPenNameLinks,
 } from "./pen-names";
@@ -104,5 +105,23 @@ describe("pen name photo path (9a: never the account id)", () => {
     [null, false],
   ])("%s -> %s (same shape as pen_names_avatar_path_check)", (value, ok) => {
     expect(isPenNamePhotoPath(value)).toBe(ok);
+  });
+});
+
+describe("penNameLinkKind (P1: icon by host)", () => {
+  it("Instagram and Facebook by host, subdomains too", () => {
+    expect(penNameLinkKind("https://instagram.com/someone")).toBe("instagram");
+    expect(penNameLinkKind("https://www.instagram.com/someone")).toBe("instagram");
+    expect(penNameLinkKind("https://www.facebook.com/someone")).toBe("facebook");
+    expect(penNameLinkKind("https://m.facebook.com/someone")).toBe("facebook");
+    expect(penNameLinkKind("https://fb.com/someone")).toBe("facebook");
+  });
+
+  it("everything else, look-alike hosts and broken values are a globe", () => {
+    expect(penNameLinkKind("https://example.com/instagram.com")).toBe("web");
+    expect(penNameLinkKind("https://notinstagram.com/x")).toBe("web");
+    expect(penNameLinkKind("https://instagram.com.example.org/x")).toBe("web");
+    expect(penNameLinkKind("https://myfacebook.com/x")).toBe("web");
+    expect(penNameLinkKind("not a url")).toBe("web");
   });
 });

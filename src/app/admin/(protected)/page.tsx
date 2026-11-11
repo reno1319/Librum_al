@@ -303,7 +303,7 @@ export default async function AdminPage({
                   </div>
                   <Link
                     href={item.href}
-                    className="focus-ring inline-flex min-h-12 items-center justify-center rounded-control bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover sm:min-h-11"
+                    className="focus-ring inline-flex min-h-12 items-center justify-center rounded-full bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover sm:min-h-11"
                   >
                     {item.actionLabel}
                   </Link>
@@ -355,7 +355,7 @@ export default async function AdminPage({
           <form action={runPreorderJobAsOwner}>
             <button
               type="submit"
-              className="focus-ring inline-flex min-h-11 items-center justify-center rounded-control bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
+              className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
             >
               {PREORDER_RUN_BUTTON}
             </button>

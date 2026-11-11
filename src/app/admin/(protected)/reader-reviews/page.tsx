@@ -182,7 +182,7 @@ export default async function AdminReaderReviewsPage({
                     />
                     <button
                       type="submit"
-                      className="focus-ring min-h-11 rounded-control bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+                      className="focus-ring min-h-11 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
                     >
                       Approve
                     </button>
@@ -237,7 +237,7 @@ export default async function AdminReaderReviewsPage({
                     </label>
                     <button
                       type="submit"
-                      className="focus-ring min-h-11 self-start rounded-control border border-control px-4 text-sm font-semibold hover:bg-surface-hover"
+                      className="focus-ring min-h-11 self-start rounded-full border border-control px-4 text-sm font-semibold hover:bg-surface-hover"
                     >
                       Reject
                     </button>

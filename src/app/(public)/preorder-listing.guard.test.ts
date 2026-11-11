@@ -26,8 +26,9 @@ describe("pre-orders in public lists", () => {
     }
   });
 
-  it("the book page's three shelves list them", () => {
-    expect(count(read("src/app/(public)/libra/[id]/page.tsx"), IN_LISTED)).toBe(3);
+  // P1: plus the author's book count, which counts what "More by" lists.
+  it("the book page's three shelves and the author's book count list them", () => {
+    expect(count(read("src/app/(public)/libra/[id]/page.tsx"), IN_LISTED)).toBe(4);
   });
 
   it("the home page stays released books only", () => {

@@ -230,7 +230,7 @@ export default async function DiscountsPage({
                 <form action={toggleDiscountCode.bind(null, code.id, code.active)}>
                   <button
                     type="submit"
-                    className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
+                    className="focus-ring rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
                   >
                     {code.active ? "Çaktivizoni" : "Aktivizoni"}
                   </button>
@@ -238,7 +238,7 @@ export default async function DiscountsPage({
                 <form action={deleteDiscountCode.bind(null, code.id)}>
                   <button
                     type="submit"
-                    className="focus-ring rounded-control border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    className="focus-ring rounded-full border border-border px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
                     Fshini
                   </button>

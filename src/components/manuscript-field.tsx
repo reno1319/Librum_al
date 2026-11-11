@@ -30,7 +30,7 @@ const PICKER_BOX_CLASSES =
   "flex flex-col gap-2 rounded-[4px] border border-dashed border-[#8c8472] bg-background p-4 text-sm sm:p-5";
 // FIX1 (X10): `text-transparent` hides the browser's own "No file
 // chosen" text, as in cover-field.tsx; "Manuscript ready" names the file.
-const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-[3px] file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
+const PICKER_INPUT_CLASSES = `${fileInputClasses} w-full max-w-full text-transparent file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-full file:border file:border-solid file:border-primary file:bg-surface file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary hover:file:bg-surface-hover disabled:opacity-60`;
 const FORMAT_CARD_CLASSES = "flex cursor-pointer items-start gap-3 rounded-[4px] p-4";
 const FORMAT_CARD_SELECTED_CLASSES = "border-2 border-primary bg-[#f4f8f5]";
 const FORMAT_CARD_IDLE_CLASSES = "border border-[#c9c0ae] bg-surface";
@@ -920,7 +920,7 @@ export function ManuscriptField({
                 <div ref={approvalBoxRef} className="mt-3 flex flex-col gap-2">
                   <button
                     type="button"
-                    className="focus-ring min-h-11 self-start rounded-[3px] bg-primary px-4 font-semibold text-white"
+                    className="focus-ring min-h-11 self-start rounded-full bg-primary px-4 font-semibold text-white"
                     onClick={() => setPreviewOpen(true)}
                   >
                     Shiko pamjen paraprake

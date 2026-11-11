@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { GENRES } from "@/lib/genres";
 
 // ALL-CUTOVER APP-A: focused coverage of the maintenance gate on this
 // schema-sensitive public discovery page (V3 §3) -- not a general audit
@@ -142,6 +143,13 @@ describe("BookstorePage: redesign step 3 layout", () => {
     return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
   }
 
+  // P2: the grid has no visible heading now; its section is labelled.
+  function grid(html: string): string {
+    const start = html.indexOf('aria-label="Të gjithë librat"');
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</section>", start));
+  }
+
   function section(html: string, heading: string): string {
     const start = html.indexOf(`>${heading}</h2>`);
     expect(start).toBeGreaterThan(-1);
@@ -199,15 +207,17 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(cardY).not.toContain("18+");
   });
 
-  it("features the newest book under the one label, with its Buy link and the sample reader", async () => {
+  // P2 (design B): the feature is a slim strip with one "Shikoni librin"
+  // pill to the book page (which owns buying and the sample reader).
+  it("features the newest book as a slim strip with its price and one link to the book", async () => {
     const html = await render();
-    const feature = html.slice(html.indexOf("featured-book-title") - 200, html.indexOf("</section>"));
+    const feature = html.slice(0, html.indexOf("</section>"));
     expect(feature).toContain("I ri në Librum");
     expect(feature).toContain("Book 10");
     expect(feature).toContain("199 lekë");
-    expect(feature).toContain("Lexoni një pjesë");
-    expect(feature).toContain(`Blini · 199 lekë`);
-    expect(feature).toContain('href="/libra/book-10"');
+    expect(feature).toMatch(/href="\/libra\/book-10"[^>]*>Shikoni librin</);
+    expect(feature).not.toContain("Lexoni një pjesë");
+    expect(feature).not.toContain("Blini ·");
   });
 
   // FIX1 (X6): Renato 17:11Z "5a" -- the second "I ri në Librum" shelf
@@ -218,7 +228,8 @@ describe("BookstorePage: redesign step 3 layout", () => {
     return BOOKS.map((b) => (b.id === `book-${String(n).padStart(2, "0")}` ? { ...b, librum_choice_at: "2026-10-18T09:00:00Z", ...extra } : b));
   }
   const featureOf = (html: string) =>
-    html.slice(html.indexOf("featured-book-title") - 200, html.indexOf("</section>"));
+    // P2: the strip is the page's first section.
+    html.slice(0, html.indexOf("</section>"));
 
   it("features Zgjedhja e Librum when a published, priced book is picked", async () => {
     bookRows = withPick(4);
@@ -227,11 +238,11 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(feature).toContain("Zgjedhja e Librum");
     expect(feature).not.toContain("I ri në Librum");
     expect(feature).toContain("Book 04");
-    expect(feature).toContain("Blini · 199 lekë");
+    expect(feature).toContain("199 lekë");
     expect(feature).toContain("An Author");
     expect(html).not.toContain("I ri në Librum");
-    // The pick still appears in the Të gjithë librat grid in its normal place.
-    expect(section(html, "Të gjithë librat")).toContain("Book 04");
+    // The pick still appears in the grid in its normal place.
+    expect(grid(html)).toContain("Book 04");
   });
 
   it("an unpriced pick falls back to the newest book as I ri në Librum", async () => {
@@ -280,12 +291,90 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(shelf).toContain('href="/librari?maxPrice=0"');
   });
 
-  it("keeps the Të gjithë librat grid with its existing count line, and ends with the author band", async () => {
+  // P2 (design B): "Libraria · N libra" heads the grid, after the strip.
+  it("heads the grid with Libraria and its count after the strip, and ends with the author band", async () => {
     const html = await render();
-    const grid = section(html, "Të gjithë librat");
-    expect(grid).toContain("10 libra");
-    expect(grid).toContain("Book 01");
+    expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · 10 libra<\/span><\/h1>/);
+    expect(html.indexOf("featured-book-title")).toBeLessThan(html.indexOf("<h1"));
+    expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('aria-label="Të gjithë librat"'));
+    expect(grid(html)).toContain("Book 01");
+    // The free shelf now follows the grid.
+    expect(html.indexOf('aria-label="Të gjithë librat"')).toBeLessThan(html.indexOf(">Libra falas</h2>"));
     expect(html).toContain("Jeni autor?");
+  });
+
+  it("names the genre and the search words in the heading", async () => {
+    const html = await render({ genre: "Letërsi artistike", q: "book" });
+    expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · Letërsi artistike<\/span><span[^>]*> · “book”<\/span><span[^>]*> · 10 libra<\/span><\/h1>/);
+  });
+
+  it("has no big heading or ornate shelf any more", async () => {
+    const html = await render();
+    expect(html).not.toContain("Zbuloni libra të pavarur.");
+    expect(html).not.toContain('aria-label="Librat më të rinj"');
+    expect(html).not.toContain('form="site-search"');
+  });
+
+  // P2c (Renato 11-10 option b): the old header is back on every page, so
+  // the search box and the genre list are back inside Libraria.
+  it("the page's own search box shows the words and keeps the genre, sort and price", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", minPrice: "1", maxPrice: "500", sort: "price_asc" });
+    const start = html.indexOf('<form id="bookstore-search"');
+    expect(start).toBeGreaterThan(-1);
+    const form = html.slice(start, html.indexOf("</form>", start));
+    expect(form).toContain('action="/librari"');
+    expect(form).toContain('role="search"');
+    expect(form).toMatch(/<input id="bookstore-q" type="search"[^>]*name="q" value="book"\/>/);
+    expect(form).toContain('<input type="hidden" name="genre" value="Letërsi artistike"/>');
+    expect(form).toContain('<input type="hidden" name="sort" value="price_asc"/>');
+    expect(form).toContain('<input type="hidden" name="minPrice" value="1"/>');
+    expect(form).toContain('<input type="hidden" name="maxPrice" value="500"/>');
+    expect(form).not.toContain('type="hidden" name="q"');
+    const plain = await render();
+    const p0 = plain.indexOf('<form id="bookstore-search"');
+    expect(plain.slice(p0, plain.indexOf("</form>", p0))).not.toContain('type="hidden"');
+  });
+
+  it("the genre list has every genre plus all genres, each keeping the words, sort and price", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "500" });
+    const start = html.indexOf('<nav aria-label="Zhanret"');
+    expect(start).toBeGreaterThan(-1);
+    const menu = html.slice(start, html.indexOf("</nav>", start));
+    const links = [...menu.matchAll(/<a [^>]*>/g)];
+    expect(links).toHaveLength(GENRES.length + 1);
+    expect(menu).toContain(">Të gjitha zhanret</a>");
+    expect(menu).toContain('href="/librari?q=book&amp;sort=price_asc&amp;maxPrice=500"');
+    for (const g of GENRES) expect(menu).toContain(`>${g.replace("&", "&amp;")}</a>`);
+    expect(menu).toMatch(/href="\/librari\?q=book&amp;genre=Poezi&amp;sort=price_asc&amp;maxPrice=500"/);
+    expect(menu).toMatch(/aria-current="true"[^>]*>Letërsi artistike</);
+    expect((menu.match(/aria-current/g) ?? []).length).toBe(1);
+  });
+
+  it("Libra falas is a pill to free books that keeps the words, genre and sort", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100" });
+    expect(html).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc&amp;maxPrice=0"[^>]*>Libra falas<\/a>/);
+    // P2d: when on, a tick icon comes before the words.
+    expect(await render({ maxPrice: "0" })).toMatch(/aria-current="true"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
+  });
+
+  it("Libra falas switches off when tapped again, keeping the words, genre and sort (P2d)", async () => {
+    const on = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "0" });
+    expect(on).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
+    expect(await render({ maxPrice: "0" })).toMatch(/href="\/librari"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
+  });
+
+  it("the sort is its own form that keeps the words, genre and price", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", minPrice: "1", maxPrice: "500", sort: "price_asc" });
+    const start = html.lastIndexOf("<form", html.indexOf('id="bookstore-sort"'));
+    const form = html.slice(start, html.indexOf("</form>", start));
+    expect(form).toContain('action="/librari"');
+    expect(form).toContain('<input type="hidden" name="q" value="book"/>');
+    expect(form).toContain('<input type="hidden" name="genre" value="Letërsi artistike"/>');
+    expect(form).toContain('<input type="hidden" name="minPrice" value="1"/>');
+    expect(form).toContain('<input type="hidden" name="maxPrice" value="500"/>');
+    expect(form).not.toContain('type="hidden" name="sort"');
+    expect(form).toMatch(/<option value="price_asc" selected="">/);
+    expect(form).toContain("<noscript>");
   });
 
   // FIX1 (X1): signed out -> sign up with Author chosen; signed in -> the
@@ -302,28 +391,14 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html).toMatch(/href="\/dashboard\/books\/new"[^>]*>Filloni të publikoni</);
   });
 
-  it("a filtered view is the result grid alone: no feature, shelves, Të gjithë librat heading or band", async () => {
+  it("a filtered view is the result grid alone: no feature, shelves or band", async () => {
     const html = await render({ genre: "Letërsi artistike" });
     expect(html).not.toContain("featured-book-title");
     expect(html).not.toContain(">I ri në Librum</h2>");
     expect(html).not.toContain(">Libra falas</h2>");
-    expect(html).not.toContain(">Të gjithë librat</h2>");
     expect(html).not.toContain("Jeni autor?");
     expect(html).toContain("10 libra");
     expect(html).toContain("Hiqni filtrat");
-  });
-
-  it("marks the current genre in the genre menu", async () => {
-    const html = await render({ genre: "Letërsi artistike" });
-    expect(html).toMatch(/aria-current="true"[^>]*>Letërsi artistike</);
-  });
-
-  it("puts the genres behind one button that names the current genre", async () => {
-    const all = await render({});
-    expect(all).toMatch(/<summary[^>]*>Të gjitha zhanret<svg/);
-    expect(all).toMatch(/<nav aria-label="Zhanret"/);
-    const fiction = await render({ genre: "Letërsi artistike" });
-    expect(fiction).toMatch(/<summary[^>]*>Letërsi artistike<svg/);
   });
 
   // BD15 follow-up (P8 audit N1): an unknown ?genre= is ignored, so the
@@ -331,69 +406,11 @@ describe("BookstorePage: redesign step 3 layout", () => {
   it("an unknown or malformed genre shows the normal page with every book", async () => {
     for (const genre of ["Horor", 'Poezi"}', "Poezi,Horror"]) {
       const html = await render({ genre });
-      expect(html).toMatch(/<summary[^>]*>Të gjitha zhanret<svg/);
+      expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · 10 libra<\/span><\/h1>/);
       expect(html).toContain("Book 04");
-      expect(html).toContain(">Të gjithë librat</h2>");
+      expect(html).toContain("featured-book-title");
       expect(html).not.toContain('name="genre"');
       expect(html).not.toContain(genre.replace(/"/g, "&quot;"));
     }
-  });
-
-  it("the genre box closes when a genre is picked", async () => {
-    const html = await render({});
-    const nav = html.indexOf('<nav aria-label="Zhanret"');
-    expect(nav).toBeGreaterThan(-1);
-    // closeOnLinkClick is a client handler; the server markup only shows
-    // the box. The wiring is checked in the source.
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    expect(source).toMatch(/<DismissableDetails className="group relative text-sm" closeOnLinkClick>\s*<summary className=\{DROPDOWN_SUMMARY_CLASSES\}>\s*\{genre \?\? "Të gjitha zhanret"\}/);
-  });
-
-  // BOOKSTORE ORNATE SHELF (Renato 10-25, header B; 1a/2a): the grid's
-  // five newest books as ornate spines beside the heading, from 768px up,
-  // and only on the unfiltered view.
-  function ornateShelf(html: string): string {
-    const start = html.indexOf('aria-label="Librat më të rinj"');
-    expect(start).toBeGreaterThan(-1);
-    return html.slice(start, html.indexOf("</ul>", start));
-  }
-
-  it("shows the five newest books as linked spines, newest first, with title and byline", async () => {
-    const shelf = ornateShelf(await render());
-    const ids = [...shelf.matchAll(/href="\/libra\/(book-\d+)"/g)].map((m) => m[1]);
-    expect(ids).toEqual(["book-10", "book-09", "book-08", "book-07", "book-06"]);
-    expect(shelf).toContain('aria-label="Shikoni Book 10 në Librum"');
-    expect(shelf).toContain(">Book 10</span>");
-    expect(shelf).toContain(">An Author</span>");
-  });
-
-  it("puts the search box under the heading and hides the shelf below 768px", async () => {
-    const html = await render();
-    expect(html.indexOf("Discover independent books.")).toBeLessThan(html.indexOf('id="bookstore-search"'));
-    expect(html.indexOf('id="bookstore-search"')).toBeLessThan(html.indexOf('aria-label="Librat më të rinj"'));
-    expect(html).toMatch(/class="hidden shrink-0 md:block \[zoom:0\.7\]"><div[^>]*><svg/);
-  });
-
-  it("has no ornate shelf on a filtered, sorted or price-limited view, or after a failed load", async () => {
-    const views: Record<string, string>[] = [{ genre: "Letërsi artistike" }, { sort: "price_asc" }, { maxPrice: "0" }];
-    for (const params of views) {
-      expect(await render(params)).not.toContain('aria-label="Librat më të rinj"');
-    }
-    failBookList = true;
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-    const html = await render();
-    quiet.mockRestore();
-    expect(html).not.toContain('aria-label="Librat më të rinj"');
-  });
-
-  it("an unpriced or draft book never reaches the shelf", async () => {
-    bookRows = BOOKS.map((b) =>
-      b.id === "book-10" ? { ...b, price_all: null } : b.id === "book-09" ? { ...b, status: "draft" } : b,
-    );
-    const shelf = ornateShelf(await render());
-    expect(shelf).not.toContain("book-10");
-    expect(shelf).not.toContain("book-09");
-    expect([...shelf.matchAll(/href="\/libra\//g)]).toHaveLength(5);
   });
 });

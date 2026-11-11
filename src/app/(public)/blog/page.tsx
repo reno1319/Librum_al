@@ -162,7 +162,7 @@ export default async function BlogIndexPage() {
           <p className="text-muted">Gati ta botoni librin tuaj?</p>
           <Link
             href="/signup?role=author"
-            className="mt-3 inline-block rounded-control bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            className="mt-3 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           >
             Publikoni librin tuaj
           </Link>

@@ -111,7 +111,7 @@ function Thumbnail({ url, title, author }: { url: string | null; title: string; 
   );
 }
 
-const ACTION_BUTTON = buttonClasses("outline", "md", "min-h-11 shrink-0 rounded-[3px] px-4");
+const ACTION_BUTTON = buttonClasses("outline", "md", "min-h-11 shrink-0 rounded-full px-4");
 
 export default async function AdminLibrumChoicePage({
   searchParams,
@@ -229,7 +229,7 @@ export default async function AdminLibrumChoicePage({
             maxLength={100}
             className={`${formControlClasses} min-h-11 min-w-0 flex-1`}
           />
-          <button type="submit" className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-[3px] px-4")}>
+          <button type="submit" className={buttonClasses("primary", "md", "min-h-11 shrink-0 rounded-full px-4")}>
             Search
           </button>
         </div>

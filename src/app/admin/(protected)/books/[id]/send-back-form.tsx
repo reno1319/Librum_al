@@ -87,7 +87,7 @@ export function SendBackForm({
         <p className="text-sm text-muted">The book stays a draft. The author sees your message on their Dashboard.</p>
         <button
           type="submit"
-          className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-[3px] bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]"
+          className="focus-ring inline-flex min-h-11 items-center justify-center self-start rounded-full bg-[#8E2A1E] px-[1.125rem] text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#74221a]"
         >
           Send back to the author
         </button>
