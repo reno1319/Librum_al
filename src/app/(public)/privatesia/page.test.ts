@@ -120,8 +120,8 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
     expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
-    // BD15: the Production release day of the D2 Privacy text (7 November 2026).
-    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 7 nëntor 2026");
+    // Release 21: the Production release day of the PL1 Privacy text (11 November 2026).
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 11 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {
