@@ -169,6 +169,22 @@ type Waiting = { book_id: string; file_path: string | null; cover_path: string |
 let pendingRows: Waiting[];
 let pendingReadOk: boolean;
 let pendingReadIds: string[][];
+// R22 (I3): the waiting "Më njofto" readers of the account's books, read
+// through the service role before deleteUser (the read and the send are
+// unit-tested in src/lib/preorder-emails.test.ts).
+let waitingReadOk: boolean;
+let waitingByBook: Map<string, { title: string; userIds: string[] }>;
+let scheduledWaiting: Map<string, { title: string; userIds: string[] }>[];
+vi.mock("@/lib/preorder-emails", () => ({
+  readWaitingReadersForBooks: async (_service: unknown, ids: readonly string[]) => {
+    events.push(`read:waiting:${ids.join(",")}`);
+    return waitingReadOk ? { ok: true, byBook: waitingByBook } : { ok: false };
+  },
+  scheduleDeletedBooksCancelledEmails: (_source: string, waiting: Map<string, { title: string; userIds: string[] }>) => {
+    events.push("schedule:cancelled-emails");
+    scheduledWaiting.push(waiting);
+  },
+}));
 vi.mock("@/lib/book-pending-changes", () => ({
   readPendingChangesForBooks: async (_service: unknown, ids: readonly string[]) => {
     pendingReadIds.push([...ids]);
@@ -238,6 +254,9 @@ beforeEach(() => {
   pendingRows = [];
   pendingReadOk = true;
   pendingReadIds = [];
+  waitingReadOk = true;
+  waitingByBook = new Map();
+  scheduledWaiting = [];
   for (const m of ["error", "warn", "log", "info", "debug"] as const) vi.spyOn(console, m).mockImplementation(() => {});
 });
 
@@ -599,8 +618,10 @@ describe("destructive ordering (13-16)", () => {
       `read:books:id, cover_path, file_path:author_id=${USER_ID}`,
       "read:purchases",
       "admin:create",
+      `read:waiting:${BOOK_ID}`,
       "read:pending",
       `deleteUser:${USER_ID}`,
+      "schedule:cancelled-emails",
       "remove:covers",
       "remove:manuscripts",
       "remove:avatars",
@@ -777,5 +798,48 @@ describe("waiting changes of a live book (P5b-3b)", () => {
     setBooks([]);
     expect(await run()).toBe("/?account=deleted");
     expect(pendingReadIds).toEqual([]);
+  });
+});
+
+describe("R22 (I3): readers waiting on the account's pre-orders", () => {
+  const WAITING = () => new Map([[BOOK_ID, { title: "Libri", userIds: ["reader-1", "reader-2"] }]]);
+
+  it("are read before deleteUser and told only after it succeeded", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: null, file_path: null }]);
+    waitingByBook = WAITING();
+    expect(await run()).toBe("/?account=deleted");
+    const read = events.indexOf(`read:waiting:${BOOK_ID}`);
+    const del = events.indexOf(`deleteUser:${USER_ID}`);
+    const sched = events.indexOf("schedule:cancelled-emails");
+    expect(read).toBeGreaterThan(-1);
+    expect(read).toBeLessThan(del);
+    expect(sched).toBeGreaterThan(del);
+    expect(scheduledWaiting).toEqual([WAITING()]);
+  });
+
+  it("a failed read stops the deletion before anything irreversible", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    waitingReadOk = false;
+    expect(await run()).toBe(PREPARE_ERROR);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
+    expect(storageCalls).toEqual([]);
+    expect(signOut).not.toHaveBeenCalled();
+    expect(scheduledWaiting).toEqual([]);
+    expect(objects.covers.has(OWN_COVER)).toBe(true);
+  });
+
+  it("a failed deleteUser tells nobody", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: null, file_path: null }]);
+    waitingByBook = WAITING();
+    deleteUserError = { message: "blocked" };
+    await run();
+    expect(scheduledWaiting).toEqual([]);
+  });
+
+  it("an account with no books reads nothing and schedules an empty list", async () => {
+    setBooks([]);
+    expect(await run()).toBe("/?account=deleted");
+    expect(events.some((e) => e.startsWith("read:waiting"))).toBe(false);
+    expect(scheduledWaiting).toEqual([new Map()]);
   });
 });

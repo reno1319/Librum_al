@@ -84,7 +84,7 @@ export default async function MyNoticesPage({
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
       <PageHeader
         title={MY_NOTICES_TITLE}
-        description="Do të merrni një email të vetëm kur të dalë secili prej këtyre librave."
+        description="Do t'ju dërgojmë email kur të dalë secili prej këtyre librave, ose nëse ndryshon data apo anulohet parapublikimi."
       />
 
       {removeFailed && (

@@ -136,6 +136,12 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 // BD15 P5b-3b: no live book here has waiting changes (that read is
 // covered in book-storage-deletion.test.ts).
+// R22 (I3): no waiting "Më njofto" readers in these cases (the pre-order
+// read itself is covered in account-deletion-preorder-readers.test.ts).
+vi.mock("@/lib/preorder-emails", () => ({
+  readWaitingReadersForBooks: async () => ({ ok: true, byBook: new Map() }),
+  scheduleDeletedBooksCancelledEmails: () => {},
+}));
 vi.mock("@/lib/book-pending-changes", () => ({
   readPendingChangesForBooks: async () => ({ ok: true, byBook: new Map() }),
 }));

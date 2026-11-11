@@ -415,7 +415,7 @@ type StackFrame = {
   html: string[];
 };
 
-function sanitizeFragment(
+export function sanitizeFragment(
   rawHtml: string,
   imageSrcRewrite: (originalSrc: string) => string | null,
   onUnsafeLink: () => void,
@@ -427,9 +427,18 @@ function sanitizeFragment(
   function isInsideDrop(): boolean {
     return stack.some((f) => f.isDropped);
   }
+  // R22 (the SX1 fix, applied here too): text runs are whatever lies
+  // between the tokens TOKEN_RE matched. Mammoth escapes the text it
+  // writes, so a raw `<` or `>` should never be here, but a broken tag
+  // with no closing `>` before the next real tag
+  // (`<img src=x onerror=alert(1)// <b>`) is never matched by TOKEN_RE
+  // and would arrive as "text" and reach the ebook raw. So `<` and `>`
+  // are always escaped. `&` is deliberately left as is: Mammoth's own
+  // entities (&amp;, &lt;) must not become &amp;amp;, and an entity in
+  // a text node can only ever render as text.
   function appendText(raw: string) {
     if (!raw || isInsideDrop()) return;
-    stack[stack.length - 1].html.push(raw);
+    stack[stack.length - 1].html.push(raw.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
   }
 
   let lastIndex = 0;

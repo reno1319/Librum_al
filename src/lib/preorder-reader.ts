@@ -47,13 +47,14 @@ export function preorderReleaseLabel(releaseDate: string | null | undefined, tod
 export const PREORDER_PRICE_NOTE =
   "Ky libër është në parapublikim. Nuk mund të blihet ose të shkarkohet para se të dalë.";
 
-// "Më njofto" (plan §1, D8). Signed-in readers only; one email when the
-// book comes out (or one if the pre-order is cancelled).
+// "Më njofto" (plan §1, D8). Signed-in readers only; an email when the
+// book comes out (or when the pre-order is cancelled), plus the one
+// "new date" email if the date moves (R22, Renato 11-11 a).
 export const NOTIFY_ME_LABEL = "Më njofto kur të dalë";
 export const NOTIFY_SIGN_IN_LABEL = "Hyr që të njoftohesh";
 export const NOTIFY_ON_NOTICE = "Do t'ju njoftojmë me email kur të dalë libri.";
 export const NOTIFY_REMOVE_LABEL = "Hiq njoftimin";
-export const NOTIFY_HELP = "Do të merrni një email të vetëm kur të dalë libri.";
+export const NOTIFY_HELP = "Do t'ju dërgojmë email kur të dalë libri, ose nëse ndryshon data apo anulohet parapublikimi.";
 
 // The reader's "Njoftimet e mia" page (D8).
 export const MY_NOTICES_PATH = "/account/njoftimet";
