@@ -72,6 +72,27 @@ const MAX_SPINE_ITEMS = 1000;
 export const GIANT_BLOCK_SLACK_WORDS = 250;
 
 const ENTITY_RE = /&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi;
+// SC2b: words joined only by a space written as an entity (&#160;,
+// &nbsp;, &#x202F;, ...) are still separate words for the giant-block
+// cut. Each such entity is blanked to the same number of spaces, so text
+// positions do not move and a cut can never land inside an entity.
+// Literal U+00A0 etc. are already \s in JavaScript.
+const NAMED_SPACES = new Set([
+  "nbsp", "NonBreakingSpace", "ensp", "emsp", "emsp13", "emsp14", "numsp", "puncsp", "thinsp", "ThinSpace",
+  "hairsp", "VeryThinSpace", "MediumSpace", "ThickSpace", "NarrowNoBreakSpace",
+]);
+function blankSpaceEntities(text: string): string {
+  if (!text.includes("&")) return text;
+  return text.replace(ENTITY_RE, (e) => {
+    const body = e.slice(1, -1);
+    let space = NAMED_SPACES.has(body);
+    if (!space && body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      space = code <= 0x10ffff && /\s/.test(String.fromCodePoint(code));
+    }
+    return space ? " ".repeat(e.length) : e;
+  });
+}
 const isWord = (token: string) => /[\p{L}\p{N}]/u.test(token.replace(ENTITY_RE, ""));
 // Our own (already cleaned) output only: every `<` in text is escaped.
 const OWN_TAG_RE = /<(\/?)([a-z][a-z0-9]*)\b[^>]*>/g;
@@ -143,12 +164,15 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
     pos = re.lastIndex;
   }
   if (pos < end) addRun(pos, end);
+  // Word and sentence checks read the blanked copies (same positions).
+  const words = blankSpaceEntities(text);
+  const blankRuns = runs.map((r) => blankSpaceEntities(r.text));
 
   // The text position where the limit is reached: the char budget, or the
   // end of the wordBudget-th word, whichever comes first.
   let limit = Math.max(1, charBudget);
   let seen = 0;
-  for (const w of text.matchAll(/\S+/g)) {
+  for (const w of words.matchAll(/\S+/g)) {
     if (!isWord(w[0])) continue;
     seen += 1;
     if (seen >= Math.max(1, wordBudget)) {
@@ -157,7 +181,7 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
     }
   }
   if (limit >= text.length) return null;
-  if (countWords(text.slice(limit)) <= GIANT_BLOCK_SLACK_WORDS) return null;
+  if (countWords(words.slice(limit)) <= GIANT_BLOCK_SLACK_WORDS) return null;
 
   // html offset of a text position.
   const htmlAt = (textPos: number) => {
@@ -170,9 +194,9 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
   // sentence end, a line break (poems keep whole lines), or the close of
   // an inner block. Else the end of the word the limit falls in.
   let best = Number.POSITIVE_INFINITY;
-  for (const run of runs) {
+  for (const [i, run] of runs.entries()) {
     if (run.at + run.text.length < limitAt) continue;
-    for (const s of run.text.matchAll(SENTENCE_END_RE)) {
+    for (const s of blankRuns[i].matchAll(SENTENCE_END_RE)) {
       const at = run.at + s.index! + s[0].length;
       if (at >= limitAt) {
         best = Math.min(best, at);
@@ -194,9 +218,10 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
     for (const run of runs) if (run.at < cut) out += run.text.slice(0, cut - run.at);
     return out;
   };
-  if (!Number.isFinite(best) || countWords(html.slice(limitAt, best).replace(/<[^>]*>/g, " ")) > GIANT_BLOCK_SLACK_WORDS) {
-    const run = runs.find((r) => r.at <= limitAt && limitAt <= r.at + r.text.length)!;
-    const space = run.text.slice(limitAt - run.at).search(/\s/);
+  if (!Number.isFinite(best) || countWords(blankSpaceEntities(html.slice(limitAt, best).replace(/<[^>]*>/g, " "))) > GIANT_BLOCK_SLACK_WORDS) {
+    const i = runs.findIndex((r) => r.at <= limitAt && limitAt <= r.at + r.text.length);
+    const run = runs[i];
+    const space = blankRuns[i].slice(limitAt - run.at).search(/\s/);
     best = space === -1 ? run.at + run.text.length : limitAt + space;
   }
 
@@ -487,8 +512,11 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
       }
       if (atCut && giant && mode === "full") {
         // The marker cannot sit inside a paragraph: close what is open,
-        // mark, then reopen and go on.
-        parts.push(chunk.html.slice(0, giant.cut) + giant.close + SAMPLE_END + giant.reopen + chunk.html.slice(giant.cut));
+        // mark, then reopen and go on. A cut made before a <br> does not
+        // start the reopened part with that <br> (no blank line after the
+        // marker); a <br> holds no text, so the book's words are unchanged.
+        const rest = chunk.html.slice(giant.cut).replace(/^<br\s*\/?>/, "");
+        parts.push(chunk.html.slice(0, giant.cut) + giant.close + SAMPLE_END + giant.reopen + rest);
         chunk.images.forEach((n) => usedImages.add(n));
         return;
       }

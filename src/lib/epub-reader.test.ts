@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import sharp from "sharp";
-import { buildReaderContent, countWords, FRONT_MATTER_FREE_MAX_WORDS, SAMPLE_MAX_WORDS } from "./epub-reader";
+import { buildReaderContent, countWords, FRONT_MATTER_FREE_MAX_WORDS, SAMPLE_MAX_WORDS, trimInsideBlock } from "./epub-reader";
 import { parseCssClassRules, sanitizeReaderBody, READER_CLASSES, READER_TAGS } from "./reader-content";
 
 // PREVIEW-READER-1: the readers' sample and the author's full preview.
@@ -543,5 +543,80 @@ describe("buildReaderContent: one giant block", () => {
     expect(r.html).not.toContain("outside");
     expect(r.html).not.toContain("u0000");
     expect(r.html).not.toMatch(/\u0000|LBIMG/);
+  });
+
+  // SC2b: spaces written as entities.
+  it("words joined only by &#160; / &nbsp; / &#xA0; / &#8239; are still cut inside, never inside an entity", async () => {
+    const seps = ["&#160;", "&nbsp;", "&#xA0;", "&#8239;"];
+    const words = Array.from({ length: 100000 }, (_, i) => `f${i}`);
+    const joined = words.map((w, i) => (i ? seps[i % seps.length] : "") + w).join("");
+    const docs = [{ id: "a", href: "a.xhtml", body: `<p>${joined}</p>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/f7499<\/p><\/section>$/);
+    expect(r.html).not.toContain("f7500");
+    wellFormed(r.html);
+  });
+
+  it("a sentence end followed by &#160; is a stop; the ~1 page gate counts &#160;-joined words", async () => {
+    const nb = (n: number, w: string) => Array.from({ length: n }, () => w).join("&#160;");
+    const giant = `<p>${nb(7500, "a")}&#160;b c fund.&#160;${nb(100000, "z")}</p>`;
+    const r = await buildReaderContent(await epub({ docs: [{ id: "a", href: "a.xhtml", body: giant }] }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/a&#160;b c fund\.<\/p><\/section>$/);
+
+    // A 300-word &#160;-joined block: 200 words past the limit is sent
+    // whole (null), 260 past is cut.
+    const html = `<p>${nb(300, "b")}</p>`;
+    expect(trimInsideBlock(html, 0, html.length, 1_000_000, 100)).toBeNull();
+    expect(trimInsideBlock(html, 0, html.length, 1_000_000, 40)?.cut).toBe(3 + 39 * "b&#160;".length + 1);
+  });
+
+  it("full mode: a poem cut before a <br> does not start a blank line after the marker", async () => {
+    const lines = Array.from({ length: 20000 }, (_, i) => `varg${i} a b c d e f,`).join("<br/>");
+    const full = await buildReaderContent(await epub({ docs: [{ id: "a", href: "a.xhtml", body: `<p>${lines}</p>` }] }), "full");
+    if (!full.available) throw new Error("unavailable");
+    expect(full.html).toContain(`varg1071 a b c d e f,</p>${marker}<p class="lb-ni">varg1072 `);
+    expect(full.html.split("<br>")).toHaveLength(20000 - 1); // one <br> dropped, at the marker
+  });
+
+  // Audit N3: three guards no test held.
+  it("pictures past the cut in the same block are not even read", async () => {
+    const png = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#0c0" } }).png().toBuffer();
+    const body = `<div>${sentences(100)}<img src="in.png" alt="inside"/>${sentences(1900, "t")}<img src="out.png" alt="outside"/>${sentences(50, "u")}</div>`;
+    const extraManifest = '<item id="i1" href="in.png" media-type="image/png"/><item id="i2" href="out.png" media-type="image/png"/>';
+    const bytes = await epub({ docs: [{ id: "a", href: "a.xhtml", body }], extraManifest, files: { "OEBPS/in.png": png, "OEBPS/out.png": png } });
+    // Every zip entry shares one prototype: record which pictures are
+    // read as bytes.
+    const entryProto = Object.getPrototypeOf((await JSZip.loadAsync(bytes)).file("OEBPS/in.png")!);
+    const original = entryProto.async;
+    const read: string[] = [];
+    const spy = vi.spyOn(entryProto, "async").mockImplementation(function (this: { name: string }, type: unknown) {
+      if (type === "nodebuffer") read.push(this.name);
+      return original.call(this, type);
+    });
+    try {
+      const r = await buildReaderContent(bytes, "sample");
+      if (!r.available) throw new Error("unavailable");
+      expect(read).toContain("OEBPS/in.png");
+      expect(read).not.toContain("OEBPS/out.png");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a number like 3.5 is not a sentence end", async () => {
+    const f = (from: number, n: number) => Array.from({ length: n }, (_, i) => `f${from + i}`).join(" ");
+    const docs = [{ id: "a", href: "a.xhtml", body: `<p>${f(0, 7500)} v3.5 b c fund. ${f(7500, 100000)}</p>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/ v3\.5 b c fund\.<\/p><\/section>$/);
+  });
+
+  it("a limit exactly at the start of a text run maps into that run, after its tag", () => {
+    const html = `<p>one<em> ${Array.from({ length: 300 }, (_, i) => `w${i}`).join(" ")}</em></p>`;
+    const t = trimInsideBlock(html, 0, html.length, 1_000_000, 1);
+    expect(t?.cut).toBe(html.indexOf("<em>") + "<em>".length);
+    expect(t?.close).toBe("</em></p>");
   });
 });
