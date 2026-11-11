@@ -399,3 +399,149 @@ describe("buildReaderContent: pictures", () => {
     expect(r.html).not.toContain("<img");
   });
 });
+
+// SC2: one giant block (a single paragraph, list, table, br-only text) is
+// cut inside, at a natural stop, instead of being sent whole.
+describe("buildReaderContent: one giant block", () => {
+  // n sentences of 10 words each: "s0001w1 ... s0001w9 s0001end."
+  const sentences = (n: number, tag = "s") =>
+    Array.from({ length: n }, (_, i) => {
+      const id = `${tag}${String(i).padStart(4, "0")}`;
+      return `${Array.from({ length: 9 }, (_, w) => `${id}w${w}`).join(" ")} ${id}end.`;
+    }).join(" ");
+  const textWords = (html: string) => countWords(html.replace(/<[^>]*>/g, " "));
+  const marker = '<div class="lb-sample-end" id="lb-sample-end"></div>';
+
+  function wellFormed(html: string) {
+    const stack: string[] = [];
+    for (const m of html.matchAll(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/g)) {
+      if (["br", "hr", "img"].includes(m[2])) continue;
+      if (m[1]) expect(stack.pop()).toBe(m[2]);
+      else stack.push(m[2]);
+    }
+    expect(stack).toEqual([]);
+  }
+
+  it("a whole book in ONE paragraph stops at the word cap, at a sentence end", async () => {
+    const docs = [{ id: "a", href: "a.xhtml", body: `<h1>Titulli</h1><p>${sentences(10000)}</p>` }]; // 100,000 words
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    // 7,500 words = sentence 0749 is the last one, whole; "Titulli" is 1.
+    expect(textWords(r.html)).toBe(SAMPLE_MAX_WORDS + 1);
+    expect(r.html).toMatch(/s0749end\.<\/p><\/section>$/);
+    expect(r.html).not.toContain("s0750");
+    expect(r.approximatePercent).toBe(8); // ~7,500 of 100,000 words
+    wellFormed(r.html);
+  });
+
+  it("a short story in one paragraph is held to ~10%", async () => {
+    const docs = [{ id: "a", href: "a.xhtml", body: `<p class="x">${sentences(300)}</p>` }]; // 3,000 words
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    const sent = textWords(r.html);
+    expect(sent).toBeGreaterThanOrEqual(300);
+    expect(sent).toBeLessThanOrEqual(310); // stops at the end of the sentence that reaches 10%
+    expect(r.html).toMatch(/end\.<\/p><\/section>$/);
+    expect(r.approximatePercent).toBe(10);
+  });
+
+  it("a block that runs at most ~1 page past the limit is still sent whole (normal books unchanged)", async () => {
+    const docs = [{ id: "a", href: "a.xhtml", body: `${para("a", 7400)}${para("b", 300)}${para("c", 100000)}` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(textWords(r.html)).toBe(7700); // the 300-word paragraph, whole
+    expect(r.html).not.toContain(">c ");
+  });
+
+  it("a giant list is cut after a whole item; every tag is closed", async () => {
+    const items = Array.from({ length: 10000 }, (_, i) => `<li><em>item${i}</em> ${Array.from({ length: 9 }, () => "fjale").join(" ")}</li>`).join("");
+    const docs = [{ id: "a", href: "a.xhtml", body: `<blockquote><ul>${items}</ul></blockquote>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/fjale<\/li><\/ul><\/blockquote><\/section>$/);
+    expect(r.html).toContain("item749<");
+    expect(r.html).not.toContain("item750<");
+    wellFormed(r.html);
+  });
+
+  it("a giant table is cut after a whole row", async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => `<tr><td>row${i} a b c d</td><td>e f g h i</td></tr>`).join("");
+    const docs = [{ id: "a", href: "a.xhtml", body: `<table><tbody>${rows}</tbody></table>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/<\/td><\/tr><\/tbody><\/table><\/section>$/);
+    expect(r.html).not.toContain("row999");
+    wellFormed(r.html);
+  });
+
+  it("a poem held together by <br> ends on a whole line and keeps its layout class", async () => {
+    // Lines with no full stops: the stop must be a line break.
+    // 7 words a line: the 7,500th word falls mid-line (line 1071).
+    const lines = Array.from({ length: 20000 }, (_, i) => `varg${i} a b c d e f,`).join("<br/>");
+    const docs = [{ id: "a", href: "a.xhtml", body: `<p class="verse-stanza">${lines}</p>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/^<section class="lb-sec"><p class="lb-verse lb-stanza">varg0 /);
+    expect(r.html).toMatch(/<br>varg1071 a b c d e f,<\/p><\/section>$/);
+  });
+
+  it("with no sentence end or line break within a page, it stops at a whole word", async () => {
+    const docs = [{ id: "a", href: "a.xhtml", body: `<p>${Array.from({ length: 100000 }, (_, i) => `f${i}`).join(" ")}</p>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(textWords(r.html)).toBe(SAMPLE_MAX_WORDS);
+    expect(r.html).toMatch(/ f7499<\/p><\/section>$/);
+  });
+
+  it("a giant paragraph inside a Calibre wrapper is cut inside it too", async () => {
+    const docs = [{ id: "a", href: "a.xhtml", body: `<div class="calibre"><h1>T</h1><p>${sentences(50, "x")}</p><p>${sentences(10000)}</p></div>` }];
+    const r = await buildReaderContent(await epub({ docs }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(textWords(r.html)).toBe(SAMPLE_MAX_WORDS + 1);
+    expect(r.html).toMatch(/s0699end\.<\/p><\/div><\/section>$/); // 500 + 7,000 words
+    expect(r.html).not.toContain("s0700");
+    wellFormed(r.html);
+  });
+
+  it("full mode: the marker sits at the same point, outside the paragraph; removing it gives the book back", async () => {
+    const body = `<h1>Titulli</h1><p class="verse"><em>${sentences(2000)}</em></p>`;
+    const bytes = await epub({ docs: [{ id: "a", href: "a.xhtml", body }] });
+    const sample = await buildReaderContent(bytes, "sample");
+    const full = await buildReaderContent(bytes, "full");
+    if (!sample.available || !full.available) throw new Error("unavailable");
+    expect(full.html.split(marker)).toHaveLength(2);
+    const at = full.html.indexOf(marker);
+    // Up to the marker = the sample minus its closing section tag.
+    expect(`${full.html.slice(0, at)}</section>`).toBe(sample.html);
+    expect(full.html.slice(at - "</em></p>".length, at)).toBe("</em></p>");
+    // Close + marker + reopen removed = the untouched book.
+    const untouched = full.html.replace(`</em></p>${marker}<p class="lb-verse lb-ni"><em>`, "");
+    expect(untouched).toBe(`<section class="lb-sec"><h1 id="lb-h-1">Titulli</h1><p class="lb-verse"><em>${sentences(2000)}</em></p></section>`);
+    expect(full.toc).toEqual([{ id: "lb-h-1", label: "Titulli" }]);
+    wellFormed(full.html);
+  });
+
+  it("full mode in a page-break wrapper: the reopened wrapper keeps its layout but starts no new page", async () => {
+    const body = `<div style="page-break-before:always" class="verse-stanza"><h2>K</h2><p>${sentences(10000)}</p></div>`;
+    const full = await buildReaderContent(await epub({ docs: [{ id: "a", href: "a.xhtml", body }] }), "full");
+    if (!full.available) throw new Error("unavailable");
+    expect(full.html).toContain(`</p></div>${marker}<div class="lb-verse lb-stanza"><p class="lb-ni">`);
+    expect(full.html.match(/lb-pb/g)).toHaveLength(1);
+    expect(full.html.match(/id="lb-h-/g)).toHaveLength(1);
+  });
+
+  it("pictures inside the giant block but past the cut are not sent", async () => {
+    const png = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#0c0" } }).png().toBuffer();
+    const body = `<div>${sentences(100)}<img src="in.png" alt="inside"/>${sentences(1900, "t")}<img src="out.png" alt="outside"/>${sentences(50, "u")}</div>`;
+    const extraManifest = '<item id="i1" href="in.png" media-type="image/png"/><item id="i2" href="out.png" media-type="image/png"/>';
+    const r = await buildReaderContent(
+      await epub({ docs: [{ id: "a", href: "a.xhtml", body }], extraManifest, files: { "OEBPS/in.png": png, "OEBPS/out.png": png } }),
+      "sample",
+    );
+    if (!r.available) throw new Error("unavailable");
+    expect(r.html).toMatch(/<img alt="inside" src="data:image\/webp;base64,/);
+    expect(r.html).not.toContain("outside");
+    expect(r.html).not.toContain("u0000");
+    expect(r.html).not.toMatch(/\u0000|LBIMG/);
+  });
+});
