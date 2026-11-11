@@ -63,6 +63,187 @@ export function countWords(text: string): number {
 }
 const MAX_SPINE_ITEMS = 1000;
 
+// SC2: the cut is made between blocks, so one giant block (a book that is
+// a single paragraph, list, table, quote, or text held together only by
+// <br>) used to be sent whole. When the block would run more than
+// GIANT_BLOCK_SLACK_WORDS (~1 printed page) past the limit, the sample is
+// cut INSIDE it instead; any smaller overshoot keeps today's whole-block
+// cut, so normal books are unchanged.
+export const GIANT_BLOCK_SLACK_WORDS = 250;
+
+const ENTITY_RE = /&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi;
+// SC2b: words joined only by a space written as an entity (&#160;,
+// &nbsp;, &#x202F;, ...) are still separate words for the giant-block
+// cut. Each such entity is blanked to the same number of spaces, so text
+// positions do not move and a cut can never land inside an entity.
+// Literal U+00A0 etc. are already \s in JavaScript.
+const NAMED_SPACES = new Set([
+  "nbsp", "NonBreakingSpace", "ensp", "emsp", "emsp13", "emsp14", "numsp", "puncsp", "thinsp", "ThinSpace",
+  "hairsp", "VeryThinSpace", "MediumSpace", "ThickSpace", "NarrowNoBreakSpace",
+]);
+function blankSpaceEntities(text: string): string {
+  if (!text.includes("&")) return text;
+  return text.replace(ENTITY_RE, (e) => {
+    const body = e.slice(1, -1);
+    let space = NAMED_SPACES.has(body);
+    if (!space && body[0] === "#") {
+      const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      space = code <= 0x10ffff && /\s/.test(String.fromCodePoint(code));
+    }
+    return space ? " ".repeat(e.length) : e;
+  });
+}
+const isWord = (token: string) => /[\p{L}\p{N}]/u.test(token.replace(ENTITY_RE, ""));
+// Our own (already cleaned) output only: every `<` in text is escaped.
+const OWN_TAG_RE = /<(\/?)([a-z][a-z0-9]*)\b[^>]*>/g;
+const OWN_VOID = new Set(["br", "hr", "img"]);
+const INLINE_TAGS = new Set(["span", "em", "strong", "i", "b", "u", "s", "small", "sup", "sub", "img"]);
+// A sample may stop right after one of these closes (a list item, a
+// paragraph inside a quote, a table row, ...).
+const CUT_AFTER_CLOSE = new Set([
+  "p", "li", "blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "table", "ul", "ol",
+  "figure", "figcaption", "aside", "caption",
+]);
+// A sentence end: . ! ? … (repeats allowed), then closing quotes or
+// brackets, then a space or the end of the text run.
+const SENTENCE_END_RE = /[.!?…]+[»”’"')\]]*(?=\s|$)/g;
+
+// Picture indexes whose tokens are in a piece of cleaned html.
+function imagesIn(html: string): number[] {
+  return [...html.matchAll(new RegExp(`${IMAGE_TOKEN_PREFIX}(\\d+)${IMAGE_TOKEN_SUFFIX}`, "g"))].map((m) => Number(m[1]));
+}
+
+export type BlockTrim = {
+  // html.slice(0, cut) + close is the sample's version of the chunk.
+  cut: number;
+  close: string;
+  // The tags open at the cut, reopened after the full-mode marker.
+  reopen: string;
+  keptText: string;
+};
+
+// A tag reopened after the full-mode marker: the same tag and layout, but
+// no id (a heading id is never doubled), no page break (the paragraph
+// goes on, it does not start a new page), and a paragraph's second half
+// gets no first-line indent.
+function reopenTag(name: string, tag: string): string {
+  const classes = (tag.match(/ class="([^"]*)"/)?.[1] ?? "").split(" ").filter((c) => c && c !== "lb-pb" && c !== "lb-break");
+  if (name === "p" && !classes.includes("lb-ni")) classes.push("lb-ni");
+  return classes.length ? `<${name} class="${classes.join(" ")}">` : `<${name}>`;
+}
+
+// Where to stop inside the region [start, end) of a chunk's html, given
+// how many text characters and words the sample may still take. Null when
+// the block does not overshoot by more than GIANT_BLOCK_SLACK_WORDS: the
+// caller then keeps the whole block, as before.
+export function trimInsideBlock(html: string, start: number, end: number, charBudget: number, wordBudget: number): BlockTrim | null {
+  // Text runs of the region, in html and text coordinates.
+  type Run = { at: number; text: string; textAt: number };
+  type Tag = { at: number; endAt: number; name: string; closing: boolean };
+  const runs: Run[] = [];
+  const tags: Tag[] = [];
+  let text = "";
+  const re = new RegExp(OWN_TAG_RE.source, "g");
+  re.lastIndex = start;
+  let pos = start;
+  // Text on both sides of a block tag or <br> is two words even with no
+  // space between ("...fjale</li><li>Tjetra"): a newline is put in `text`
+  // there (for counting only; it is never sent).
+  let gap = false;
+  const addRun = (from: number, to: number) => {
+    if (gap && text) text += "\n";
+    gap = false;
+    runs.push({ at: from, text: html.slice(from, to), textAt: text.length });
+    text += html.slice(from, to);
+  };
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && m.index < end) {
+    if (m.index > pos) addRun(pos, m.index);
+    tags.push({ at: m.index, endAt: re.lastIndex, name: m[2], closing: m[1] === "/" });
+    if (!INLINE_TAGS.has(m[2])) gap = true;
+    pos = re.lastIndex;
+  }
+  if (pos < end) addRun(pos, end);
+  // Word and sentence checks read the blanked copies (same positions).
+  const words = blankSpaceEntities(text);
+  const blankRuns = runs.map((r) => blankSpaceEntities(r.text));
+
+  // The text position where the limit is reached: the char budget, or the
+  // end of the wordBudget-th word, whichever comes first.
+  let limit = Math.max(1, charBudget);
+  let seen = 0;
+  for (const w of words.matchAll(/\S+/g)) {
+    if (!isWord(w[0])) continue;
+    seen += 1;
+    if (seen >= Math.max(1, wordBudget)) {
+      limit = Math.min(limit, w.index! + w[0].length);
+      break;
+    }
+  }
+  if (limit >= text.length) return null;
+  if (countWords(words.slice(limit)) <= GIANT_BLOCK_SLACK_WORDS) return null;
+
+  // html offset of a text position.
+  const htmlAt = (textPos: number) => {
+    for (let i = runs.length - 1; i >= 0; i--) if (runs[i].textAt <= textPos) return runs[i].at + (textPos - runs[i].textAt);
+    return start;
+  };
+  const limitAt = htmlAt(limit);
+
+  // First natural stop at or after the limit, within about a page: a
+  // sentence end, a line break (poems keep whole lines), or the close of
+  // an inner block. Else the end of the word the limit falls in.
+  let best = Number.POSITIVE_INFINITY;
+  for (const [i, run] of runs.entries()) {
+    if (run.at + run.text.length < limitAt) continue;
+    for (const s of blankRuns[i].matchAll(SENTENCE_END_RE)) {
+      const at = run.at + s.index! + s[0].length;
+      if (at >= limitAt) {
+        best = Math.min(best, at);
+        break;
+      }
+    }
+    if (best < Number.POSITIVE_INFINITY) break;
+  }
+  for (const t of tags) {
+    if (t.at < limitAt) continue;
+    const at = t.name === "br" ? t.at : t.closing && CUT_AFTER_CLOSE.has(t.name) ? t.endAt : -1;
+    if (at >= limitAt) {
+      best = Math.min(best, at);
+      break;
+    }
+  }
+  const textOf = (cut: number) => {
+    let out = "";
+    for (const run of runs) if (run.at < cut) out += run.text.slice(0, cut - run.at);
+    return out;
+  };
+  if (!Number.isFinite(best) || countWords(blankSpaceEntities(html.slice(limitAt, best).replace(/<[^>]*>/g, " "))) > GIANT_BLOCK_SLACK_WORDS) {
+    const i = runs.findIndex((r) => r.at <= limitAt && limitAt <= r.at + r.text.length);
+    const run = runs[i];
+    const space = blankRuns[i].slice(limitAt - run.at).search(/\s/);
+    best = space === -1 ? run.at + run.text.length : limitAt + space;
+  }
+
+  // Tags still open at the cut (in the whole chunk, wrappers included).
+  const open: { name: string; tag: string }[] = [];
+  const all = new RegExp(OWN_TAG_RE.source, "g");
+  while ((m = all.exec(html)) && m.index < best) {
+    const name = m[2];
+    if (OWN_VOID.has(name)) continue;
+    if (m[1] === "/") {
+      const i = open.map((o) => o.name).lastIndexOf(name);
+      if (i !== -1) open.splice(i);
+    } else open.push({ name, tag: m[0] });
+  }
+  return {
+    cut: best,
+    close: open.map((o) => `</${o.name}>`).reverse().join(""),
+    reopen: open.map((o) => reopenTag(o.name, o.tag)).join(""),
+    keptText: textOf(best),
+  };
+}
+
 // Picture budgets: count, and total inline bytes after re-encoding.
 const IMAGE_LIMITS: Record<ReaderMode, { count: number; bytes: number }> = {
   sample: { count: 40, bytes: 6 * 1024 * 1024 },
@@ -303,6 +484,15 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   const cutPart = docs[cutDoc].chunks[cutChunk].parts;
   // A block inside a chunk, not its last one: the chunk is trimmed there.
   const trimAt = cutPart && units[cut].p < cutPart.length - 1 ? cutPart[units[cut].p] : null;
+  // SC2: one giant block at the cut is cut inside (see trimInsideBlock).
+  const cutHtml = docs[cutDoc].chunks[cutChunk].html;
+  const regionStart = cutPart && units[cut].p > 0 ? cutPart[units[cut].p - 1].end : 0;
+  const regionEnd = cutPart ? cutPart[units[cut].p].end : cutHtml.length;
+  const before = units.slice(0, cut);
+  const charsBefore = before.reduce((s, u) => s + u.text.length, 0);
+  const wordsBefore = before.reduce((s, u) => s + countWords(u.text), 0);
+  const giant = trimInsideBlock(cutHtml, regionStart, regionEnd, target - charsBefore, wordTarget - wordsBefore);
+  if (giant) included = charsBefore + giant.keptText.length;
   const sampleTextShare = Math.min(100, Math.max(1, Math.round((Math.max(0, included - frontFree) / total) * 100)));
 
   const SAMPLE_END = '<div class="lb-sample-end" id="lb-sample-end"></div>';
@@ -314,6 +504,22 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     docs[d].chunks.forEach((chunk, c) => {
       if (mode === "sample" && d === cutDoc && c > cutChunk) return;
       const atCut = d === cutDoc && c === cutChunk;
+      if (atCut && giant && mode === "sample") {
+        const kept = chunk.html.slice(0, giant.cut);
+        parts.push(kept + giant.close);
+        for (const n of imagesIn(kept)) usedImages.add(n);
+        return;
+      }
+      if (atCut && giant && mode === "full") {
+        // The marker cannot sit inside a paragraph: close what is open,
+        // mark, then reopen and go on. A cut made before a <br> does not
+        // start the reopened part with that <br> (no blank line after the
+        // marker); a <br> holds no text, so the book's words are unchanged.
+        const rest = chunk.html.slice(giant.cut).replace(/^<br\s*\/?>/, "");
+        parts.push(chunk.html.slice(0, giant.cut) + giant.close + SAMPLE_END + giant.reopen + rest);
+        chunk.images.forEach((n) => usedImages.add(n));
+        return;
+      }
       if (atCut && trimAt && mode === "sample") {
         // Everything before trimAt.end is byte-for-byte the chunk's own
         // html; then the wrappers still open there are closed.

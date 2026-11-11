@@ -389,3 +389,97 @@ export async function sendPreorderJobEmails(
   }
   return sendWaitingReaderEmails(admin);
 }
+
+// R22 (I3): an author who deletes their account takes their books with
+// them, and the "Më njofto" rows go too (on delete cascade), so the
+// readers' sweep above could never tell them. deleteAccount reads the
+// unsent rows of the author's books BEFORE deleting anything (a failed
+// read stops the deletion, like its other reads), then, only once the
+// account is gone, sends each of those readers the "cancelled" email.
+// The rows no longer exist, so there is no mark to set: this is one
+// best-effort send, never retried, never twice (nothing is left for a
+// later run to find). No address is logged.
+
+export type WaitingReadersRead =
+  | { ok: true; byBook: Map<string, { title: string; userIds: string[] }> }
+  | { ok: false };
+
+type WaitingRow = { book_id: string; user_id: string; books: { title: string } | null };
+
+/** Every unsent "Më njofto" row of these books, by book. ok:false on a failed read. */
+export async function readWaitingReadersForBooks(
+  admin: AdminClient,
+  bookIds: readonly string[],
+): Promise<WaitingReadersRead> {
+  const byBook = new Map<string, { title: string; userIds: string[] }>();
+  const ids = Array.from(new Set(bookIds));
+  if (ids.length === 0) return { ok: true, byBook };
+  try {
+    const { data, error } = await admin
+      .from("preorder_notify_requests")
+      .select("book_id, user_id, books!inner(title)")
+      .in("book_id", ids)
+      .is("notified_at", null)
+      .returns<WaitingRow[]>();
+    if (error || !Array.isArray(data)) {
+      console.error("preorder emails: the deleted books' readers read failed", { code: error?.code ?? null });
+      return { ok: false };
+    }
+    for (const row of data) {
+      if (!ids.includes(row.book_id) || !row.books?.title) return { ok: false };
+      const entry = byBook.get(row.book_id) ?? { title: row.books.title, userIds: [] };
+      entry.userIds.push(row.user_id);
+      byBook.set(row.book_id, entry);
+    }
+    return { ok: true, byBook };
+  } catch {
+    console.error("preorder emails: the deleted books' readers read failed");
+    return { ok: false };
+  }
+}
+
+/** The "cancelled" email to readers read by readWaitingReadersForBooks. Never throws. */
+export async function sendDeletedBooksCancelledEmails(
+  admin: AdminClient,
+  waiting: Map<string, { title: string; userIds: string[] }>,
+): Promise<number> {
+  if (waiting.size === 0) return 0;
+  if (!emailSendingConfigured()) {
+    console.warn("preorder emails: RESEND_API_KEY not set -- the deleted books' readers were not told");
+    return 0;
+  }
+  let sent = 0;
+  for (const [bookId, { title, userIds }] of waiting) {
+    try {
+      const { subject, html } = preorderCancelledReaderEmail({ title });
+      const emails = await emailsFor(admin, userIds);
+      const { notSent, invalid } = await sendEmailBatch(
+        emails.map((to) => ({ to, subject, html })),
+        { permissive: true },
+      );
+      sent += emails.length - notSent.length - invalid.length;
+    } catch (sendError) {
+      console.error("preorder emails: a deleted book's cancelled emails failed", { bookId, error: sendError });
+    }
+  }
+  return sent;
+}
+
+/** After the account is deleted: send once the page has answered. Never throws. */
+export function scheduleDeletedBooksCancelledEmails(
+  source: string,
+  waiting: Map<string, { title: string; userIds: string[] }>,
+): void {
+  if (waiting.size === 0) return;
+  try {
+    after(async () => {
+      try {
+        await sendDeletedBooksCancelledEmails(createAdminClient(), waiting);
+      } catch (sendError) {
+        console.error(`${source}: the deleted books' cancelled emails failed`, { error: sendError });
+      }
+    });
+  } catch (scheduleError) {
+    console.error(`${source}: the deleted books' cancelled emails could not be scheduled`, { error: scheduleError });
+  }
+}
