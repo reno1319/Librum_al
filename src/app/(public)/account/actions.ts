@@ -16,6 +16,7 @@ import {
 } from "@/lib/book-storage-path";
 import { deletedBookManuscriptKeys, readReviewSnapshots } from "@/lib/book-reviews";
 import { readPendingChangesForBooks } from "@/lib/book-pending-changes";
+import { readWaitingReadersForBooks, scheduleDeletedBooksCancelledEmails } from "@/lib/preorder-emails";
 
 const PREPARE_FAILED_PATH = `/account?error=${encodeURIComponent(
   "Nuk mundëm ta përgatisim fshirjen e llogarisë. Provoni përsëri.",
@@ -264,6 +265,20 @@ export async function deleteAccount(formData: FormData) {
 
   const admin = createAdminClient();
 
+  // R22 (I3): the readers waiting on this account's pre-orders ("Më
+  // njofto"). Their rows go with the books, so they are read NOW, before
+  // deleteUser; a failed read stops the deletion. They get the
+  // "cancelled" email only once the account is gone (below).
+  let waitingReaders = new Map<string, { title: string; userIds: string[] }>();
+  if (bookIds.length > 0) {
+    const waiting = await readWaitingReadersForBooks(admin, bookIds);
+    if (!waiting.ok) {
+      console.error("deleteAccount: pre-order readers read failed; nothing was deleted");
+      redirect(PREPARE_FAILED_PATH);
+    }
+    waitingReaders = waiting.byBook;
+  }
+
   // ADMIN-3-REVIEW (N3, P5): a book's review history may name more of its
   // own manuscript keys (the last approved file kept for buyers, a stale
   // snapshot). They are read NOW, before deleteUser -- the cascade sets
@@ -327,6 +342,9 @@ export async function deleteAccount(formData: FormData) {
       )}`,
     );
   }
+
+  // R22 (I3): best effort, after the page has answered; never throws.
+  scheduleDeletedBooksCancelledEmails("deleteAccount", waitingReaders);
 
   // The account is gone at this point -- from the user's perspective the
   // deletion already succeeded. Any failure past here is an orphaned

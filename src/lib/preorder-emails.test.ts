@@ -71,6 +71,7 @@ function query(table: string) {
     return r[column];
   };
   let limit = Infinity;
+  let columns = "";
   const run = () => {
     if (update && failClaim) return { data: null, error: { code: "XX000" } };
     if (table === "books" && failBooksRead) return { data: null, error: { code: "57014" } };
@@ -78,10 +79,22 @@ function query(table: string) {
       .filter((r) => filters.every((f) => f(r)))
       .slice(0, limit);
     if (update) for (const r of hit) Object.assign(r, update);
+    // R22: the embedded book title (books!inner(title)); a row whose
+    // book is gone drops out, like an inner join.
+    if (columns.includes("books!inner(title)")) {
+      const joined = hit.flatMap((r) => {
+        const book = books.find((b) => b.id === r.book_id);
+        return book ? [{ ...r, books: { title: book.title } }] : [];
+      });
+      return { data: joined, error: null };
+    }
     return { data: hit.map((r) => ({ ...r })), error: null };
   };
   const chain = {
-    select: () => chain,
+    select: (c?: string) => {
+      if (typeof c === "string") columns = c;
+      return chain;
+    },
     order: () => chain,
     limit: (n: number) => {
       limit = n;
@@ -133,6 +146,9 @@ const {
   scheduleWaitingReaderEmails,
   sendDateMovedReaderEmails,
   scheduleDateMovedReaderEmails,
+  readWaitingReadersForBooks,
+  sendDeletedBooksCancelledEmails,
+  scheduleDeletedBooksCancelledEmails,
 } = await import("./preorder-emails");
 
 function summary(over: Partial<{ releasedBookIds: string[]; slipped: { bookId: string; releaseDate: string }[]; cancelledBookIds: string[] }> = {}) {
@@ -440,5 +456,79 @@ describe("r3: a full chunk of bad addresses does not stop the sweep", () => {
     await sendWaitingReaderEmails(fakeAdmin());
     expect(sent).toEqual([{ to: "good@example.test", subject: "released:Released" }]);
     expect(rows.every((r) => r.notified_at !== null)).toBe(true);
+  });
+});
+
+describe("R22 (I3): readers of an account's books when the account is deleted", () => {
+  it("reads every unsent row of those books (waiting or cancelled-but-unsent), by book, with the title", async () => {
+    const read = await readWaitingReadersForBooks(fakeAdmin(), ["b-rel", "b-wait", "b-cxl", "b-wait"]);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect([...read.byBook]).toEqual([
+      ["b-rel", { title: "Released", userIds: ["r1", "r2"] }],
+      ["b-wait", { title: "Waiting", userIds: ["r1"] }],
+      ["b-cxl", { title: "Cancelled", userIds: ["r4"] }],
+    ]);
+  });
+
+  it("leaves out other books and rows already told", async () => {
+    const read = await readWaitingReadersForBooks(fakeAdmin(), ["b-wait"]);
+    expect(read.ok && [...read.byBook.keys()]).toEqual(["b-wait"]);
+    const none = await readWaitingReadersForBooks(fakeAdmin(), []);
+    expect(none.ok && none.byBook.size).toBe(0);
+  });
+
+  it("a failed read is ok:false (the deletion stops)", async () => {
+    failClaim = false;
+    const admin = {
+      from: () => ({
+        select: () => ({ in: () => ({ is: () => ({ returns: async () => ({ data: null, error: { code: "57014" } }) }) }) }),
+      }),
+    } as never;
+    expect(await readWaitingReadersForBooks(admin, ["b-wait"])).toEqual({ ok: false });
+    const throwing = { from: () => { throw new Error("down"); } } as never;
+    expect(await readWaitingReadersForBooks(throwing, ["b-wait"])).toEqual({ ok: false });
+  });
+
+  it("sends each waiting reader the cancelled email once, and logs no address", async () => {
+    const waiting = new Map([
+      ["b-wait", { title: "Waiting", userIds: ["r1", "gone-1"] }],
+      ["b-cxl", { title: "Cancelled", userIds: ["r4"] }],
+    ]);
+    expect(await sendDeletedBooksCancelledEmails(fakeAdmin(), waiting)).toBe(2);
+    expect(sent).toEqual([
+      { to: "r1@example.test", subject: "cancelled:Waiting" },
+      { to: "r4@example.test", subject: "cancelled:Cancelled" },
+    ]);
+    expect(batchOptions).toEqual([{ permissive: true }, { permissive: true }]);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("@");
+  });
+
+  it("without an email key nothing is sent", async () => {
+    keyConfigured = false;
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const waiting = new Map([["b-wait", { title: "Waiting", userIds: ["r1"] }]]);
+    expect(await sendDeletedBooksCancelledEmails(fakeAdmin(), waiting)).toBe(0);
+    expect(mockBatch).not.toHaveBeenCalled();
+  });
+
+  it("one book's failure does not stop the next book", async () => {
+    batchAnswers = ["refuse", "ok"];
+    const waiting = new Map([
+      ["b-wait", { title: "Waiting", userIds: ["r1"] }],
+      ["b-cxl", { title: "Cancelled", userIds: ["r4"] }],
+    ]);
+    expect(await sendDeletedBooksCancelledEmails(fakeAdmin(), waiting)).toBe(1);
+    expect(sent).toEqual([{ to: "r4@example.test", subject: "cancelled:Cancelled" }]);
+  });
+
+  it("is scheduled after the response, and an empty list schedules nothing", async () => {
+    scheduleDeletedBooksCancelledEmails("test", new Map());
+    expect(afterTasks).toHaveLength(0);
+    scheduleDeletedBooksCancelledEmails("test", new Map([["b-wait", { title: "Waiting", userIds: ["r1"] }]]));
+    expect(afterTasks).toHaveLength(1);
+    expect(sent).toEqual([]);
+    await afterTasks[0]();
+    expect(sent).toEqual([{ to: "r1@example.test", subject: "cancelled:Waiting" }]);
   });
 });

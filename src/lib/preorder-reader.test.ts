@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BookCard } from "@/components/book-card";
 import {
   LISTED_BOOK_STATUSES,
+  NOTIFY_HELP,
   PREORDER_SOON_LABEL,
   isPreorder,
   isWaitingNotice,
@@ -84,5 +85,16 @@ describe("BookCard badge (D1)", () => {
       const html = renderToStaticMarkup(createElement(BookCard, { book, coverUrl: null }));
       expect(html).not.toContain("data-preorder-badge");
     }
+  });
+});
+
+// R22 (Renato 11-11 a): the help text names every email a reader can get
+// (release, the one new date, cancel), never "një email të vetëm".
+describe("R22 Më njofto help text", () => {
+  it("names the release, the new date and the cancel", () => {
+    expect(NOTIFY_HELP).toBe(
+      "Do t'ju dërgojmë email kur të dalë libri, ose nëse ndryshon data apo anulohet parapublikimi.",
+    );
+    expect(NOTIFY_HELP).not.toContain("vetëm");
   });
 });

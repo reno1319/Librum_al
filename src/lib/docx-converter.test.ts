@@ -5,6 +5,7 @@ import {
   headingHtmlToText,
   isHarmlessMammothWarning,
   removeEmptyElements,
+  sanitizeFragment,
 } from "./docx-converter";
 import {
   buildDocxBytes,
@@ -644,5 +645,39 @@ describe("W2 converter fixes", () => {
     expect(result.sections[0].html).not.toContain("<sup>");
     expect(result.sections[0].html).not.toContain("<ol>");
     expect(result.sections[0].html).toContain("Tekst me shënim");
+  });
+});
+
+// R22: the SX1 escape, applied to the Word converter's sanitizer.
+describe("R22 sanitizer text escape", () => {
+  const keepImages = () => null;
+  const noop = () => {};
+
+  it("never lets a broken tag with no closing '>' through as live markup", () => {
+    const out = sanitizeFragment("<p>a <img src=x onerror=alert(1)// <b>b</b></p>", keepImages, noop);
+    expect(out).not.toMatch(/<img/i);
+    expect(out).not.toMatch(/<[a-z][^>]*onerror/i);
+    expect(out).toContain("&lt;img src=x onerror=alert(1)// ");
+    expect(out).toBe("<p>a &lt;img src=x onerror=alert(1)// <b>b</b></p>");
+  });
+
+  it("escapes a stray '>' and an unterminated '<svg' in text", () => {
+    const out = sanitizeFragment("<p>1 > 0 <svg onload=alert(1)</p>", keepImages, noop);
+    expect(out).not.toMatch(/<svg/i);
+    expect(out).toBe("<p>1 &gt; 0 &lt;svg onload=alert(1)</p>");
+  });
+
+  it("leaves Mammoth's own entities exactly as they were (no double escape)", () => {
+    const html = "<p>Ana &amp; Beni &lt;3 &#233; &quot;x&quot;</p>";
+    expect(sanitizeFragment(html, keepImages, noop)).toBe(html);
+  });
+
+  it("keeps ordinary escaped Word text byte-identical end to end", async () => {
+    const bytes = await buildDocxBytes({ bodyXml: paragraph("Look: &lt;b&gt; 1 &gt; 0 &amp; more") });
+    const result = await convertDocxToDocument(bytes);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.sections[0].html).toContain("Look: &lt;b&gt; 1 &gt; 0 &amp; more");
+    expect(result.sections[0].html).not.toContain("&amp;lt;");
   });
 });
