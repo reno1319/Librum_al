@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { AdultTag } from "@/components/adult-tag";
-import { descriptionSnippet } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
+import { resolveActiveCheckoutProvider } from "@/lib/checkout-regime";
 import { ROYALTY_HEADLINE_CAPTION, ROYALTY_RULE_SENTENCE, STANDARD_ROYALTY_FROM_ALL } from "@/lib/royalty";
 import { resolveHomepageCta, computeAuthorSharePercent, type HomepageCta } from "@/lib/homepage";
 import { Alert } from "@/components/ui/alert";
@@ -9,8 +8,9 @@ import { IconCheck } from "@/components/icons";
 import { resolveBookByline } from "@/lib/book-byline";
 import type { PenNameRef } from "@/lib/pen-names";
 import { getPublicHomeSlots } from "@/lib/home-picks";
-import { HOME_SLOT_COUNT, pickShowcaseBooks, resolveHomeFan, type FanCover } from "@/lib/home-picks-logic";
+import { HOME_SLOT_COUNT, resolveHomeFan, type FanCover } from "@/lib/home-picks-logic";
 import { HomeCoverFan } from "@/components/home-cover-fan";
+import { HomeBookRow } from "@/components/home-book-row";
 import type { PublicBook } from "@/lib/types";
 import {
   BRASS_CTA_CLASSES,
@@ -30,6 +30,9 @@ import type { Metadata } from "next";
 // mentioned exactly once, as an author benefit/proof, and once as a
 // quiet text link under "Published with Librum" (never as a shopping
 // destination from this page).
+// HOME-ROWS-1 (Renato 2026-11-12, design C2): one approved exception --
+// the "Published with Librum" row shows each book's price, but only
+// while buying is on (resolveActiveCheckoutProvider is "pok").
 //
 // LIBRUM 2.0 GLOBAL VISUAL POLISH 1: same product architecture and copy
 // strategy as UI-3, restructured for a richer editorial visual language
@@ -87,14 +90,18 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 // otherwise-decorative cover image needs SOME accessible name (see
 // PublishedWithLibrumSection's aria-label) -- this is the same single
 // query, extended by one scalar column, not a new query.
-const MAX_HOMEPAGE_COVERS = 8;
+// HOME-ROWS-1 (Renato 2026-11-12, 1a): 15, the newest books the one
+// sliding row holds (was 8). The fan's fallback reads the same list.
+const MAX_HOMEPAGE_COVERS = 15;
 
 // HOME-PICKS-1: one select and one mapping for the newest list and the
 // staff-picked fan books, so both carry the same fields and byline.
 // BD15 P8: is_adult for the showcase's 18+ tag (Q1 a).
+// HOME-ROWS-1: price_all instead of description (the row shows no
+// blurb; the price only while buying is on).
 const COVER_SELECT =
-  "id, title, cover_path, genre, description, original_author, is_adult, pen:public_pen_names(id, name)";
-type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "description" | "original_author"> &
+  "id, title, cover_path, genre, price_all, original_author, is_adult, pen:public_pen_names(id, name)";
+type CoverRow = Pick<PublicBook, "id" | "title" | "cover_path" | "genre" | "price_all" | "original_author"> &
   Required<Pick<PublicBook, "is_adult">> & {
   pen: PenNameRef | null;
 };
@@ -106,8 +113,7 @@ function toCover(supabase: SupabaseClient, b: CoverRow): Cover {
     author: resolveBookByline(b),
     genre: b.genre,
     isAdult: b.is_adult === true,
-    // BD15 P8: the plain text of the rich description, never its marks.
-    description: descriptionSnippet(b.description) || null,
+    priceAll: b.price_all,
     url: supabase.storage.from("covers").getPublicUrl(b.cover_path!).data.publicUrl,
   };
 }
@@ -167,7 +173,7 @@ type Cover = {
   author: string | null;
   genre: string | null;
   isAdult: boolean;
-  description: string | null;
+  priceAll: number | null;
   url: string;
 };
 
@@ -195,17 +201,19 @@ export default async function Home({
   // HOME-PICKS-1 (Renato 2026-10-25): the hero fan shows the three staff
   // picks, each empty or no-longer-live slot filled by the newest book
   // not already shown. Librum's choice is no longer on the home page
-  // (it stays on the Bookstore). "Published with Librum" skips the fan's
-  // books while enough others exist (pickShowcaseBooks).
+  // (it stays on the Bookstore).
+  // HOME-ROWS-1 (Renato 2026-11-12, 6a): the row below no longer skips
+  // the fan's books, so it is the true newest list.
   const picked = await fetchPickedCovers(
     supabase,
     slots.map((slot) => slot.book_id),
   );
   const fan = resolveHomeFan(slots, picked, newestCovers);
-  const showcase = pickShowcaseBooks(
-    newestCovers,
-    fan.map((cover) => cover.book),
-  );
+  const showPrice =
+    resolveActiveCheckoutProvider({
+      newCheckoutRegime: process.env.NEW_CHECKOUT_REGIME,
+      ledgerPaymentProvider: process.env.LEDGER_PAYMENT_PROVIDER,
+    }) === "pok";
 
   // Same minimal, page-local user/profile resolution pattern already
   // used throughout this codebase (dashboard pages, account page, the
@@ -238,7 +246,7 @@ export default async function Home({
       <WhyLibrumSection />
       <PublishInFourStepsSection />
       <EarningsSection />
-      {showcase.length > 0 && <PublishedWithLibrumSection books={showcase} />}
+      {newestCovers.length > 0 && <PublishedWithLibrumSection books={newestCovers} showPrice={showPrice} />}
       {cta.final && <ClosingCtaBand cta={cta.final} />}
     </main>
   );
@@ -518,74 +526,32 @@ function EarningsSection() {
 
 // ============================================================
 // Section 5 — Published with Librum: real published covers as proof.
-// REDESIGN STEP 2: a white section in the mockup's frame (r8: three
-// featured books, see below). Non-commerce: books link to /libra/{id} (proof that
-// Librum books reach the public marketplace) but never show price/Buy/
-// wishlist/rating.
+// HOME-ROWS-1 (Renato 2026-11-12, design C2 then "one row" 1a-6a,
+// replacing r8's three featured books): one sliding row of the 15
+// newest books (1a), with no row heading (2a) and one link under it
+// (3a). Each card is cover, genre, title and author; no blurb; the price
+// only while buying is on. Books link to /libra/{id}; never Buy,
+// wishlist or rating.
 // ============================================================
 
-// REDESIGN STEP 2 r8 (Renato's card "Three featured"): a small curated
-// showcase instead of a row of covers -- three books (see
-// pickShowcaseBooks for which), each
-// with its cover, title, author, genre and the first lines of its
-// description, all the book's own data. A quiet grid, no shelf: one
-// column with the cover beside the text on phones and tablets, three
-// columns from lg up. Each book is one link to its page.
-// HOME-PICKS-1 (Renato 2026-10-25, 3a): the three books come from
-// pickShowcaseBooks -- the newest books not in the hero fan, topped up
-// with fan books only when too few others exist. Never a book twice.
-function PublishedWithLibrumSection({ books }: { books: Cover[] }) {
+function PublishedWithLibrumSection({ books, showPrice }: { books: Cover[]; showPrice: boolean }) {
   return (
     <section className="border-y border-border bg-surface">
       <div className={SECTION_CONTAINER}>
-        <h2 className={SECTION_HEADING}>Botuar me Librum</h2>
-        <p className="mt-3 max-w-md text-muted">
-          Libra që autorë të pavarur të Librum ua sjellin lexuesve.
-        </p>
-
-        <ul className="mt-8 grid gap-8 lg:grid-cols-3 lg:gap-10">
-          {books.map((book) => (
-            <li key={book.id}>
-              <Link
-                href={`/libra/${book.id}`}
-                aria-label={`Shikoni ${book.title} në Librum`}
-                className="focus-ring group/book flex gap-5 rounded-[3px]"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={book.url}
-                  alt=""
-                  loading="lazy"
-                  className="aspect-[5/8] w-28 shrink-0 self-start rounded-[3px] object-contain object-bottom drop-shadow-[0_6px_6px_rgba(0,0,0,0.3)] transition-transform duration-150 group-hover/book:-translate-y-1 motion-reduce:transition-none motion-reduce:group-hover/book:translate-y-0 sm:w-32 xl:w-36"
-                />
-                <div className="min-w-0">
-                  {(book.genre || book.isAdult) && (
-                    <p className="flex flex-wrap items-center gap-x-2 text-xs font-semibold tracking-[0.08em] text-primary uppercase">
-                      {book.genre && <span>{book.genre}</span>}
-                      {book.isAdult && <AdultTag />}
-                    </p>
-                  )}
-                  <h3
-                    lang="sq"
-                    className="mt-1.5 line-clamp-3 font-serif text-xl leading-snug text-primary group-hover/book:underline"
-                  >
-                    {book.title}
-                  </h3>
-                  {book.author && (
-                    <p lang="sq" className="mt-1 text-sm text-foreground/80">
-                      {book.author}
-                    </p>
-                  )}
-                  {book.description && (
-                    <p lang="sq" className="mt-3 line-clamp-4 text-[0.9375rem] leading-relaxed text-muted">
-                      {book.description}
-                    </p>
-                  )}
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <HomeBookRow
+          id="home-row-newest"
+          label="Librat më të rinj në Librum"
+          books={books}
+          showPrice={showPrice}
+          header={
+            <>
+              <h2 className={SECTION_HEADING}>Botuar me Librum</h2>
+              <p className="mt-3 max-w-md text-muted">
+                Libra që autorë të pavarur të Librum ua sjellin lexuesve.
+              </p>
+            </>
+          }
+        />
 
         <div className="mt-8">
           <Link href="/librari" className={TEXT_LINK_CLASSES}>
