@@ -633,16 +633,28 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).not.toMatch(/href="\/autore\/pen-an-author"[^>]*>Arthur Machen/);
   });
 
+  // DR1 fix 1: on phones the one price box sits under the title block,
+  // by visual order only; DR1 fix 4: serif section headings.
+  it("phone order: title block, then the one price box, then the description", async () => {
+    const html = await render({});
+    expect(html.match(/id="blerja"/g)).toHaveLength(1);
+    expect(html).toContain('<div class="min-w-0 max-md:contents"><div class="max-md:order-1"><h1');
+    expect(html).toMatch(/<div class="max-md:order-3"><hr class="my-4 max-md:mt-0 /);
+    expect(html).toMatch(/<aside aria-label="Çmimi dhe marrja e librit" class="w-full max-md:order-2 md:col-start-2 lg:col-start-3 lg:row-start-1">/);
+    expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Rreth autorit</h2>');
+    expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Vlerësimet</h2>');
+  });
+
   it("an ordinary book: the pen name, linked to its page, then (Autor)", async () => {
     const html = await render({});
     expect(text(html)).toContain("nga An Author (Autor)");
     expect(html).toMatch(/href="\/autore\/pen-an-author"[^>]*>An Author<\/a> <span class="text-muted">\(Autor\)<\/span>/);
   });
 
-  it("the price box: a gold pill main action, the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
+  it("the price box: a dark green pill main action (DR1), the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
     const html = await render({ user: { id: "reader" } });
     const box = html.slice(html.indexOf('id="blerja"'), html.indexOf("</aside>"));
-    expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-accent[^"]*">Blini e-librin — 250 lekë<\/button>/);
+    expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-primary [^"]*">Blini e-librin — 250 lekë<\/button>/);
     expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexoni një pjesë<\/button>/);
     expect(box).toContain(">Ruajeni për më vonë</button>");
     expect(box).toContain('aria-label="Ndajeni në WhatsApp"');

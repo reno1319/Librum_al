@@ -99,10 +99,19 @@ export function submitReviewOutcome(result: unknown): SubmitReviewOutcome {
   }
 }
 
-// The green box after a save (?review=pending / ?review=unchanged).
-export const REVIEW_PENDING_NOTICE =
-  "Faleminderit! Vlerësimi juaj po shqyrtohet dhe do të shfaqet pasi ta miratojë stafi.";
+// The green box after a save (?review=unchanged only).
 export const REVIEW_UNCHANGED_NOTICE = "Vlerësimi juaj nuk ndryshoi.";
+
+/**
+ * BD13a: which after-save box to show for ?review=..., if any. A saved
+ * review (?review=pending) gets no green box: the box above the form
+ * (ownReviewNotice) already says "po shqyrtohet" while it waits, and
+ * the real state after staff decide -- so the line never shows twice
+ * and a reload never shows a stale one (Renato 11-12, "review b").
+ */
+export function savedReviewNotice(param: string | undefined): string | null {
+  return param === "unchanged" ? REVIEW_UNCHANGED_NOTICE : null;
+}
 
 /**
  * The published rule (3a), under the review form. It names exactly the

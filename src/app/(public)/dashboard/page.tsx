@@ -361,7 +361,7 @@ export default async function DashboardPage({
       <MoneySummary
         sales={sales}
         nextPayoutCycle={
-          schedulerEnabled ? formatPayoutCycleDate(computeNextPayoutCycleDate()) : "Nuk është caktuar ende"
+          schedulerEnabled ? formatPayoutCycleDate(computeNextPayoutCycleDate()) : null
         }
       />
 
@@ -522,10 +522,11 @@ function ShelfSelect({
 }
 
 // ALL-TXN-CURRENCY-4 (as on the Sales page): one line per currency,
-// never a combined figure.
-function CurrencyTotalsText({ totals, emptyLabel }: { totals: CurrencyTotals; emptyLabel: string }) {
+// never a combined figure. DR1 fix 2: no total yet reads "0 lekë" in
+// the big figure; the words go in a small note under it (NoSalesNote).
+function CurrencyTotalsText({ totals }: { totals: CurrencyTotals }) {
   if (totals.totals.length === 0) {
-    return <>{emptyLabel}</>;
+    return <>{formatTransactionMinorUnits(0, "ALL")}</>;
   }
   return (
     <>
@@ -549,12 +550,25 @@ function UnresolvedNote({ totals }: { totals: CurrencyTotals }) {
   );
 }
 
+// DR1 fix 2: the small grey note under an empty money figure. Q3 a: the
+// "this month" card shows it only while the author has never sold
+// (the all-time total is empty too) -- "Ende pa shitje" means "no sales
+// yet". Never next to the unresolved-currency note.
+function NoSalesNote({ totals, allTime }: { totals: CurrencyTotals; allTime: CurrencyTotals }) {
+  if (totals.totals.length > 0 || totals.unresolvedCount > 0) return null;
+  if (allTime.totals.length > 0 || allTime.unresolvedCount > 0) return null;
+  return <p className={EMPTY_NOTE_CLASSES}>Ende pa shitje</p>;
+}
+
+const EMPTY_NOTE_CLASSES = "text-[0.8125rem] text-muted";
+
 function MoneySummary({
   sales,
   nextPayoutCycle,
 }: {
   sales: DashboardSalesResult;
-  nextPayoutCycle: string;
+  // null while the payout scheduler is off.
+  nextPayoutCycle: string | null;
 }) {
   if (!sales.ok) {
     return (
@@ -574,8 +588,9 @@ function MoneySummary({
         <div>
           <p className={BOX_LABEL_CLASSES}>Këtë muaj</p>
           <p className="font-serif text-2xl leading-tight text-primary">
-            <CurrencyTotalsText totals={netThisMonth} emptyLabel="Ende pa shitje" />
+            <CurrencyTotalsText totals={netThisMonth} />
           </p>
+          <NoSalesNote totals={netThisMonth} allTime={netAllTime} />
         </div>
         <div>
           <p className={BOX_LABEL_CLASSES}>Shitje</p>
@@ -597,13 +612,23 @@ function MoneySummary({
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
           <p className={BOX_LABEL_CLASSES}>Të ardhurat neto këtë muaj</p>
           <p className={BOX_FIGURE_CLASSES}>
-            <CurrencyTotalsText totals={netThisMonth} emptyLabel="Ende pa shitje" />
+            <CurrencyTotalsText totals={netThisMonth} />
           </p>
+          <NoSalesNote totals={netThisMonth} allTime={netAllTime} />
           <UnresolvedNote totals={netThisMonth} />
         </div>
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
           <p className={BOX_LABEL_CLASSES}>Pagesa e radhës për autorin</p>
-          <p className="font-serif text-2xl leading-tight text-primary">{nextPayoutCycle}</p>
+          {nextPayoutCycle ? (
+            <p className="font-serif text-2xl leading-tight text-primary">{nextPayoutCycle}</p>
+          ) : (
+            <>
+              <p aria-hidden="true" className={BOX_FIGURE_CLASSES}>
+                &mdash;
+              </p>
+              <p className={EMPTY_NOTE_CLASSES}>Nuk është caktuar ende</p>
+            </>
+          )}
           <Link href="/dashboard/balance" className={TEXT_LINK_CLASSES}>
             Shikoni bilancin &rarr;
           </Link>
@@ -611,8 +636,9 @@ function MoneySummary({
         <div className={`${BOX_CLASSES} flex flex-col gap-1.5`}>
           <p className={BOX_LABEL_CLASSES}>Të ardhurat neto gjithsej</p>
           <p className={BOX_FIGURE_CLASSES}>
-            <CurrencyTotalsText totals={netAllTime} emptyLabel="Ende pa shitje" />
+            <CurrencyTotalsText totals={netAllTime} />
           </p>
+          <NoSalesNote totals={netAllTime} allTime={netAllTime} />
           <UnresolvedNote totals={netAllTime} />
           <Link href="/dashboard/sales" className={TEXT_LINK_CLASSES}>
             Shikoni shitjet dhe fitimet &rarr;

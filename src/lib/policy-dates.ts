@@ -18,9 +18,8 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // BD13 (review wording, Renato 2 Nov): the BD13 release goes to
 // Production on Tuesday 3 November 2026; if it moves, this line moves
 // with it. Terms and Refunds keep their dates.
-// BD15 (Renato 11-05, release day "a"): BD15 ships the D2 Privacy text
-// to Production on Saturday 7 November 2026; if it moves, this line
-// moves with it.
+// BD15 (Renato 11-05, release day "a"): BD15 shipped the D2 Privacy
+// text to Production on 7 November 2026.
 // PL1 (Release 21): the pre-order «Më njofto» text ships to Production
 // on Wednesday 11 November 2026; if it moves, this line moves with it.
 export const PRIVACY_LAST_UPDATED = "11 nëntor 2026";
@@ -34,12 +33,8 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // (BD7) sets the final value.
 // BD7 (Renato 1 Nov, card "b"): release day Monday 2 November 2026.
 // D2 (Renato 11-04, "ballinë" word change, TERMS_VERSION "terms-sq-3"):
-// the Terms and the Privacy Policy text changed again. RELEASE STEP: the
-// release that ships D2 to Production (BD15) sets TERMS_LAST_UPDATED
-// and PRIVACY_LAST_UPDATED to its own day. Until then they keep the
-// dates of the text that is live on Production.
-// BD15 (Renato 11-05, release day "a"): release day Saturday 7 November
-// 2026; if it moves, this line moves with it.
+// the Terms and the Privacy Policy text changed again; BD15 shipped it
+// to Production on 7 November 2026 (Renato 11-05, release day "a").
 // PL1 (Release 21): the Terms §5 "Parapublikimi" text ships to
 // Production on Wednesday 11 November 2026; if it moves, this line
 // moves with it.
