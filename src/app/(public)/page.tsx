@@ -120,8 +120,8 @@ function toCover(supabase: SupabaseClient, b: CoverRow): Cover {
 
 // ALL-WIRING-2: `.not("price_all", "is", null)` joins the two filters
 // already here. This section links each cover to its book's detail
-// page, so it is a public listing of the storefront's catalog even
-// though it renders no price -- and a book with no authored ALL price
+// page, so it is a public listing of the storefront's catalog (the
+// price shows only while buying is on) -- and a book with no authored ALL price
 // is not part of that catalog until its author sets one. Consequence
 // worth stating plainly rather than discovering later: while every
 // published book is unpriced, this section renders nothing at all.
@@ -131,8 +131,8 @@ async function fetchPublishedCovers(supabase: SupabaseClient): Promise<Cover[]> 
     .from("public_books")
     // REDESIGN STEP 2 / PEN-NAMES-1: each book's pen name, embedded from
     // the public_pen_names view, as the bookstore does.
-    // r8: genre and description too, for the three-book showcase in
-    // "Published with Librum" (each book's own data, no site copy).
+    // HOME-ROWS-1: genre, the 18+ flag and the price for the one sliding
+    // row in "Botuar me Librum" (each book's own data, no site copy).
     .select(COVER_SELECT)
     .eq("status", "published")
     .not("price_all", "is", null)

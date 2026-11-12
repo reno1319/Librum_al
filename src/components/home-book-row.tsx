@@ -152,13 +152,16 @@ function ArrowButton({
   controls: string;
 }) {
   return (
+    // aria-disabled, not disabled: a real disabled button drops keyboard
+    // focus to <body> when the row reaches its end (audit M1). It stays
+    // focusable, reads as unavailable, and a press does nothing.
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+      aria-disabled={disabled}
       aria-controls={controls}
       aria-label={direction === "back" ? "Librat e mëparshëm" : "Librat e tjerë"}
-      className="focus-ring grid size-11 place-items-center rounded-full border border-primary text-primary transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-default disabled:border-border disabled:text-muted disabled:hover:bg-transparent"
+      className="focus-ring grid size-11 place-items-center rounded-full border border-primary text-primary transition-colors hover:bg-primary hover:text-primary-foreground aria-disabled:cursor-default aria-disabled:border-border aria-disabled:text-muted aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted"
     >
       <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={direction === "back" ? "M15 18l-6-6 6-6" : "M9 6l6 6-6 6"} />

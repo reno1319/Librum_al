@@ -8,6 +8,8 @@ import {
   REVIEW_RULES_NOTE,
   isReviewRejectionReason,
   ownReviewNotice,
+  REVIEW_UNCHANGED_NOTICE,
+  savedReviewNotice,
   submitReviewOutcome,
   type OwnReview,
 } from "./reader-reviews";
@@ -99,5 +101,17 @@ describe("ownReviewNotice", () => {
       "Vlerësimi juaj nuk u miratua: Emri i papërshtatshëm.",
       "Zgjidhni një emër tjetër dhe dërgojeni përsëri.",
     ]);
+  });
+});
+
+describe("savedReviewNotice (BD13a: no second or stale 'po shqyrtohet')", () => {
+  it("shows no green box for a saved review (the box above the form says it)", () => {
+    expect(savedReviewNotice("pending")).toBeNull();
+  });
+
+  it("keeps the unchanged box, and shows nothing for other values", () => {
+    expect(savedReviewNotice("unchanged")).toBe(REVIEW_UNCHANGED_NOTICE);
+    expect(savedReviewNotice(undefined)).toBeNull();
+    expect(savedReviewNotice("approved")).toBeNull();
   });
 });

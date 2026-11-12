@@ -86,6 +86,9 @@ describe("the author's preview of an unpublished book", () => {
     expect(html).toContain("Menaxhoni librin");
     expect(html).toContain(`href="/api/books/${BOOK_ID}/download"`);
     expect(html).not.toContain(">Buy");
+    // "ShkarkoniEPUB" fix: the words sit in one <span>, so the inline-flex
+    // button keeps the space between them.
+    expect(html).toMatch(new RegExp(`/download" class="[^"]*inline-flex[^"]*"><span>Shkarkoni <span[^>]*>EPUB</span></span></a>`));
   });
 
   it("a live book's author gets Read sample but no Preview strip", async () => {
