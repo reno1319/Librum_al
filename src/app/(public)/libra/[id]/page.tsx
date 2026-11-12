@@ -107,11 +107,10 @@ import {
   REVIEW_EDIT_WARNING,
   REVIEW_NAME_HELP,
   REVIEW_NAME_MAX,
-  REVIEW_PENDING_NOTICE,
   REVIEW_RULES_NOTE,
-  REVIEW_UNCHANGED_NOTICE,
   VERIFIED_PURCHASE_LABEL,
   ownReviewNotice,
+  savedReviewNotice,
   type OwnReview,
 } from "@/lib/reader-reviews";
 
@@ -627,6 +626,8 @@ export default async function BookDetailPage({
       : 0;
   const myReview: MyReview | null = myReviewRow ?? null;
   const myReviewNotice = ownReviewNotice(myReview);
+  // BD13a: the after-save box (only "unchanged"; see savedReviewNotice).
+  const savedNotice = savedReviewNotice(reviewStatus);
 
   // BD13 (Q2a): the account's public review name, read only for a reader
   // who may review (own-row read). Null = the form asks for one.
@@ -957,7 +958,9 @@ export default async function BookDetailPage({
           )}
         </p>
       )}
-      {notifyStatus && (
+      {/* "Më njofto" (Renato 11-12, a): no top box for "on" -- the price
+          panel already says NOTIFY_ON_NOTICE, so it showed twice. */}
+      {notifyStatus && notifyStatus !== "on" && (
         <p
           role="status"
           className={`${NOTICE_CLASSES} ${
@@ -1539,12 +1542,12 @@ export default async function BookDetailPage({
       <section id="vleresimet" className={`${PAGE_SECTION_CLASSES} scroll-mt-24`}>
         <h2 className={SECTION_HEADING}>Vlerësimet</h2>
 
-        {(reviewStatus === "pending" || reviewStatus === "unchanged") && (
+        {savedNotice && (
           <p
             role="status"
             className="mt-4 max-w-[42.5rem] rounded-[3px] bg-green-50 px-3 py-2 text-sm text-green-700"
           >
-            {reviewStatus === "pending" ? REVIEW_PENDING_NOTICE : REVIEW_UNCHANGED_NOTICE}
+            {savedNotice}
           </p>
         )}
 
@@ -1800,6 +1803,9 @@ const TILE_ICON_CLASSES = "size-[1.375rem]";
 const TRANSLATOR_ROLE = "(Përkthyes)";
 
 // P1 (Renato 12:47): "EPUB" and "DRM" stay capitals, a little smaller.
+// Inside an inline-flex button, wrap "Shkarkoni <Acronym>" in one
+// <span>: a bare text node is its own flex item and loses its trailing
+// space ("ShkarkoniEPUB").
 function Acronym({ children }: { children: string }) {
   return <span className="text-[0.82em] tracking-[0.03em]">{children}</span>;
 }
@@ -1992,7 +1998,9 @@ function PurchasePanel({
           Menaxhoni librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>
-          Shkarkoni <Acronym>EPUB</Acronym>
+          <span>
+            Shkarkoni <Acronym>EPUB</Acronym>
+          </span>
         </a>
         {sampleSlot}
       </div>
@@ -2004,7 +2012,9 @@ function PurchasePanel({
       <div className="flex flex-col gap-3">
         <span className={STATUS_PILL_CLASSES}>Ky libër është i juaji</span>
         <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
-          Shkarkoni <Acronym>EPUB</Acronym>
+          <span>
+            Shkarkoni <Acronym>EPUB</Acronym>
+          </span>
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
         {/* D13 2a / BD4: the sharing reminder next to Download. */}

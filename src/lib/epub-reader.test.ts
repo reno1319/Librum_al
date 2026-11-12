@@ -65,6 +65,18 @@ describe("reader cleaner: hostile markup", () => {
     expect(out).toContain("&lt;img src=x onerror=alert(1)//");
   });
 
+  // SX1 audit N1, moved to the live reader: a slash right after the tag
+  // name ("<svg/onload=...>") is not a tag the cleaner accepts, so it
+  // must come out as plain text, never as a live element.
+  it("escapes slash-after-name tags (<svg/onload>, <p/onclick>, <img/src/onerror>)", () => {
+    expect(clean("<p>a <svg/onload=alert(1)> b</p>")).toBe("<p>a &lt;svg/onload=alert(1)&gt; b</p>");
+    expect(clean("<p/onclick=alert(1)>x</p>")).toBe("<p>&lt;p/onclick=alert(1)&gt;x</p>");
+    expect(clean("<p>a</p><svg/onload=alert(1)><p>b</p>")).toBe("<p>a</p><p>&lt;svg/onload=alert(1)&gt;</p><p>b</p>");
+    const out = clean("<p>x <img/src=x/onerror=alert(1)> y</p>");
+    expect(out).not.toMatch(/<img|<svg|onerror=alert\(1\)>/);
+    expect(out).toBe("<p>x &lt;img/src=x/onerror=alert(1)&gt; y</p>");
+  });
+
   it("drops scripts, svg, iframes, forms with their content", () => {
     const out = clean(
       '<p>a</p><script>bad()</script><svg><script>x</script><image href="http://e/x"/></svg><iframe src="http://e">t</iframe><form><input value="z"/></form><p>b</p>',

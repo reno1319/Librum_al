@@ -163,6 +163,12 @@ describe("BD16 P4: a pre-order's book page", () => {
     expect(odd).not.toContain("&lt;i&gt;");
   });
 
+  it("after 'Më njofto' the 'on' sentence shows once (the price panel), with no top box (Renato 11-12, a)", async () => {
+    const html = await render({ b: book(), user: READER_ID, notice: { book_cancelled_at: null }, searchParams: { notify: "on" } });
+    expect(html.split("Do t&#x27;ju njoftojmë me email kur të dalë libri.").length - 1).toBe(1);
+    expect(html).toContain("Hiq njoftimin");
+  });
+
   it("says 'Del së shpejti' once the release day has passed", async () => {
     const html = await render({ b: book({ release_date: "2020-01-01" }), user: null });
     expect(html).toContain("Del së shpejti");

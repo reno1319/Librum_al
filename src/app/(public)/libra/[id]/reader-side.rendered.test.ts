@@ -188,3 +188,40 @@ describe("BD15 P8: Ju mund të pëlqeni (Q2 a)", () => {
     expect(q).toContainEqual(["eq", ["is_adult", false]]);
   });
 });
+
+// BD13a (Renato 11-12, "review b"): after a review is saved the address
+// keeps ?review=pending. "po shqyrtohet" shows once (the box above the
+// form) while it waits, and not at all once staff approved it.
+describe("the review box after a save (?review=pending)", () => {
+  const READER = { id: "9229f938-0000-4000-8000-000000000800" };
+  async function renderOwned(status: "pending" | "approved") {
+    const review = { id: "r1", rating: 5, body: "Mirë", status, rejection_reason: null, rejection_note: null };
+    mockCreateClient.mockImplementation(() => ({
+      auth: { getUser: async () => ({ data: { user: READER } }) },
+      rpc: vi.fn(async (name: string) => ({ data: name === "user_owns_book" })),
+      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/x.png" } }) }) },
+      from: (table: string) => {
+        if (table === "public_books") return queryStub({ data: [] }, { data: BASE });
+        if (table === "reviews") return queryStub({ data: [] }, { data: review });
+        return queryStub({ data: [] }, { data: null });
+      },
+    }));
+    const element = await BookDetailPage({
+      params: Promise.resolve({ id: BOOK_ID }),
+      searchParams: Promise.resolve({ review: "pending" }),
+    });
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("a waiting review: 'po shqyrtohet' once, inside the form", async () => {
+    const html = await renderOwned("pending");
+    expect(html).toContain("Përditësoni vlerësimin tuaj");
+    expect(html.split("po shqyrtohet").length - 1).toBe(1);
+  });
+
+  it("an approved review: no 'po shqyrtohet' after a reload", async () => {
+    const html = await renderOwned("approved");
+    expect(html).toContain("Përditësoni vlerësimin tuaj");
+    expect(html).not.toContain("po shqyrtohet");
+  });
+});

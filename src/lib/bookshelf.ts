@@ -77,8 +77,6 @@ export type ShelfStateCopy = {
   button: string;
   /** Where it goes: the editor, or the public book page. */
   action: ShelfMainAction;
-  /** Filled (the next step is the author's) or outlined. */
-  primary: boolean;
 };
 
 export const PREORDER_CHANGES_LINE = "Dërgojini për shqyrtim te Çmimi.";
@@ -87,42 +85,37 @@ export const READERS_SEE_OLD_VERSION_LINE =
   "Lexuesit shohin ende versionin e vjetër derisa ndryshimet të miratohen.";
 
 export const SHELF_STATE_COPY: Record<ShelfState, ShelfStateCopy> = {
-  draft: { label: "Draft", line: null, button: "Vazhdoni përgatitjen", action: "editor", primary: true },
+  draft: { label: "Draft", line: null, button: "Vazhdoni përgatitjen", action: "editor" },
   in_review: {
     label: "Në shqyrtim",
     line: null,
     button: "Shikoni çfarë dërguat",
     action: "editor",
-    primary: false,
   },
   sent_back: {
     label: "Kthyer për ndryshime",
     line: null,
     button: "Rregullojeni dhe ridërgojeni",
     action: "editor",
-    primary: true,
   },
-  live: { label: "Publikuar", line: null, button: "Shikoni faqen e librit", action: "book_page", primary: false },
+  live: { label: "Publikuar", line: null, button: "Shikoni faqen e librit", action: "book_page" },
   live_changes: {
     label: "Publikuar, me ndryshime të padërguara",
     line: READERS_SEE_OLD_VERSION_LINE,
     button: "Vazhdoni ndryshimet",
     action: "editor",
-    primary: true,
   },
   live_in_review: {
     label: "Publikuar, ndryshimet në shqyrtim",
     line: READERS_SEE_OLD_VERSION_LINE,
     button: "Shikoni çfarë dërguat",
     action: "editor",
-    primary: false,
   },
   live_sent_back: {
     label: "Publikuar, ndryshimet u kthyen",
     line: READERS_SEE_OLD_VERSION_LINE,
     button: "Rregulloni ndryshimet",
     action: "editor",
-    primary: true,
   },
   // BD16 P2: the release date, the file due date and the waiting
   // readers are added by the card (author-book-row.tsx).
@@ -131,30 +124,26 @@ export const SHELF_STATE_COPY: Record<ShelfState, ShelfStateCopy> = {
     line: null,
     button: "Ngarkoni dorëshkrimin final",
     action: "content",
-    primary: true,
   },
   preorder_changes: {
     label: "Parapublikim, me ndryshime të padërguara",
     line: PREORDER_CHANGES_LINE,
     button: "Vazhdoni ndryshimet",
     action: "editor",
-    primary: true,
   },
   preorder_in_review: {
     label: "Parapublikim, në shqyrtim",
     line: null,
     button: "Shikoni çfarë dërguat",
     action: "editor",
-    primary: false,
   },
   preorder_sent_back: {
     label: "Parapublikim, ndryshimet u kthyen",
     line: null,
     button: "Rregulloni ndryshimet",
     action: "editor",
-    primary: true,
   },
-  taken_down: { label: "Hequr nga Libraria", line: null, button: "Shikoni arsyen", action: "editor", primary: false },
+  taken_down: { label: "Hequr nga Libraria", line: null, button: "Shikoni arsyen", action: "editor" },
 };
 
 /** BD16 P2: a pre-order whose final manuscript is approved waits for its day. */
@@ -163,7 +152,6 @@ export const PREORDER_READY_COPY: ShelfStateCopy = {
   line: null,
   button: "Shikoni faqen e librit",
   action: "book_page",
-  primary: false,
 };
 
 /** The copy for a card: a ready pre-order (approved file) has its own. */
