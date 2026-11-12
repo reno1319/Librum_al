@@ -134,7 +134,7 @@ describe("BD3 patch 4: the original author", () => {
   });
 
   it("every explicit book select that feeds a byline reads original_author", () => {
-    expect(readSrc("app/(public)/page.tsx")).toContain("description, original_author, is_adult, pen:public_pen_names(id, name)");
+    expect(readSrc("app/(public)/page.tsx")).toContain("price_all, original_author, is_adult, pen:public_pen_names(id, name)");
     expect(readSrc("app/api/books/[id]/sample/route.ts")).toContain("status, original_author, pen:public_pen_names");
     const choice = readSrc("app/admin/(protected)/librum-choice/page.tsx");
     expect(choice).toContain('"id, title, cover_path, original_author, pen:public_pen_names(id, name)"');
