@@ -306,21 +306,15 @@ export function AuthorBookRow({
       </div>
 
       <div className="relative flex w-full flex-wrap items-center gap-2 sm:w-auto">
-        {copy.primary ? (
-          <Link
-            href={mainHref}
-            className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-4 text-sm font-bold text-accent-foreground transition-colors hover:bg-[#c9a42c]"
-          >
-            {copy.button}
-          </Link>
-        ) : (
-          <Link
-            href={mainHref}
-            className={buttonClasses("outline", "sm", "min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold")}
-          >
-            {copy.button}
-          </Link>
-        )}
+        {/* DR1 fix 3: gold only on dark green, so every row's main
+            link is the outlined button on this light page ("+ Libër i
+            ri" stays the page's one dark green button). */}
+        <Link
+          href={mainHref}
+          className={buttonClasses("outline", "sm", "min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold")}
+        >
+          {copy.button}
+        </Link>
 
         <DismissableDetails className="sm:relative" closeOnFocusOut>
           <summary

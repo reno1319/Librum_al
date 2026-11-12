@@ -805,8 +805,9 @@ function FeaturedStrip({
   );
 }
 
+// DR1 fix 3: outlined on this light strip (gold only on dark green).
 const FEATURE_CTA_CLASSES =
-  "focus-ring inline-flex shrink-0 items-center justify-center rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-colors hover:bg-primary-hover hover:text-primary-foreground";
+  "focus-ring inline-flex shrink-0 items-center justify-center rounded-full border border-primary px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 
 // REDESIGN STEP 3 (B2): a headed shelf of cover cards with "See all".
 // One row that scrolls sideways on phones; a grid from the small

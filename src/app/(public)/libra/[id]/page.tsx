@@ -1092,7 +1092,13 @@ export default async function BookDetailPage({
           {coverUrl && <p className="text-xs text-muted">Klikoni ballinën për ta parë të madhe</p>}
         </div>
 
-        <div className="min-w-0">
+        {/* DR1 fix 1: on phones (below md) this column dissolves into
+            the stacked page so the price box (max-md:order-2) sits right
+            under the title, author, genre and rating, above the
+            description. Visual order only -- one box, same DOM order, so
+            tablet and desktop are unchanged. Nothing is sticky. */}
+        <div className="min-w-0 max-md:contents">
+          <div className="max-md:order-1">
           <h1 className="font-serif text-[1.75rem] leading-[1.2] font-normal text-foreground sm:text-[1.875rem]">
             {book.title}
           </h1>
@@ -1202,8 +1208,11 @@ export default async function BookDetailPage({
                 : "Ende pa vlerësime"}
             </span>
           </div>
+          </div>
 
-          <hr className="my-4 border-0 border-t border-border" />
+          <div className="max-md:order-3">
+
+          <hr className="my-4 max-md:mt-0 border-0 border-t border-border" />
 
           {/* LIBRUM 2.0 PRODUCT-1: only the real description. BD15 P8:
               the rich description (bold, italic, lists), parsed -- never
@@ -1317,16 +1326,17 @@ export default async function BookDetailPage({
               )}
             </dl>
           </section>
+          </div>
         </div>
 
         {/* REDESIGN STEP 3 (P2) -> P1 (design B): the purchase panel as a
-            small box -- the price, the main action as a gold pill, the
+            small box -- the price, the main action as a dark green pill (DR1), the
             sample as an outline pill, save for later, then sharing.
             Which controls show, and every form and action, are exactly
             as before. */}
         {/* PREVIEW-READER-1: id="blerja" is where the sample's end page
             button takes the reader. */}
-        <aside aria-label="Çmimi dhe marrja e librit" className="w-full md:col-start-2 lg:col-start-3 lg:row-start-1">
+        <aside aria-label="Çmimi dhe marrja e librit" className="w-full max-md:order-2 md:col-start-2 lg:col-start-3 lg:row-start-1">
           <div id="blerja" className="flex scroll-mt-24 flex-col gap-3 rounded-[8px] border border-[#d9d3c3] p-4">
             <span className="text-2xl font-semibold text-foreground">{formattedPrice}</span>
 
@@ -1774,7 +1784,8 @@ export default async function BookDetailPage({
 // REDESIGN STEP 3 -> P1 (design B, 2026-11-10): shared classes for this
 // page. Plain section headings with a thin rule above each section; links
 // inside sentences underlined at rest (C1).
-const SECTION_HEADING = "text-xl font-semibold text-foreground";
+// DR1 fix 4: the serif section heading, as the dashboard h2.
+const SECTION_HEADING = "font-serif text-2xl font-normal text-primary";
 const PAGE_SECTION_CLASSES = "mt-12 border-t border-border pt-6";
 const INLINE_LINK_CLASSES =
   "focus-ring rounded-sm font-semibold text-primary underline underline-offset-2 hover:decoration-2";
@@ -1865,18 +1876,20 @@ async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
 const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Ky libër nuk mund të blihet ende.";
 
 // REDESIGN STEP 3 (P2) -> P1 (design B): full-width pills inside the
-// price box -- the main one gold, the secondary one outlined under it,
-// save for later as a quiet text button.
+// price box -- the main one filled, the secondary one outlined under it,
+// save for later as a quiet text button. DR1 fix 3 (Q1 a): the main one
+// is dark green, as gold stays for dark green areas only.
 const PRIMARY_ACTION_CLASSES =
-  "focus-ring inline-flex w-full items-center justify-center rounded-full bg-accent px-3 py-2.5 text-center text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#c9a42c] disabled:cursor-not-allowed disabled:opacity-50";
+  "focus-ring inline-flex w-full items-center justify-center rounded-full bg-primary px-3 py-2.5 text-center text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
 const SECONDARY_ACTION_CLASSES =
   "focus-ring inline-flex w-full items-center justify-center rounded-full border border-primary bg-surface px-3 py-2 text-center text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 const WISHLIST_ACTION_CLASSES =
   "focus-ring w-full rounded-sm py-1 text-center text-[0.8125rem] font-medium text-primary underline underline-offset-2 hover:decoration-2";
 const COVER_PILL_CLASSES =
   "focus-ring inline-flex items-center whitespace-nowrap rounded-full border border-[#d9d3c3] bg-surface px-3 py-1 text-xs font-semibold text-primary shadow-sm hover:bg-surface-hover";
+// DR1 fix 3 (Q2 a): dark green fill, still unlike the outlined "Po e ndiqni".
 const FOLLOW_PILL_CLASSES =
-  "focus-ring inline-flex items-center justify-center rounded-full bg-accent px-5 py-1.5 text-sm font-semibold text-accent-foreground transition-colors hover:bg-[#c9a42c]";
+  "focus-ring inline-flex items-center justify-center rounded-full bg-primary px-5 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover";
 const FOLLOWING_PILL_CLASSES =
   "focus-ring inline-flex items-center justify-center rounded-full border border-primary px-4 py-1.5 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 const STATUS_PILL_CLASSES = "rounded-[8px] bg-surface-hover px-3 py-2.5 text-center text-sm font-medium";
