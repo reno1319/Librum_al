@@ -201,6 +201,34 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(enabled).not.toContain("Nuk është caktuar ende");
   });
 
+  // DR1 fix 2: empty money figures read "0 lekë", the words go small under them.
+  it("shows 0 lekë with a small 'Ende pa shitje' note before the first sale, and a dash for the payout", async () => {
+    const html = await render(
+      { ...TABLES, author_book_purchases: { data: [], error: null } },
+      { list_purchase_currencies: { data: [], error: null } },
+    );
+    // Phone box + two desktop cards.
+    expect(html.match(/>0 lekë</g)).toHaveLength(3);
+    expect(html.match(/<p class="text-\[0.8125rem\] text-muted">Ende pa shitje<\/p>/g)).toHaveLength(3);
+    expect(html).toMatch(/<p aria-hidden="true" class="[^"]*font-serif[^"]*">—<\/p><p class="text-\[0.8125rem\] text-muted">Nuk është caktuar ende<\/p>/);
+  });
+
+  it("drops 'Ende pa shitje' from this month once the author has ever sold (Q3 a)", async () => {
+    const old = new Date(Date.now() - 70 * 24 * 3600 * 1000).toISOString();
+    const html = await render(
+      {
+        ...TABLES,
+        author_book_purchases: {
+          data: [{ ...(TABLES.author_book_purchases.data[0] as Record<string, unknown>), created_at: old }],
+          error: null,
+        },
+      },
+      RPCS,
+    );
+    expect(html).toContain(">0 lekë<");
+    expect(html).not.toContain("Ende pa shitje");
+  });
+
   // ADMIN-3-REVIEW (F, N9): the row's IN REVIEW tag and send-back notice
   // come from ONE read of the author's own review rows.
   it("shows In review and the send-back notice from the author's review rows", async () => {
