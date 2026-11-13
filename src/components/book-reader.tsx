@@ -72,6 +72,20 @@ const CHROME: Record<ReaderTheme, { bg: string; bar: string; text: string; muted
   dark: { bg: "#0f0f10", bar: "#18181a", text: "#d8d4cc", muted: "#9a958c", border: "#2e2e32" },
 };
 
+// DD (13 Nov): classes of the controls that only show inside a menu or on
+// the end page, kept here so a test can guard their 44 px+ size.
+export const READER_TAP_CLASSES = {
+  tocRow: "focus-ring min-h-12 w-full px-4 py-3 text-left text-sm hover:bg-black/5",
+  fontButton: "focus-ring flex h-11 flex-1 items-center justify-center rounded-md border font-serif disabled:opacity-40",
+  restart: "focus-ring min-h-11 rounded-sm px-3 text-sm underline underline-offset-2",
+} as const;
+
+// DD: Escape with a menu open closes only that menu, and only while the
+// reader is on screen (never on the book page after the popup closed).
+export function closesOpenMenu(key: string, panel: "none" | "toc" | "aa", readerShown: boolean): boolean {
+  return readerShown && key === "Escape" && panel !== "none";
+}
+
 export function BookReader({
   data,
   coverUrl,
@@ -97,6 +111,7 @@ export function BookReader({
   const stageWrapRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const srcDoc = useMemo(() => buildReaderFrameDoc(data.html), [data.html]);
 
@@ -180,6 +195,27 @@ export function BookReader({
       progressRef.current = layout.contentViews > 1 ? view.k / (layout.contentViews - 1) : 0;
     }
   }, [view, layout]);
+
+  // DD: with Contents or the page-look menu open, Escape closes only that
+  // menu and puts focus back on the button that opened it. Listened for on
+  // the window (capture), not on the reader, because focus can fall out of
+  // the reader (e.g. the bigger-letters button disables at the largest
+  // size); cancelling the keydown stops the dialog's own Escape close.
+  useEffect(() => {
+    if (panel === "none") return;
+    function onEscape(e: KeyboardEvent) {
+      // The reader stays mounted inside the closed popup until it is opened
+      // again, so ignore keys unless it is actually on screen.
+      const shown = (rootRef.current?.getClientRects().length ?? 0) > 0;
+      if (!closesOpenMenu(e.key, panel, shown)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPanel("none");
+      rootRef.current?.querySelector<HTMLElement>(`[data-panel-toggle="${panel}"]`)?.focus();
+    }
+    window.addEventListener("keydown", onEscape, true);
+    return () => window.removeEventListener("keydown", onEscape, true);
+  }, [panel]);
 
   const go = useCallback(
     (delta: number) => setViewIndex((i) => Math.max(0, Math.min(views.length - 1, i + delta))),
@@ -305,6 +341,7 @@ export function BookReader({
 
   return (
     <div
+      ref={rootRef}
       className="flex h-full w-full flex-col outline-none"
       style={{ background: chrome.bg, color: chrome.text }}
       onKeyDown={onKeyDown}
@@ -312,7 +349,7 @@ export function BookReader({
     >
       {/* Top bar: Back / title / Contents / Aa */}
       <div className="relative z-20 flex shrink-0 items-center gap-2 border-b px-2 py-1.5 sm:px-4" style={{ background: chrome.bar, borderColor: chrome.border }}>
-        <button type="button" onClick={onClose} aria-label="Mbyllni leximin" className="focus-ring flex size-10 items-center justify-center rounded-full hover:bg-black/5">
+        <button type="button" onClick={() => (setPanel("none"), onClose())} aria-label="Mbyllni leximin" className="focus-ring flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-black/5">
           <IconClose className="size-5" aria-hidden="true" />
         </button>
         <div className="min-w-0 flex-1 text-center">
@@ -321,12 +358,12 @@ export function BookReader({
             {data.mode === "full" ? "Pamja paraprake e librit të plotë" : data.author ? `nga ${data.author} · Pjesë falas` : "Pjesë falas"}
           </p>
         </div>
-        <ToolbarButton label="Përmbajtja" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? "none" : "toc")}>
+        <ToolbarButton label="Përmbajtja" word="Përmbajtja" panelKey="toc" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? "none" : "toc")}>
           <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
             <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
           </svg>
         </ToolbarButton>
-        <ToolbarButton label="Madhësia e shkronjave dhe ngjyra e faqes" active={panel === "aa"} onClick={() => setPanel(panel === "aa" ? "none" : "aa")}>
+        <ToolbarButton label="Madhësia e shkronjave dhe ngjyra e faqes" panelKey="aa" active={panel === "aa"} onClick={() => setPanel(panel === "aa" ? "none" : "aa")}>
           <span className="font-serif text-[17px] leading-none" aria-hidden="true">
             A<span className="text-[13px]">a</span>
           </span>
@@ -341,13 +378,13 @@ export function BookReader({
             ) : (
               <ul className="max-h-[60vh] overflow-y-auto py-1">
                 <li>
-                  <button type="button" onClick={() => (setViewIndex(0), setPanel("none"))} className="focus-ring w-full px-4 py-2.5 text-left text-sm hover:bg-black/5">
+                  <button type="button" onClick={() => (setViewIndex(0), setPanel("none"))} className={READER_TAP_CLASSES.tocRow}>
                     Ballina
                   </button>
                 </li>
                 {data.toc.map((entry) => (
                   <li key={entry.id}>
-                    <button type="button" onClick={() => jumpTo(entry.id)} className="focus-ring w-full px-4 py-2.5 text-left text-sm hover:bg-black/5">
+                    <button type="button" onClick={() => jumpTo(entry.id)} className={READER_TAP_CLASSES.tocRow}>
                       {entry.label}
                     </button>
                   </li>
@@ -369,7 +406,7 @@ export function BookReader({
                 aria-label="Shkronja më të vogla"
                 disabled={settings.step === 0}
                 onClick={() => updateSettings({ ...settings, step: settings.step - 1 })}
-                className="focus-ring flex h-10 flex-1 items-center justify-center rounded-md border font-serif text-sm disabled:opacity-40"
+                className={`${READER_TAP_CLASSES.fontButton} text-sm`}
                 style={{ borderColor: chrome.border }}
               >
                 A
@@ -382,7 +419,7 @@ export function BookReader({
                 aria-label="Shkronja më të mëdha"
                 disabled={settings.step === READER_FONT_STEPS.length - 1}
                 onClick={() => updateSettings({ ...settings, step: settings.step + 1 })}
-                className="focus-ring flex h-10 flex-1 items-center justify-center rounded-md border font-serif text-xl disabled:opacity-40"
+                className={`${READER_TAP_CLASSES.fontButton} text-xl`}
                 style={{ borderColor: chrome.border }}
               >
                 A
@@ -419,7 +456,7 @@ export function BookReader({
       </div>
 
       {devices && (
-        <div className="flex shrink-0 justify-center gap-1 border-b px-2 py-1.5" style={{ background: chrome.bar, borderColor: chrome.border }} role="radiogroup" aria-label="Pajisja">
+        <div className="flex shrink-0 justify-center gap-1 border-b px-2 py-0.5" style={{ background: chrome.bar, borderColor: chrome.border }} role="radiogroup" aria-label="Pajisja">
           {(Object.keys(DEVICE_SIZE) as ReaderDevice[]).map((key) => (
             <button
               key={key}
@@ -427,7 +464,7 @@ export function BookReader({
               role="radio"
               aria-checked={device === key}
               onClick={() => setDevice(key)}
-              className="focus-ring rounded-full px-3 py-1 text-xs font-medium"
+              className="focus-ring flex min-h-11 items-center rounded-full px-4 text-sm font-medium"
               style={device === key ? { background: chrome.text, color: chrome.bar } : { color: chrome.muted }}
             >
               {DEVICE_SIZE[key].label}
@@ -481,7 +518,7 @@ export function BookReader({
       </div>
 
       {/* Bottom: slider + "Faqe x nga y · %" */}
-      <div className="shrink-0 border-t px-4 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-2 sm:px-8" style={{ background: chrome.bar, borderColor: chrome.border }}>
+      <div className="shrink-0 border-t px-4 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-0.5 sm:px-8" style={{ background: chrome.bar, borderColor: chrome.border }}>
         <div className="relative mx-auto max-w-3xl">
           <input
             type="range"
@@ -491,18 +528,18 @@ export function BookReader({
             onChange={(e) => setViewIndex(Number(e.target.value))}
             aria-label="Faqja"
             aria-valuetext={`Faqe ${pageLabel} nga ${totalPages}`}
-            className="block h-5 w-full cursor-pointer appearance-none bg-transparent [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[#c0841a] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[var(--lb-track)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[var(--lb-track)] [&::-webkit-slider-thumb]:-mt-1.5 [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#c0841a] [&::-webkit-slider-thumb]:shadow"
+            className="block h-11 w-full cursor-pointer appearance-none bg-transparent [&::-moz-range-thumb]:size-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[#c0841a] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[var(--lb-track)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[var(--lb-track)] [&::-webkit-slider-thumb]:-mt-2 [&::-webkit-slider-thumb]:size-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#c0841a] [&::-webkit-slider-thumb]:shadow"
             style={{ ["--lb-track" as string]: chrome.border }}
           />
           {endTick !== null && (
             <span
               aria-hidden="true"
               title="Këtu mbaron pjesa që shohin lexuesit"
-              className="pointer-events-none absolute top-[3px] h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-[#7a4f0b]"
+              className="pointer-events-none absolute top-[15px] h-3.5 w-0.5 -translate-x-1/2 rounded-full bg-[#7a4f0b]"
               style={{ left: `calc(8px + (100% - 16px) * ${endTick / 100})` }}
             />
           )}
-          <p className="mt-1 text-center text-xs tabular-nums" style={{ color: chrome.muted }}>
+          <p className="-mt-1.5 text-center text-xs tabular-nums" style={{ color: chrome.muted }}>
             Faqe {pageLabel} nga {totalPages} · {percent}%
           </p>
         </div>
@@ -511,16 +548,38 @@ export function BookReader({
   );
 }
 
-function ToolbarButton({ label, active, onClick, children }: { label: string; active: boolean; onClick: () => void; children: ReactNode }) {
+// DD (Renato 13 Nov): every reader control is at least 44 px. Contents
+// also shows its word on computer and tablet; on phone, icons only.
+function ToolbarButton({
+  label,
+  word,
+  panelKey,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  word?: string;
+  panelKey: "toc" | "aa";
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
       aria-expanded={active}
+      data-panel-toggle={panelKey}
       onClick={onClick}
-      className={`focus-ring flex size-10 items-center justify-center rounded-full hover:bg-black/5 ${active ? "bg-black/10" : ""}`}
+      className={`focus-ring flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-full hover:bg-black/5 ${word ? "sm:px-3" : ""} ${active ? "bg-black/10" : ""}`}
     >
       {children}
+      {word && (
+        <span className="hidden text-sm sm:inline" aria-hidden="true">
+          {word}
+        </span>
+      )}
     </button>
   );
 }
@@ -597,7 +656,7 @@ function EndPage({
               {endAction.label}
             </button>
           )}
-          <button type="button" onClick={onRestart} className="focus-ring rounded-sm text-sm underline underline-offset-2" style={{ color: muted }}>
+          <button type="button" onClick={onRestart} className={READER_TAP_CLASSES.restart} style={{ color: muted }}>
             Lexoni përsëri nga fillimi
           </button>
         </div>
