@@ -4,6 +4,7 @@ import {
   SHELF_STATE_COPY,
   groupShelfBooks,
   matchesShelfFilter,
+  isShelfQueryActive,
   parseShelfQuery,
   resolveShelfState,
   shelfHref,
@@ -288,5 +289,18 @@ describe("BD16 P2: pre-orders on the shelf", () => {
       "preorder_sent_back",
     ]);
     expect(ALL_STATES.filter((s) => matchesShelfFilter(s, "live")).some((s) => s.startsWith("preorder"))).toBe(false);
+  });
+});
+
+// DC 4: the phone toolbar starts open while any choice is not the default.
+describe("isShelfQueryActive", () => {
+  it("is false only for the default view", () => {
+    expect(isShelfQueryActive(parseShelfQuery({}))).toBe(false);
+    expect(isShelfQueryActive(parseShelfQuery({ q: "  " }))).toBe(false);
+    expect(isShelfQueryActive(parseShelfQuery({ q: "Era" }))).toBe(true);
+    expect(isShelfQueryActive(parseShelfQuery({ sort: "az" }))).toBe(true);
+    expect(isShelfQueryActive(parseShelfQuery({ filter: "draft" }))).toBe(true);
+    expect(isShelfQueryActive(parseShelfQuery({ view: "flat" }))).toBe(true);
+    expect(isShelfQueryActive(parseShelfQuery({ filter: "nonsense" }))).toBe(false);
   });
 });

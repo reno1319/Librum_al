@@ -7,7 +7,7 @@ vi.mock("@/app/(public)/dashboard/books/editor-actions", () => ({ createSeriesFr
 // Upload notes 1: the form re-reads the pen names when the author comes back.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
 
-const { BookDetailsForm } = await import("./book-details-form");
+const { BookDetailsForm, detailsExtrasInUse, isExtrasField } = await import("./book-details-form");
 
 const PEN = "d4444444-4444-4444-8444-444444444444";
 const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
@@ -53,6 +53,51 @@ function render(
     }),
   );
 }
+
+// DC 5 (Renato 11-13, a): series, edition and contributors live in one
+// "Të dhëna shtesë (opsionale)" box at the end of the tab.
+describe("BookDetailsForm: the extras box", () => {
+  const extras = (html: string) => {
+    const start = html.indexOf("<details");
+    expect(start).toBeGreaterThan(-1);
+    return { tag: html.slice(start, html.indexOf(">", start) + 1), body: html.slice(start, html.indexOf("</details>", start)) };
+  };
+  const blank = { seriesId: "", seriesPosition: "", editionNumber: "", contributors: [] };
+
+  it("holds Seria, Botimi and Kontribues, after Fjalët kyçe and before the save buttons", () => {
+    const html = render(blank);
+    const { body } = extras(html);
+    expect(body).toContain("Të dhëna shtesë");
+    expect(body).toContain("(opsionale)");
+    for (const name of ["seriesId", "seriesPosition", "editionNumber"]) expect(body).toContain(`name="${name}"`);
+    expect(body).toContain("+ Shto kontribues");
+    expect(html.indexOf(">Fjalët kyçe</h2>")).toBeLessThan(html.indexOf("<details"));
+    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf('value="save"'));
+    // Still inside the one <form>, so closed fields are saved as before.
+    expect(html.indexOf("<details")).toBeGreaterThan(html.indexOf("<form"));
+    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf("</form>"));
+  });
+
+  it("starts closed for a book that uses none of them", () => {
+    expect(extras(render(blank)).tag).not.toContain(" open");
+    expect(extras(render({ ...blank, editionNumber: "1" })).tag).not.toContain(" open");
+  });
+
+  it("starts open when the book has a series, an edition above 1 or a contributor", () => {
+    expect(extras(render({ ...blank, seriesId: "s1", seriesPosition: "2" })).tag).toContain(" open");
+    expect(extras(render({ ...blank, editionNumber: "2" })).tag).toContain(" open");
+    expect(extras(render({ ...blank, contributors: [{ id: "c1", name: "Besnik", role: "Editor" }] })).tag).toContain(" open");
+  });
+
+  it("names exactly its three fields as extras", () => {
+    expect(["seriesPosition", "editionNumber", "contributors"].every((f) => isExtrasField(f as never))).toBe(true);
+    for (const f of ["title", "subtitle", "language", "description", "keywords", "categories", "bookType", "rightsBasis"]) {
+      expect(isExtrasField(f as never), f).toBe(false);
+    }
+    expect(detailsExtrasInUse({ seriesId: "", editionNumber: " 1 ", contributors: [] })).toBe(false);
+    expect(detailsExtrasInUse({ seriesId: "", editionNumber: "3", contributors: [] })).toBe(true);
+  });
+});
 
 describe("BookDetailsForm", () => {
   it("renders the sections of the Details tab and the two save buttons", () => {

@@ -18,7 +18,11 @@ import {
 export function DashboardMenu() {
   const pathname = usePathname() ?? "";
   const match = findDashboardMenuMatch(pathname);
-  const subItems = match && match.group.items.length > 1 ? match.group.items : null;
+  // DC 1 (Renato 11-13, a): a group may hide its second row on a
+  // computer (Librat: "Seritë" is in the Mjetet boxes and each book's
+  // "…" menu). The phone menu still lists every page.
+  const subItems =
+    match && match.group.items.length > 1 && match.group.desktopSubRow !== false ? match.group.items : null;
 
   return (
     <nav aria-label="Paneli i autorit">

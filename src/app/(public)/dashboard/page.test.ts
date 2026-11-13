@@ -168,8 +168,12 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(html).toContain("1 shitje (30 ditë)");
     expect(html).toContain("0 shkarkime (30 ditë)");
     expect(html).toContain(">+ Libër i ri<");
+    // DC 3 (Renato 11-13, a): "+ Libër i ri" is the one main button; the
+    // series page stays linked from the Mjetet boxes.
     expect(html).toContain('href="/dashboard/series"');
-    expect(html).toContain(">+ Seri e re<");
+    expect(html).not.toContain("Seri e re");
+    // DC 2: no spaced capital labels on the dashboard.
+    expect(html).not.toMatch(/\buppercase\b/);
     expect(html).not.toContain('href="/dashboard/books"');
     expect(html).toContain("Për t&#x27;u bërë: Shtoni një ballinë");
     expect(html).not.toContain("Të dhënat e shitjeve nuk u ngarkuan");
@@ -474,6 +478,23 @@ describe("DashboardPage: step 4 dashboard", () => {
     );
     expect(html).toContain("Emrat e serive nuk u ngarkuan. Rifreskoni faqen.");
     expect(html).toContain("Libri dy");
+  });
+
+  // DC 4 (Renato 11-13, a): on a phone the toolbar folds under one line.
+  it("folds the phone toolbar, closed by default and open while a choice is active", async () => {
+    const closed = await render(TABLES, RPCS);
+    const fold = closed.match(/<details[^>]*md:hidden[^>]*>/);
+    expect(fold).not.toBeNull();
+    expect(fold![0]).not.toContain(" open");
+    expect(closed).toContain("Rendit, filtro, kërko");
+    // Two forms with their own ids: the phone copy and the computer row.
+    expect(closed.match(/role="search"/g)).toHaveLength(2);
+    expect(closed).toContain('id="phone-dashboard-book-search"');
+    expect(closed).toContain('id="dashboard-book-search"');
+    expect(closed).toMatch(/<form role="search" class="hidden [^"]*md:grid/);
+
+    const searched = await render(TABLES, RPCS, { q: "Era" });
+    expect(searched.match(/<details[^>]*md:hidden[^>]*>/)![0]).toContain(" open");
   });
 
   it("the toolbar is a plain GET form that keeps the chosen values", async () => {

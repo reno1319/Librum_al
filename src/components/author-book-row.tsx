@@ -290,14 +290,14 @@ export function AuthorBookRow({
       </div>
 
       <div className="hidden w-36 shrink-0 flex-col gap-0.5 sm:flex">
-        <span className="text-xs uppercase tracking-wide text-muted">Çmimi</span>
+        <span className="text-[0.8125rem] text-muted">Çmimi</span>
         <span className="font-semibold text-foreground">{priceLabel}</span>
       </div>
 
       <div className="hidden w-36 shrink-0 flex-col gap-0.5 sm:flex">
         {showRecent && (
           <>
-            <span className="text-xs uppercase tracking-wide text-muted">
+            <span className="text-[0.8125rem] text-muted">
               {isFree ? "Shkarkime" : "Shitje"} (30 ditë)
             </span>
             <span className="font-semibold text-foreground">{recentCopies}</span>

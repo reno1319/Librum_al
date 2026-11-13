@@ -84,12 +84,15 @@ describe("aria-current", () => {
   };
 
   it("an item is 'page' only on its own page, the group 'true'", () => {
+    // DC 1: Librat has no second row, so its tab is the page itself.
     expect(current("/dashboard")).toEqual({
-      groups: ["true", undefined, undefined, undefined],
+      groups: ["page", undefined, undefined, undefined],
       items: ["page", undefined, undefined, undefined, undefined, undefined, undefined, undefined],
     });
     expect(current("/dashboard/balance").items[3]).toBe("page");
     expect(current("/dashboard/balance").groups).toEqual([undefined, "true", undefined, undefined]);
+    expect(current("/dashboard/series").groups).toEqual(["true", undefined, undefined, undefined]);
+    expect(current("/dashboard/books/new").groups).toEqual(["true", undefined, undefined, undefined]);
   });
 
   it.each(["/dashboard/books", "/dashboard/books/new", "/dashboard/books/abc/edit"])(
