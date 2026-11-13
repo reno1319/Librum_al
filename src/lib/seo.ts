@@ -2,6 +2,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { isSupportedLanguage } from "@/lib/languages";
 import { isValidIsbn } from "@/lib/book-identifiers";
 import { authorPagePath } from "@/lib/pen-names";
+import { buildBookstoreHref } from "@/lib/bookstore";
 import { bookCategories, descriptionSnippet } from "@/lib/book-reader-details";
 import type { PublicBook } from "@/lib/types";
 
@@ -128,6 +129,24 @@ export function buildBookJsonLd(
     };
   }
   return data;
+}
+
+// B2 (Renato 11-13, folded in from A2): schema.org BreadcrumbList for
+// the book page -- the same path its visible breadcrumbs show:
+// Libraria > the book's primary genre (when it has one) > the title.
+// Hidden data only; no price, nothing about the author.
+export function buildBookBreadcrumbJsonLd(
+  book: { id: string; title: string; genre: string | null },
+  origin: string,
+): Record<string, unknown> {
+  const crumbs: { name: string; item: string }[] = [{ name: "Libraria", item: `${origin}${buildBookstoreHref({}, {})}` }];
+  if (book.genre) crumbs.push({ name: book.genre, item: `${origin}${buildBookstoreHref({}, { genre: book.genre })}` });
+  crumbs.push({ name: book.title, item: `${origin}${bookPagePath(book.id)}` });
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: crumbs.map((crumb, i) => ({ "@type": "ListItem", position: i + 1, name: crumb.name, item: crumb.item })),
+  };
 }
 
 // JSON for an inline <script type="application/ld+json">. Every "<", ">"

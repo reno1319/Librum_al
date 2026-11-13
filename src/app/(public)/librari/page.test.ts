@@ -585,6 +585,22 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(genres.at(-1)).toMatchObject({ text: "Fantazi", count: 0, active: true });
   });
 
+  it("B2: Titulli A–Zh lists the grid in Albanian alphabet order, also after a search, and is offered in the sort", async () => {
+    const titles = ["Zhurma", "Dhoma", "Ëndrra", "Çelësi", "Era", "Dritarja", "Cana", "Gjethi", "Guri", "Zogu"];
+    bookRows = BOOKS.map((b, i) => ({ ...b, title: titles[i] }));
+    const expected = ["Cana", "Çelësi", "Dritarja", "Dhoma", "Era", "Ëndrra", "Guri", "Gjethi", "Zogu", "Zhurma"];
+    const order = (html: string) =>
+      expected.map((t) => grid(html).indexOf(`>${t}<`)).every((pos, i, all) => pos > -1 && (i === 0 || all[i - 1] < pos));
+    const html = await render({ sort: "title_asc" });
+    expect(order(html)).toBe(true);
+    expect(html).toContain('<option value="title_asc" selected="">Titulli A–Zh</option>');
+    // After a search (the RPC path) the matches keep the same order.
+    const searched = await render({ q: "a", sort: "title_asc" });
+    const hits = expected.filter((t) => t.toLowerCase().includes("a"));
+    const pos = hits.map((t) => grid(searched).indexOf(`>${t}<`));
+    expect(pos.every((p, i) => p > -1 && (i === 0 || pos[i - 1] < p))).toBe(true);
+  });
+
   it("Patch C: tapping the active genre clears it, keeping the words, sort and price", async () => {
     bookRows = catalogue();
     const html = await render({ q: "book", genre: "Horror", sort: "price_asc", maxPrice: "200" });

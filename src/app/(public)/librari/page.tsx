@@ -14,6 +14,7 @@ import {
   sidebarGenres,
   PRICE_PRESETS,
   BOOKSTORE_SORT_OPTIONS,
+  sortByAlbanianTitle,
   type BookstoreQuery,
   type CatalogueFacets,
   type FacetRow,
@@ -243,6 +244,9 @@ async function fetchSearchResults(
     results = [...results].sort((a, b) => (a.price_all ?? 0) - (b.price_all ?? 0));
   } else if (sort === "price_desc") {
     results = [...results].sort((a, b) => (b.price_all ?? 0) - (a.price_all ?? 0));
+  } else if (sort === "title_asc") {
+    // B2: A–Zh in Albanian alphabet order (see sortByAlbanianTitle).
+    results = sortByAlbanianTitle(results);
   } else if (sort === "bestselling" && results.length > 0) {
     // Real non-refunded purchase counts for exactly the books already in
     // this result set, aggregated server-side (see bestselling_books in

@@ -6,7 +6,7 @@ import { GENRES, type Genre } from "@/lib/genres";
 // src/lib/homepage.ts's resolveHomepageCta()/computeAuthorSharePercent()
 // and src/components/site-header.tsx's buildSiteHeaderNav().
 
-export type BookstoreSort = "" | "bestselling" | "price_asc" | "price_desc";
+export type BookstoreSort = "" | "bestselling" | "price_asc" | "price_desc" | "title_asc";
 
 export const BOOKSTORE_SORT_OPTIONS: { value: BookstoreSort; label: string }[] = [
   { value: "", label: "Më të rejat" },
@@ -15,7 +15,19 @@ export const BOOKSTORE_SORT_OPTIONS: { value: BookstoreSort; label: string }[] =
   // Sort pill on phones is not cut off.
   { value: "price_asc", label: "Më të lirat" },
   { value: "price_desc", label: "Më të shtrenjtat" },
+  // B2 (Renato 11-13, b2-1 a): titles in Albanian alphabet order, last.
+  { value: "title_asc", label: "Titulli A–Zh" },
 ];
+
+// B2: the Albanian alphabet's own order -- Ç after C, Dh after D, Ë
+// after E, then Gj, Ll, Nj, Rr, Sh, Th, Xh, Zh as letters of their own
+// (CLDR "sq" collation, built into Node's ICU). Base sensitivity: case
+// is ignored; equal titles keep their newest-first order (stable sort).
+const ALBANIAN_TITLE_COLLATOR = new Intl.Collator("sq", { sensitivity: "base" });
+
+export function sortByAlbanianTitle<T extends { title: string }>(books: readonly T[]): T[] {
+  return [...books].sort((a, b) => ALBANIAN_TITLE_COLLATOR.compare(a.title.trim(), b.title.trim()));
+}
 
 const KNOWN_SORTS = new Set<string>(BOOKSTORE_SORT_OPTIONS.map((o) => o.value));
 

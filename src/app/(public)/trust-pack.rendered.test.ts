@@ -157,9 +157,10 @@ describe("TRUST PACK 6: share on WhatsApp", () => {
     expect(book).toContain("bookWhatsappShareHref(book, bookByline)");
     expect(book).toMatch(/href=\{whatsappShareHref\}\s+target="_blank"\s+rel="noopener noreferrer"/);
     expect(book).toContain("Ndajeni në WhatsApp");
-    // P2: the page's one script is its own schema.org data block.
+    // P2: the page's only scripts are its own schema.org data blocks
+    // (B2: Book + BreadcrumbList).
     expect(book).not.toMatch(/<script(?! type="application\/ld\+json")|next\/script/);
-    expect(book.match(/<script/g)).toHaveLength(1);
+    expect(book.match(/<script/g)).toHaveLength(2);
   });
 });
 
