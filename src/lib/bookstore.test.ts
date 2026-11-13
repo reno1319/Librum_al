@@ -5,6 +5,7 @@ import {
   toggleGenreHref,
   isKnownBookstoreSort,
   BOOKSTORE_SORT_OPTIONS,
+  sortByAlbanianTitle,
   countCatalogueFacets,
   sidebarGenres,
   activePricePreset,
@@ -274,5 +275,27 @@ describe("price presets", () => {
     expect(togglePriceHref(q, PRICE_PRESETS[2])).toBe("/librari?q=x&genre=Horror&sort=price_asc&minPrice=200&maxPrice=399");
     expect(togglePriceHref({ ...q, minPrice: "200", maxPrice: "399" }, PRICE_PRESETS[2])).toBe("/librari?q=x&genre=Horror&sort=price_asc");
     expect(togglePriceHref({ ...q, maxPrice: "999" }, PRICE_PRESETS[3])).toBe("/librari?q=x&genre=Horror&sort=price_asc&minPrice=400");
+  });
+});
+
+describe("B2: sortByAlbanianTitle", () => {
+  it("is offered last as Titulli A–Zh", () => {
+    expect(BOOKSTORE_SORT_OPTIONS.at(-1)).toEqual({ value: "title_asc", label: "Titulli A–Zh" });
+    expect(isKnownBookstoreSort("title_asc")).toBe(true);
+  });
+
+  it("orders by the Albanian alphabet, digraphs as letters of their own, ignoring case", () => {
+    const titles = ["zhurma", "Zog", "Xhemal", "Xixa", "Thika", "Toka", "Shpresa", "Sokol", "Rruga", "Rosa", "Njeri", "Nora",
+      "Lleshi", "Lula", "Gjergj", "Guri", "Ëndrra", "Era", "Dhe", "Dua", "Çajupi", "Cana"];
+    expect(sortByAlbanianTitle(titles.map((title) => ({ title }))).map((b) => b.title)).toEqual([
+      "Cana", "Çajupi", "Dua", "Dhe", "Era", "Ëndrra", "Guri", "Gjergj", "Lula", "Lleshi", "Nora", "Njeri",
+      "Rosa", "Rruga", "Sokol", "Shpresa", "Toka", "Thika", "Xixa", "Xhemal", "Zog", "zhurma",
+    ]);
+  });
+
+  it("keeps the incoming order for equal titles and does not change its input", () => {
+    const input = [{ title: "Pan", id: 1 }, { title: "Ana", id: 2 }, { title: "pan", id: 3 }];
+    expect(sortByAlbanianTitle(input).map((b) => b.id)).toEqual([2, 1, 3]);
+    expect(input.map((b) => b.id)).toEqual([1, 2, 3]);
   });
 });

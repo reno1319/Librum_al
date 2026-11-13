@@ -74,7 +74,7 @@ import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
-import { bookPagePath, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
+import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { editorPath } from "@/lib/book-editor-copy";
 import {
@@ -857,6 +857,11 @@ export default async function BookDetailPage({
         }),
       )
     : null;
+  // B2: the visible breadcrumbs' path as BreadcrumbList data, on the
+  // same pages as the Book data above.
+  const breadcrumbJsonLd = jsonLdOrigin
+    ? serializeJsonLd(buildBookBreadcrumbJsonLd(book, jsonLdOrigin))
+    : null;
 
   // P1 book page (design B): the price box's "Lexoni një pjesë" and the
   // "Shikoni brenda" pill on the cover open the same sample reader, by
@@ -903,6 +908,9 @@ export default async function BookDetailPage({
     <main className="page-container flex-1 pt-4 pb-16 sm:pt-5">
       {bookJsonLd && (
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: bookJsonLd }} />
+      )}
+      {breadcrumbJsonLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }} />
       )}
       {/* PREVIEW-1 (A5, Renato 1a): the author's own unpublished book is
           their "Preview my book" page. Not "only you can see this": a
