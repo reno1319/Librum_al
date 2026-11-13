@@ -428,8 +428,7 @@ export default async function BookstorePage({
 
         <BookstoreHeading
           query={{ ...rawQuery, genre }}
-          isFiltered={isFiltered}
-          countLine={error || books.length === 0 ? null : countLineFor(totalMatched)}
+          countLine={error ? null : countLineFor(totalMatched)}
           hasFeature={!!featured}
         />
 
@@ -459,238 +458,277 @@ function countLineFor(totalMatched: number): string {
     : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
 }
 
-// P2 (design B): "Libraria · <genre> · “<words>” · N libra" on the left,
-// the search box on the right (full width under 640px). P2c: under them
-// one row of pills: Zhanret, Sort, Price, Libra falas. Each keeps the
+// Patch B (Renato 11-13): a serif "Libraria" heading over one framed
+// box. Row 1: the full-width search box. Row 2: the pills (Zhanret,
+// Sort, Price, Libra falas) with the count on the right (its own line
+// on phones). Row 3, only while a filter is on: one chip per filter,
+// each removing only itself, then "Hiq të gjitha". Sort is not a
+// filter, so it has no chip. Each pill keeps the
 // other current filters: the search box and Sort are small GET forms
 // with hidden fields (Sort sends itself on change, with a button only
 // when JavaScript is off); genres and Libra falas are links.
 function BookstoreHeading({
   query,
-  isFiltered,
   countLine,
   hasFeature,
 }: {
   query: BookstoreQuery;
-  isFiltered: boolean;
+  // null only when the load failed: then no count line at all.
   countLine: string | null;
   hasFeature: boolean;
 }) {
   const { q, genre, sort, minPrice, maxPrice } = query;
   const words = q?.trim();
-  const details = [genre, words ? `“${words}”` : null, countLine].filter(Boolean);
 
   const freeActive = maxPrice === "0" && !minPrice;
 
-  return (
-    <div className={`${hasFeature ? "mt-6" : "mt-1"} border-b border-border pb-3`}>
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
-        <h1 className="min-w-0 text-xl font-semibold text-foreground">
-          Libraria
-          {details.map((part) => (
-            <span key={part} className="text-sm font-normal text-muted">
-              {" · "}
-              {part}
-            </span>
-          ))}
-        </h1>
+  // One chip per filter that is really applied, so the price chip reads
+  // the parsed bounds (a hand-typed "abc" is ignored by the grid and gets
+  // no chip). Each chip's link drops only its own filter.
+  const { minPriceAll, maxPriceAll, isFiltered } = parseBookstoreQuery(query);
+  const noPrice = { minPrice: undefined, maxPrice: undefined };
+  const chips: { label: string; href: string }[] = [];
+  if (words) chips.push({ label: `“${words}”`, href: buildBookstoreHref(query, { q: undefined }) });
+  if (genre) chips.push({ label: genre, href: buildBookstoreHref(query, { genre: undefined }) });
+  if (maxPriceAll === 0 && !minPriceAll) {
+    chips.push({ label: "Falas", href: buildBookstoreHref(query, noPrice) });
+  } else if (minPriceAll != null || maxPriceAll != null) {
+    // r2: an open-ended range reads "Nga X lekë" / "Deri X lekë".
+    const label =
+      minPriceAll != null && maxPriceAll != null
+        ? `Çmimi: ${minPriceAll}–${maxPriceAll} lekë`
+        : minPriceAll != null
+          ? `Nga ${minPriceAll} lekë`
+          : `Deri ${maxPriceAll} lekë`;
+    chips.push({ label, href: buildBookstoreHref(query, noPrice) });
+  }
 
-        {/* P2c: the page's own search box (as before P2). It keeps the
-            current genre, sort and price; a new search replaces the words.
-            16px text on phones so iPhone Safari does not zoom in. */}
-        <form
-          id="bookstore-search"
-          action="/librari"
-          method="get"
-          role="search"
-          className="flex w-full min-w-0 sm:w-auto sm:max-w-[28rem] sm:min-w-[18rem] sm:flex-1"
-        >
+  return (
+    <div className={hasFeature ? "mt-10" : "mt-1"}>
+      <h1 className="font-serif text-[2rem] leading-tight font-normal text-primary sm:text-[2.25rem]">Libraria</h1>
+      <div className="mt-4 rounded-[12px] border border-control bg-surface p-3 sm:p-4">
+        <form id="bookstore-search" action="/librari" method="get" role="search" className="flex w-full min-w-0">
           <label htmlFor="bookstore-q" className="sr-only">
             Kërkoni libra ose autorë
           </label>
-          <input
-            id="bookstore-q"
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Kërkoni libra ose autorë"
-            className="focus-ring h-9 min-w-0 flex-1 rounded-l-full border border-r-0 border-control bg-surface px-4 text-base text-foreground sm:h-8 sm:text-sm"
-          />
+          <span className="relative flex min-w-0 flex-1">
+            <svg aria-hidden="true" viewBox="0 0 20 20" className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted">
+              <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M13 13l4.5 4.5" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+            <input
+              id="bookstore-q"
+              type="search"
+              name="q"
+              defaultValue={q ?? ""}
+              placeholder="Kërkoni libra ose autorë"
+              className="focus-ring h-11 min-w-0 flex-1 rounded-l-full border border-r-0 border-control bg-surface pr-4 pl-10 text-base text-foreground"
+            />
+          </span>
           {genre && <input type="hidden" name="genre" value={genre} />}
           {sort && <input type="hidden" name="sort" value={sort} />}
           {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
           {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
           <button
             type="submit"
-            className="focus-ring h-9 shrink-0 rounded-r-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover sm:h-8"
+            className="focus-ring h-11 shrink-0 rounded-r-full bg-primary px-5 text-base font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
           >
-            Kërkoni
+            Kërko
           </button>
         </form>
-      </div>
 
-      {/* P2d (Renato 11-10): on phones the four pills sit in two tidy rows
-          of two equal pills (a 2x2 grid), all visible with no swiping;
-          "Hiqni filtrat" goes on its own line under them. From 640px up
-          the row wraps as before. */}
-      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
-        {/* P2c: the genre list, as the old header menu had it. On phones
-            it spans the page, 16px from each edge, so it never runs past
-            the screen; from 640px up it hangs under the button. Each
-            genre keeps the current words, sort and price. */}
-        <DismissableDetails className="group text-sm sm:relative" closeOnLinkClick>
-          <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            Zhanret
-            <ChevronIcon />
-          </summary>
-          <nav
-            aria-label="Zhanret"
-            className="absolute inset-x-4 z-30 mt-2 rounded-[8px] border border-border bg-surface p-2 shadow-md sm:inset-x-auto sm:left-0 sm:w-[26rem]"
-          >
-            <ul className="grid gap-0.5 sm:grid-cols-2">
-              <li>
-                <Link
-                  href={buildBookstoreHref(query, { genre: undefined })}
-                  aria-current={!genre ? "true" : undefined}
-                  className={`${GENRE_LINK_CLASSES} ${!genre ? "font-semibold text-primary" : "font-medium text-foreground"}`}
-                >
-                  Të gjitha zhanret
-                </Link>
-              </li>
-              {GENRES.map((g) => (
-                <li key={g}>
+        {/* P2d (Renato 11-10): on phones the four pills sit in two tidy rows
+            of two equal pills (a 2x2 grid), all visible with no swiping;
+            the count goes on its own line under them. From 640px up the
+            row wraps as before. */}
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
+          {/* P2c: the genre list, as the old header menu had it. On phones
+              it spans the page, 16px from each edge, so it never runs past
+              the screen; from 640px up it hangs under the button. Each
+              genre keeps the current words, sort and price. */}
+          <DismissableDetails className="group text-sm sm:relative" closeOnLinkClick>
+            <summary className={DROPDOWN_SUMMARY_CLASSES}>
+              Zhanret
+              <ChevronIcon />
+            </summary>
+            <nav
+              aria-label="Zhanret"
+              className="absolute inset-x-4 z-30 mt-2 rounded-[8px] border border-border bg-surface p-2 shadow-md sm:inset-x-auto sm:left-0 sm:w-[26rem]"
+            >
+              <ul className="grid gap-0.5 sm:grid-cols-2">
+                <li>
                   <Link
-                    href={buildBookstoreHref(query, { genre: g })}
-                    aria-current={genre === g ? "true" : undefined}
-                    className={`${GENRE_LINK_CLASSES} ${genre === g ? "font-semibold text-primary" : "font-medium text-foreground"}`}
+                    href={buildBookstoreHref(query, { genre: undefined })}
+                    aria-current={!genre ? "true" : undefined}
+                    className={`${GENRE_LINK_CLASSES} ${!genre ? "font-semibold text-primary" : "font-medium text-foreground"}`}
                   >
-                    {g}
+                    Të gjitha zhanret
                   </Link>
                 </li>
-              ))}
-            </ul>
-          </nav>
-        </DismissableDetails>
-
-        <form action="/librari" method="get" className="contents">
-          {q && <input type="hidden" name="q" value={q} />}
-          {genre && <input type="hidden" name="genre" value={genre} />}
-          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-          {/* Still a native select: the box around it (with "Sort by")
-              is drawn to match the Price button beside it. */}
-          <label
-            htmlFor="bookstore-sort"
-            className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
-          >
-            {/* On phones the label is for screen readers only, so Sort and
-                Price fit on one line. */}
-            <span className="sr-only font-normal text-muted sm:not-sr-only">Renditni sipas</span>
-            <span className="relative flex flex-1 items-center">
-              <AutoSubmitSelect
-                id="bookstore-sort"
-                name="sort"
-                defaultValue={sort ?? ""}
-                className="w-full cursor-pointer appearance-none bg-transparent pr-5 font-semibold text-foreground outline-none"
-              >
-                {BOOKSTORE_SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
+                {GENRES.map((g) => (
+                  <li key={g}>
+                    <Link
+                      href={buildBookstoreHref(query, { genre: g })}
+                      aria-current={genre === g ? "true" : undefined}
+                      className={`${GENRE_LINK_CLASSES} ${genre === g ? "font-semibold text-primary" : "font-medium text-foreground"}`}
+                    >
+                      {g}
+                    </Link>
+                  </li>
                 ))}
-              </AutoSubmitSelect>
-              <span className="pointer-events-none absolute right-0 flex">
-                <ChevronIcon />
-              </span>
-            </span>
-          </label>
-          <noscript>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
-              Renditni
-            </button>
-          </noscript>
-        </form>
+              </ul>
+            </nav>
+          </DismissableDetails>
 
-        {/* P2 r2: on phones the price box spans the page, 16px from each
-            edge (Sort and Price now share one line, so a box hung under
-            the button could run off the screen); from 640px up it hangs
-            under the button, right-aligned. */}
-        <DismissableDetails className="group text-sm sm:relative">
-          <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            Çmimi (lekë)
-            <ChevronIcon />
-          </summary>
-          <form
-            action="/librari"
-            method="get"
-            className="absolute inset-x-4 z-20 mt-2 flex items-end gap-3 rounded-[8px] border border-border bg-surface p-3 shadow-md sm:inset-x-auto sm:right-0 sm:w-max"
-          >
+          <form action="/librari" method="get" className="contents">
             {q && <input type="hidden" name="q" value={q} />}
             {genre && <input type="hidden" name="genre" value={genre} />}
-            {sort && <input type="hidden" name="sort" value={sort} />}
-
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
-                Nga
-              </label>
-              <input
-                id="bookstore-min-price"
-                type="number"
-                name="minPrice"
-                defaultValue={minPrice ?? ""}
-                placeholder="0"
-                min="0"
-                step="1"
-                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
-              />
-            </div>
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
-                Deri
-              </label>
-              <input
-                id="bookstore-max-price"
-                type="number"
-                name="maxPrice"
-                defaultValue={maxPrice ?? ""}
-                placeholder="Pa kufi"
-                min="0"
-                step="1"
-                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
-              />
-            </div>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
-              Zbatoni
-            </button>
+            {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+            {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
+            {/* Still a native select: the box around it (with "Sort by")
+                is drawn to match the Price button beside it. */}
+            <label
+              htmlFor="bookstore-sort"
+              className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
+            >
+              {/* On phones the label is for screen readers only, so Sort and
+                  Price fit on one line. */}
+              <span className="sr-only font-normal text-muted sm:not-sr-only">Renditni sipas</span>
+              <span className="relative flex flex-1 items-center">
+                <AutoSubmitSelect
+                  id="bookstore-sort"
+                  name="sort"
+                  defaultValue={sort ?? ""}
+                  className="w-full cursor-pointer appearance-none bg-transparent pr-5 font-semibold text-foreground outline-none"
+                >
+                  {BOOKSTORE_SORT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </AutoSubmitSelect>
+                <span className="pointer-events-none absolute right-0 flex">
+                  <ChevronIcon />
+                </span>
+              </span>
+            </label>
+            <noscript>
+              <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
+                Rendit
+              </button>
+            </noscript>
           </form>
-        </DismissableDetails>
 
-        {/* P2c: Libra falas (the old header link) as a pill: free books,
-            keeping the current words, genre and sort. P2d: when it is on,
-            tapping it again switches it off (all prices, the rest kept). */}
-        <Link
-          href={buildBookstoreHref(
-            query,
-            freeActive ? { maxPrice: undefined } : { minPrice: undefined, maxPrice: "0" },
-          )}
-          aria-current={freeActive ? "true" : undefined}
-          className={`focus-ring ${FILTER_CONTROL_CLASSES} max-sm:justify-center ${freeActive ? "border-primary bg-primary! text-primary-foreground! hover:bg-primary-hover!" : ""}`}
-        >
-          {/* P2d: when on, the pill is filled dark green with a tick, so
-              on and off are clearly different ("!" because the shared
-              pill classes already set a background and text colour). */}
-          {freeActive && (
-            <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3">
-              <path d="M2 6.5l2.5 2.5L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            </svg>
-          )}
-          Libra falas
-        </Link>
+          {/* P2 r2: on phones the price box spans the page, 16px from each
+              edge (Sort and Price now share one line, so a box hung under
+              the button could run off the screen); from 640px up it hangs
+              under the button, right-aligned. */}
+          <DismissableDetails className="group text-sm sm:relative">
+            <summary className={DROPDOWN_SUMMARY_CLASSES}>
+              Çmimi (lekë)
+              <ChevronIcon />
+            </summary>
+            <form
+              action="/librari"
+              method="get"
+              className="absolute inset-x-4 z-20 mt-2 flex items-end gap-3 rounded-[8px] border border-border bg-surface p-3 shadow-md sm:inset-x-auto sm:right-0 sm:w-max"
+            >
+              {q && <input type="hidden" name="q" value={q} />}
+              {genre && <input type="hidden" name="genre" value={genre} />}
+              {sort && <input type="hidden" name="sort" value={sort} />}
 
-        {isFiltered && (
-          <Link href="/librari" className={`${TEXT_LINK_CLASSES} col-span-2 justify-self-start sm:ml-1`}>
-            Hiqni filtrat
+              <div className="min-w-0 flex-1 sm:flex-none">
+                <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
+                  Nga
+                </label>
+                <input
+                  id="bookstore-min-price"
+                  type="number"
+                  name="minPrice"
+                  defaultValue={minPrice ?? ""}
+                  placeholder="0"
+                  min="0"
+                  step="1"
+                  className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
+                />
+              </div>
+              <div className="min-w-0 flex-1 sm:flex-none">
+                <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
+                  Deri
+                </label>
+                <input
+                  id="bookstore-max-price"
+                  type="number"
+                  name="maxPrice"
+                  defaultValue={maxPrice ?? ""}
+                  placeholder="Pa kufi"
+                  min="0"
+                  step="1"
+                  className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
+                />
+              </div>
+              <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
+                Zbato
+              </button>
+            </form>
+          </DismissableDetails>
+
+          {/* P2c: Libra falas (the old header link) as a pill: free books,
+              keeping the current words, genre and sort. P2d: when it is on,
+              tapping it again switches it off (all prices, the rest kept). */}
+          <Link
+            href={buildBookstoreHref(
+              query,
+              freeActive ? { maxPrice: undefined } : { minPrice: undefined, maxPrice: "0" },
+            )}
+            aria-current={freeActive ? "true" : undefined}
+            className={`focus-ring ${FILTER_CONTROL_CLASSES} max-sm:justify-center ${freeActive ? "border-primary bg-primary! text-primary-foreground! hover:bg-primary-hover!" : ""}`}
+          >
+            {/* P2d: when on, the pill is filled dark green with a tick, so
+                on and off are clearly different ("!" because the shared
+                pill classes already set a background and text colour). */}
+            {freeActive && (
+              <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3">
+                <path d="M2 6.5l2.5 2.5L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            )}
+            Libra falas
           </Link>
+
+          {countLine && (
+            <p className="col-span-2 mt-1 text-sm sm:mt-0 sm:ml-auto" aria-live="polite">
+              <span className="font-semibold text-foreground">{countLine}</span>
+            </p>
+          )}
+        </div>
+
+        {/* r2: the row shows whenever the page counts as filtered, so a
+            sort-only view still has "Hiq të gjitha". Each link's tap area
+            is 44px tall (min-h-11) while the pill drawn inside stays 36px;
+            -my-1 keeps the row as compact as the pills. */}
+        {(chips.length > 0 || isFiltered) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            {chips.length > 0 && <span className="text-sm text-muted">Filtrat:</span>}
+            {chips.map((c) => (
+              <Link
+                key={c.label}
+                href={c.href}
+                aria-label={`Hiq filtrin ${c.label}`}
+                className="focus-ring group -my-1 inline-flex min-h-11 max-w-full min-w-0 items-center rounded-full"
+              >
+                <span className="inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-sm font-semibold text-primary group-hover:bg-primary/15">
+                  {/* Long words are cut with "…" so the chip stays inside the box. */}
+                  <span className="min-w-0 truncate">{c.label}</span>
+                  <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 shrink-0">
+                    <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" />
+                  </svg>
+                </span>
+              </Link>
+            ))}
+            <Link href="/librari" className={`${TEXT_LINK_CLASSES} -my-1 inline-flex min-h-11 items-center ${chips.length > 0 ? "ml-1" : ""}`}>
+              Hiq të gjitha
+            </Link>
+          </div>
         )}
       </div>
     </div>
@@ -724,7 +762,7 @@ function ChevronIcon() {
 }
 
 // P2 (design B): the feature is one slim strip -- small cover, label,
-// title, "nga <author> · <genre>", the price and one "Shikoni librin"
+// title, "nga <author> · <genre>", the price and one "Shiko librin"
 // pill to the book's own page, which owns buying and the sample reader.
 // Same byline rule as before: an original author has no Librum page, so
 // it is plain text; the pen name keeps its link.
@@ -799,7 +837,7 @@ function FeaturedStrip({
       </div>
 
       <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
-        Shikoni librin
+        Shiko librin
       </Link>
     </section>
   );
@@ -828,7 +866,7 @@ function CoverShelf({
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className={SECTION_HEADING}>{heading}</h2>
         <Link href={seeAllHref} className={TEXT_LINK_CLASSES}>
-          Shikoni të gjitha
+          Shiko të gjitha
         </Link>
       </div>
       <ul className="-mx-4 mt-5 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
@@ -873,9 +911,10 @@ function BookGrid({
       <EmptyState
         className="mt-10"
         title="Asnjë libër nuk përputhet me kërkimin tuaj."
+        description="Provoni një fjalë tjetër, ose hiqni një filtër."
         action={
           <Link href="/librari" className={buttonClasses("outline", "sm")}>
-            Hiqni filtrat
+            Hiq filtrat
           </Link>
         }
       />
@@ -894,7 +933,7 @@ function BookGrid({
   }
 
   return (
-    <section id="all-books" aria-label="Të gjithë librat" className="mt-6 scroll-mt-6">
+    <section id="all-books" aria-label="Të gjithë librat" className="mt-8 scroll-mt-6">
       <ul className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {books.map((book) => (
           <li key={book.id}>

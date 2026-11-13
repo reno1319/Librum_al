@@ -156,6 +156,25 @@ describe("BookstorePage: redesign step 3 layout", () => {
     return html.slice(start, html.indexOf("</section>", start));
   }
 
+  // Patch B: the count line's text, or null when there is none.
+  function countLine(html: string): string | null {
+    const m = html.match(/aria-live="polite"><span[^>]*>([^<]*)<\/span><\/p>/);
+    return m ? m[1] : null;
+  }
+
+  // Patch B: the filter chips, in order, as { label, href } (the href's
+  // &amp; decoded).
+  function chips(html: string): { label: string; href: string }[] {
+    return [...html.matchAll(/<a [^>]*aria-label="Hiq filtrin [^"]*"[^>]*>/g)].map(([tag]) => ({
+      href: tag.match(/href="([^"]*)"/)![1].replace(/&amp;/g, "&"),
+      label: tag.match(/aria-label="Hiq filtrin ([^"]*)"/)![1].replace(/&amp;/g, "&"),
+    }));
+  }
+
+  function paramsOf(href: string): Record<string, string> {
+    return Object.fromEntries(new URL(href, "https://x.test").searchParams);
+  }
+
   // BD15 P8: a category matches any of a book's (up to 3) categories,
   // with or without a search term.
   function withSecondCategory(n: number, extra: Row = {}): Row[] {
@@ -207,7 +226,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(cardY).not.toContain("18+");
   });
 
-  // P2 (design B): the feature is a slim strip with one "Shikoni librin"
+  // P2 (design B): the feature is a slim strip with one "Shiko librin"
   // pill to the book page (which owns buying and the sample reader).
   it("features the newest book as a slim strip with its price and one link to the book", async () => {
     const html = await render();
@@ -215,7 +234,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(feature).toContain("I ri në Librum");
     expect(feature).toContain("Book 10");
     expect(feature).toContain("199 lekë");
-    expect(feature).toMatch(/href="\/libra\/book-10"[^>]*>Shikoni librin</);
+    expect(feature).toMatch(/href="\/libra\/book-10"[^>]*>Shiko librin</);
     expect(feature).not.toContain("Lexoni një pjesë");
     expect(feature).not.toContain("Blini ·");
   });
@@ -291,10 +310,12 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(shelf).toContain('href="/librari?maxPrice=0"');
   });
 
-  // P2 (design B): "Libraria · N libra" heads the grid, after the strip.
+  // Patch B: a plain "Libraria" h1 heads the grid, after the strip; the
+  // count sits in the box, in a polite live region.
   it("heads the grid with Libraria and its count after the strip, and ends with the author band", async () => {
     const html = await render();
-    expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · 10 libra<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Libraria<\/h1>/);
+    expect(countLine(html)).toBe("10 libra");
     expect(html.indexOf("featured-book-title")).toBeLessThan(html.indexOf("<h1"));
     expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('aria-label="Të gjithë librat"'));
     expect(grid(html)).toContain("Book 01");
@@ -303,9 +324,12 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html).toContain("Jeni autor?");
   });
 
-  it("names the genre and the search words in the heading", async () => {
+  // Patch B: the genre and the words left the h1; they are chips now.
+  it("names the genre and the search words as chips, not in the heading", async () => {
     const html = await render({ genre: "Letërsi artistike", q: "book" });
-    expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · Letërsi artistike<\/span><span[^>]*> · “book”<\/span><span[^>]*> · 10 libra<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Libraria<\/h1>/);
+    expect(chips(html).map((c) => c.label)).toEqual(["“book”", "Letërsi artistike"]);
+    expect(countLine(html)).toBe("10 libra");
   });
 
   it("has no big heading or ornate shelf any more", async () => {
@@ -397,8 +421,9 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html).not.toContain(">I ri në Librum</h2>");
     expect(html).not.toContain(">Libra falas</h2>");
     expect(html).not.toContain("Jeni autor?");
-    expect(html).toContain("10 libra");
-    expect(html).toContain("Hiqni filtrat");
+    expect(countLine(html)).toBe("10 libra");
+    expect(html).toMatch(/href="\/librari"[^>]*>Hiq të gjitha</);
+    expect(html).not.toContain("Hiqni filtrat");
   });
 
   // BD15 follow-up (P8 audit N1): an unknown ?genre= is ignored, so the
@@ -406,11 +431,121 @@ describe("BookstorePage: redesign step 3 layout", () => {
   it("an unknown or malformed genre shows the normal page with every book", async () => {
     for (const genre of ["Horor", 'Poezi"}', "Poezi,Horror"]) {
       const html = await render({ genre });
-      expect(html).toMatch(/<h1[^>]*>Libraria<span[^>]*> · 10 libra<\/span><\/h1>/);
+      expect(html).toMatch(/<h1[^>]*>Libraria<\/h1>/);
+      expect(countLine(html)).toBe("10 libra");
+      expect(html).not.toContain("Filtrat:");
       expect(html).toContain("Book 04");
       expect(html).toContain("featured-book-title");
       expect(html).not.toContain('name="genre"');
       expect(html).not.toContain(genre.replace(/"/g, "&quot;"));
     }
+  });
+
+  // ============================================================
+  // Patch B (Renato 11-13): the filter chips and the count line.
+  // ============================================================
+  it("Patch B: each chip removes only its own filter, and sort never gets a chip", async () => {
+    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100", maxPrice: "500" });
+    const found = chips(html);
+    expect(found.map((c) => c.label)).toEqual(["“book”", "Letërsi artistike", "Çmimi: 100–500 lekë"]);
+    const all = { q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100", maxPrice: "500" };
+    const without = (...keys: string[]) =>
+      Object.fromEntries(Object.entries(all).filter(([k]) => !keys.includes(k)));
+    expect(paramsOf(found[0].href)).toEqual(without("q"));
+    expect(paramsOf(found[1].href)).toEqual(without("genre"));
+    expect(paramsOf(found[2].href)).toEqual(without("minPrice", "maxPrice"));
+    expect(html).toMatch(/href="\/librari"[^>]*>Hiq të gjitha</);
+  });
+
+  it("Patch B: the price chip covers min only (Nga), max only (Deri), and min and max", async () => {
+    expect(chips(await render({ minPrice: "200" })).map((c) => c.label)).toEqual(["Nga 200 lekë"]);
+    expect(chips(await render({ maxPrice: "300" })).map((c) => c.label)).toEqual(["Deri 300 lekë"]);
+    expect(chips(await render({ minPrice: "100", maxPrice: "300" })).map((c) => c.label)).toEqual(["Çmimi: 100–300 lekë"]);
+  });
+
+  it("Patch B: maxPrice=0 shows a Falas chip, not a price chip, and the chip clears it", async () => {
+    const found = chips(await render({ maxPrice: "0", q: "book" }));
+    expect(found.map((c) => c.label)).toEqual(["“book”", "Falas"]);
+    expect(paramsOf(found[1].href)).toEqual({ q: "book" });
+  });
+
+  it("Patch B: a price the grid ignores (not a whole number) gets no chip", async () => {
+    const html = await render({ minPrice: "abc" });
+    expect(chips(html)).toEqual([]);
+    expect(html).not.toContain("Filtrat:");
+  });
+
+  it("Patch B: a genre with & keeps its text in the chip and is encoded in the other chips' links", async () => {
+    bookRows = BOOKS.map((b) => ({ ...b, categories: ["Biografi & kujtime"] }));
+    const html = await render({ genre: "Biografi & kujtime", q: "book" });
+    const found = chips(html);
+    expect(found.map((c) => c.label)).toEqual(["“book”", "Biografi & kujtime"]);
+    expect(found[0].href).toBe("/librari?genre=Biografi+%26+kujtime");
+    expect(paramsOf(found[0].href)).toEqual({ genre: "Biografi & kujtime" });
+  });
+
+  it("Patch B: a long search word is cut inside its chip (truncate), never widening the box", async () => {
+    const long = "a".repeat(120);
+    const html = await render({ q: long });
+    expect(html).toMatch(new RegExp(`aria-label="Hiq filtrin “${long}”"[^>]*max-w-full[^>]*><span class="[^"]*max-w-full[^"]*"><span class="min-w-0 truncate">“${long}”</span>`));
+  });
+
+  it("Patch B r2: a sort-only view has Hiq të gjitha but no chips and no Filtrat label", async () => {
+    const html = await render({ sort: "price_asc" });
+    expect(chips(html)).toEqual([]);
+    expect(html).not.toContain("Filtrat:");
+    expect(html).toMatch(/href="\/librari"[^>]*>Hiq të gjitha</);
+  });
+
+  it("Patch B r2: no Hiq të gjitha on the unfiltered page", async () => {
+    expect(await render()).not.toContain("Hiq të gjitha");
+  });
+
+  it("Patch B r2: each chip and Hiq të gjitha has a 44px tap area around a 36px pill", async () => {
+    const html = await render({ genre: "Letërsi artistike", maxPrice: "300" });
+    const tags = [...html.matchAll(/<a [^>]*aria-label="Hiq filtrin [^"]*"[^>]*>/g)].map(([tag]) => tag);
+    expect(tags).toHaveLength(2);
+    for (const tag of tags) expect(tag).toMatch(/class="[^"]*\bmin-h-11\b/);
+    const clearAll = html.match(/<a [^>]*>Hiq të gjitha</)![0];
+    expect(clearAll).toContain('href="/librari"');
+    expect(clearAll).toMatch(/class="[^"]*\bmin-h-11\b/);
+    expect(html).toMatch(/<span class="[^"]*\bmin-h-9\b[^"]*bg-primary\/10/);
+  });
+
+  it("Patch B: no results shows 0 libra, the help line and Hiq filtrat", async () => {
+    const html = await render({ q: "zzz-no-match" });
+    expect(countLine(html)).toBe("0 libra");
+    expect(html).toContain("Asnjë libër nuk përputhet me kërkimin tuaj.");
+    expect(html).toContain("Provoni një fjalë tjetër, ose hiqni një filtër.");
+    expect(html).toMatch(/href="\/librari"[^>]*>Hiq filtrat</);
+  });
+
+  it("Patch B: a failed load shows no count line, but the box still renders", async () => {
+    failBookList = true;
+    const html = await render();
+    expect(countLine(html)).toBeNull();
+    expect(html).not.toContain('aria-live="polite"');
+    expect(html).toContain('id="bookstore-search"');
+    expect(html).toContain("Libraria nuk u hap dot tani.");
+  });
+
+  it("Patch B: one book reads 1 libër; more than 48 reads Po shfaqen 48 librat e parë", async () => {
+    bookRows = [book(1, 199)];
+    expect(countLine(await render())).toBe("1 libër");
+    bookRows = Array.from({ length: 50 }, (_, i) => ({ ...book(1, 199), id: `many-${i}`, title: `Many ${i}` }));
+    expect(countLine(await render())).toBe("Po shfaqen 48 librat e parë");
+  });
+
+  it("Patch B: informal buttons on Libraria; the formal label and placeholder stay", async () => {
+    const html = await render({ genre: "Letërsi artistike" });
+    expect(html).toMatch(/<button type="submit"[^>]*>Kërko<\/button>/);
+    expect(html).toMatch(/>Zbato<\/button>/);
+    expect(html).toMatch(/<noscript><button type="submit"[^>]*>Rendit<\/button><\/noscript>/);
+    expect(html).toContain('placeholder="Kërkoni libra ose autorë"');
+    for (const old of [">Kërkoni<", ">Zbatoni<", ">Hiqni filtrat<", ">Shikoni të gjitha<", ">Shikoni librin<", ">Renditni<"]) {
+      expect(html).not.toContain(old);
+    }
+    const shelf = section(await render(), "Libra falas");
+    expect(shelf).toMatch(/>Shiko të gjitha</);
   });
 });
