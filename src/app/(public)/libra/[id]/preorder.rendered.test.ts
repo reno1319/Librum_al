@@ -104,11 +104,11 @@ async function render(opts: Parameters<typeof stub>[0] & { searchParams?: Record
 }
 
 function noBuyControls(html: string) {
-  expect(html).not.toContain("Blini e-librin");
-  expect(html).not.toContain("Merreni e-librin");
-  expect(html).not.toContain("Hyr për ta blerë");
-  expect(html).not.toContain("Ruajeni për më vonë");
-  expect(html).not.toContain("Lexoni një pjesë");
+  expect(html).not.toContain("Blej librin");
+  expect(html).not.toContain("Merre falas");
+  expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Blej librin</);
+  expect(html).not.toContain("Ruaje për më vonë");
+  expect(html).not.toContain("Lexo një pjesë");
 }
 
 beforeEach(() => {
@@ -176,16 +176,16 @@ describe("BD16 P4: a pre-order's book page", () => {
   });
 
   // PREVIEW-READER-1 (Q6 b): replaces "no sample for a pre-order".
-  it("readers get 'Lexoni një pjesë' once a file is approved, and still nothing to buy", async () => {
+  it("readers get 'Lexo një pjesë' once a file is approved, and still nothing to buy", async () => {
     const b = book();
     reviewRows = {
       data: [{ id: "r1", book_id: b.id, status: "approved", file_path: "a/b.epub", cover_path: null, submitted_at: "2026-10-01T00:00:00Z", decided_at: "2026-10-02T00:00:00Z" }],
       error: null,
     };
     const html = await render({ b, user: null });
-    expect(html).toContain("Lexoni një pjesë");
-    expect(html).not.toContain("Blini e-librin");
-    expect(html).not.toContain("Merreni e-librin");
+    expect(html).toContain("Lexo një pjesë");
+    expect(html).not.toContain("Blej librin");
+    expect(html).not.toContain("Merre falas");
   });
 
   it("approved without a file, never approved, or a read error: no sample button", async () => {
@@ -197,13 +197,13 @@ describe("BD16 P4: a pre-order's book page", () => {
       const b = book();
       reviewRows = { ...rows, data: rows.data?.map((r) => ({ ...r, book_id: b.id })) ?? null };
       const html = await render({ b, user: READER_ID });
-      expect(html).not.toContain("Lexoni një pjesë");
+      expect(html).not.toContain("Lexo një pjesë");
     }
   });
 
   it("the author gets their own panel (manage, preview sample), no notify button, no draft banner", async () => {
     const html = await render({ b: book(), user: AUTHOR_ID });
-    expect(html).toContain("Menaxhoni librin");
+    expect(html).toContain("Menaxho librin");
     expect(html).not.toContain("Më njofto kur të dalë");
     expect(html).not.toContain("Parapamje. Ky libër nuk është në Librari.");
     expect(noticeQueries).toBe(0);
@@ -255,5 +255,27 @@ describe("BD16 P4: a pre-order's book page", () => {
     expect(html).not.toContain("data-preorder-release");
     expect(html).not.toContain("Më njofto kur të dalë");
     expect(noticeQueries).toBe(0);
+  });
+});
+
+// Patch A (3a): on a pre-order the phone bar repeats "Më njofto" only.
+describe("patch A: a pre-order's sticky bar", () => {
+  const bar = (html: string) => {
+    const at = html.indexOf("data-sticky-buy-bar");
+    return at === -1 ? null : html.slice(at);
+  };
+  it("a reader gets the notify form, a visitor the sign-in link, and no buy control in either", async () => {
+    const reader = bar(await render({ b: book(), user: READER_ID }));
+    expect(reader).toMatch(/<form[^>]*><button type="submit" class="[^"]*">Më njofto<\/button><\/form>/);
+    const visitor = bar(await render({ b: book(), user: null }));
+    expect(visitor).toMatch(/<a class="[^"]*" href="\/login\?next=\/libra\/[0-9a-f-]+">Më njofto<\/a>/);
+    for (const b of [reader, visitor]) {
+      expect(b).not.toContain("Blej librin");
+      expect(b).not.toContain('name="code"');
+    }
+  });
+  it("no bar once the reader is on the list, or for the author", async () => {
+    expect(bar(await render({ b: book(), user: READER_ID, notice: { book_cancelled_at: null } }))).toBeNull();
+    expect(bar(await render({ b: book(), user: AUTHOR_ID }))).toBeNull();
   });
 });

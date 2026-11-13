@@ -91,6 +91,7 @@ import {
 } from "@/lib/book-reader-details";
 import { BookDescriptionView } from "@/components/book-description-view";
 import { CopyLinkButton, CoverZoom, ExpandableText } from "@/components/book-page-extras";
+import { StickyBuyBar } from "@/components/sticky-buy-bar";
 import {
   IconCalendar,
   IconClock,
@@ -777,10 +778,10 @@ export default async function BookDetailPage({
           label: preorder
             ? "Më njofto kur të dalë"
             : purchaseState.includes("free")
-              ? "Merreni e-librin"
+              ? "Merre falas"
               : purchaseState.includes("paid") && !purchaseState.includes("closed")
-                ? "Blini e-librin"
-                : "Kthehuni te libri",
+                ? "Blej librin"
+                : "Kthehu te libri",
         };
 
   const authorAvatarUrl = book.pen?.avatar_path
@@ -870,16 +871,35 @@ export default async function BookDetailPage({
       endLink={sampleEndLink}
     />
   );
-  const boxSample = showSample ? sampleReader("Lexoni një pjesë", SECONDARY_ACTION_CLASSES) : null;
+  const boxSample = showSample ? sampleReader("Lexo një pjesë", SECONDARY_ACTION_CLASSES) : null;
   // P1 (Renato 11-10): pages and reading time come from the same count.
   const pagesText = pageEstimateText(book.word_count);
   const readingTime = readingTimeText(book.word_count);
   const publishedOnLibrum =
     book.status === "published" && book.published_at ? formatTimestampAsDate(book.published_at) : null;
 
+  // Patch A (Renato 11-13, 2a/3a): the phone sticky bar repeats the
+  // box's main action only (no promo code). Same server actions and the
+  // same purchaseState gate as the box: no bar for author, owned,
+  // unavailable, checkout-closed, or a pre-order already on "Më njofto".
+  const STICKY_BTN = "focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-5 text-[0.9375rem] font-semibold text-accent-foreground";
+  const stickyAction =
+    showPreorderPanel
+      ? (!user
+          ? <Link href={`/login?next=/libra/${book.id}`} className={STICKY_BTN}>Më njofto</Link>
+          : notifyOn ? null
+          : <form action={notifyMeWhenOut.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>Më njofto</button></form>)
+      : purchaseState === "paid-unowned"
+        ? <form action={buyBook.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>Blej librin</button></form>
+        : purchaseState === "free-unowned"
+          ? <form action={getFreeBook.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>Merre falas</button></form>
+          : purchaseState === "anonymous-paid" || purchaseState === "anonymous-free"
+            ? <Link href={`/login?next=/libra/${book.id}`} className={STICKY_BTN}>{purchaseState === "anonymous-free" ? "Merre falas" : "Blej librin"}</Link>
+            : null;
+
   return (
     // P1 (design B): a white page, on this page only.
-    <div className="flex flex-1 flex-col bg-surface">
+    <div className="flex flex-1 flex-col bg-surface max-md:pb-20 [&_[data-card-genre]]:text-[0.8125rem] [&_[data-card-genre]]:tracking-[0.04em]">
     <main className="page-container flex-1 pt-4 pb-16 sm:pt-5">
       {bookJsonLd && (
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: bookJsonLd }} />
@@ -897,8 +917,8 @@ export default async function BookDetailPage({
         </p>
       )}
       {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
-      <nav aria-label="Rruga e navigimit" className="text-[0.8125rem] text-muted">
-        <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <nav aria-label="Rruga e navigimit" className="-my-2 text-[0.875rem] text-muted">
+        <ol className="flex flex-wrap items-center gap-x-2">
           <li>
             <Link href="/librari" className={BREADCRUMB_LINK_CLASSES}>
               Libraria
@@ -1062,9 +1082,9 @@ export default async function BookDetailPage({
           (cover | title and text | a small price box), two on a tablet
           (the price box under the text), stacked on phones.
           ============================================================ */}
-      <div className="mt-5 flex flex-col gap-8 md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-x-8 md:gap-y-6 lg:grid-cols-[15rem_minmax(0,1fr)_15.625rem]">
-        <div className="mx-auto flex w-56 shrink-0 flex-col items-center gap-2 sm:w-60 md:row-span-2 md:mx-0 md:w-full lg:row-span-1">
-          <div className="relative w-full pt-3">
+      <div className="mt-4 grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-4 gap-y-5 md:mt-5 md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-x-8 md:gap-y-6 lg:grid-cols-[15rem_minmax(0,1fr)_15.625rem]">
+        <div className="flex w-full shrink-0 flex-col items-center gap-2 max-md:col-start-1 max-md:row-start-1 md:row-span-2 lg:row-span-1">
+          <div className="relative w-full md:pt-3">
             {coverUrl ? (
               // P1 (design B): the cover opens large (a plain link to the
               // image without JavaScript).
@@ -1087,12 +1107,12 @@ export default async function BookDetailPage({
             {/* See resolveShowSample's own comment (src/lib/book-purchase.ts):
                 omitted for "owned", who already have Download EPUB. */}
             {showSample && (
-              <div className="absolute top-0 left-1/2 z-10 -translate-x-1/2">
-                {sampleReader("Shikoni brenda", COVER_PILL_CLASSES)}
+              <div className="absolute top-0 left-1/2 z-10 -translate-x-1/2 max-md:hidden">
+                {sampleReader("Shiko brenda", COVER_PILL_CLASSES)}
               </div>
             )}
           </div>
-          {coverUrl && <p className="text-xs text-muted">Klikoni ballinën për ta parë të madhe</p>}
+          {coverUrl && <p className="text-xs text-muted max-md:hidden">Klikoni ballinën për ta parë të madhe</p>}
         </div>
 
         {/* DR1 fix 1: on phones (below md) this column dissolves into
@@ -1101,8 +1121,8 @@ export default async function BookDetailPage({
             description. Visual order only -- one box, same DOM order, so
             tablet and desktop are unchanged. Nothing is sticky. */}
         <div className="min-w-0 max-md:contents">
-          <div className="max-md:order-1">
-          <h1 className="font-serif text-[1.75rem] leading-[1.2] font-normal text-foreground sm:text-[1.875rem]">
+          <div className="max-md:col-start-2 max-md:row-start-1 max-md:self-center">
+          <h1 className="font-serif text-[1.75rem] leading-[1.1] font-normal text-foreground sm:text-[2.25rem] lg:text-[2.75rem]">
             {book.title}
           </h1>
           {/* LIBRUM 2.0 PUBLISHING-UX-1 PART D: rendered as its own,
@@ -1201,19 +1221,17 @@ export default async function BookDetailPage({
             </p>
           )}
 
-          <div className="mt-2 flex items-center gap-2.5 text-sm">
-            {/* FIX1 (X4): no star row (and no "0 out of 5 stars" for
-                screen readers) until the first review; the words stay. */}
-            {reviewCount > 0 && <StarRating rating={averageRating} />}
-            <span className="text-muted">
-              {reviewCount > 0
-                ? `${averageRating.toFixed(1).replace(".", ",")} · ${reviewCount} ${reviewCount === 1 ? "vlerësim" : "vlerësime"}`
-                : "Ende pa vlerësime"}
-            </span>
-          </div>
+          {reviewCount > 0 && (
+            <a href="#vleresimet" className="focus-ring mt-1 inline-flex min-h-11 items-center gap-2.5 rounded-sm text-sm">
+              <StarRating rating={averageRating} />
+              <span className="text-muted underline underline-offset-2">
+                {`${averageRating.toFixed(1).replace(".", ",")} · ${reviewCount} ${reviewCount === 1 ? "vlerësim" : "vlerësime"}`}
+              </span>
+            </a>
+          )}
           </div>
 
-          <div className="max-md:order-3">
+          <div className="max-md:col-span-2 max-md:row-start-3">
 
           <hr className="my-4 max-md:mt-0 border-0 border-t border-border" />
 
@@ -1339,9 +1357,9 @@ export default async function BookDetailPage({
             as before. */}
         {/* PREVIEW-READER-1: id="blerja" is where the sample's end page
             button takes the reader. */}
-        <aside aria-label="Çmimi dhe marrja e librit" className="w-full max-md:order-2 md:col-start-2 lg:col-start-3 lg:row-start-1">
+        <aside aria-label="Çmimi dhe marrja e librit" className="w-full max-md:col-span-2 max-md:row-start-2 md:col-start-2 lg:col-start-3 lg:row-start-1">
           <div id="blerja" className="flex scroll-mt-24 flex-col gap-3 rounded-[8px] border border-[#d9d3c3] p-4">
-            <span className="text-2xl font-semibold text-foreground">{formattedPrice}</span>
+            <span className="text-[1.625rem] leading-none font-semibold text-foreground">{formattedPrice}</span>
 
             {showPreorderPanel ? (
               <PreorderPanel
@@ -1354,7 +1372,6 @@ export default async function BookDetailPage({
               <PurchasePanel
                 state={purchaseState}
                 bookId={book.id}
-                formattedPrice={formattedPrice}
                 wishlisted={wishlisted}
                 downloadNote={downloadNote}
                 sampleSlot={boxSample}
@@ -1401,7 +1418,7 @@ export default async function BookDetailPage({
                 from WhatsApp. P1: plus "Kopjo lidhjen" (this page's own
                 address, copied in the browser). */}
             {whatsappShareHref && (
-              <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-t border-border pt-3 text-xs">
+              <p className="flex flex-wrap items-center gap-x-1.5 border-t border-border pt-1 text-xs">
                 <span className="text-muted">Ndajeni:</span>
                 <a
                   href={whatsappShareHref}
@@ -1479,7 +1496,7 @@ export default async function BookDetailPage({
                     type="submit"
                     className={isFollowingAuthor ? FOLLOWING_PILL_CLASSES : FOLLOW_PILL_CLASSES}
                   >
-                    {isFollowingAuthor ? "Po e ndiqni" : "Ndiqni"}
+                    {isFollowingAuthor ? "Po e ndjek" : "Ndiq"}
                   </button>
                 </form>
               ) : (
@@ -1526,7 +1543,8 @@ export default async function BookDetailPage({
             <BookShelf
               inline
               title={authorName ? `Më shumë nga ${authorName}` : "Më shumë nga ky autor"}
-              books={moreByAuthor ?? []}
+              books={(moreByAuthor ?? []).slice(0, 5)}
+              seeAllHref={penNamePath && (moreByAuthor ?? []).length > 5 ? penNamePath : undefined}
               supabase={supabase}
             />
           </div>
@@ -1539,7 +1557,7 @@ export default async function BookDetailPage({
           ============================================================ */}
       {/* BD13: id="vleresimet" is where the end page's review link
           (BD4b) and the after-save redirect land. */}
-      <section id="vleresimet" className={`${PAGE_SECTION_CLASSES} scroll-mt-24`}>
+      <section id="vleresimet" className={`${allReviews.length === 0 && !owned ? "mt-10 border-t border-border pt-5" : PAGE_SECTION_CLASSES} scroll-mt-24`}>
         <h2 className={SECTION_HEADING}>Vlerësimet</h2>
 
         {savedNotice && (
@@ -1631,7 +1649,11 @@ export default async function BookDetailPage({
         )}
 
         {allReviews.length === 0 ? (
-          <p className="mt-4 text-muted">Ende nuk ka vlerësime.</p>
+          !owned && (
+            <p className="mt-2 text-[0.9375rem] text-muted">
+              Ende pa vlerësime. Vlerësimi i parë mund të jetë i juaji, pasi ta lexoni librin.
+            </p>
+          )
         ) : (
           <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-4">
             {allReviews.map((review) => (
@@ -1762,7 +1784,8 @@ export default async function BookDetailPage({
       <BookShelf
         headingClassName={SECTION_HEADING}
         title="Mund t'ju pëlqejnë edhe"
-        books={youMightLike}
+        books={youMightLike.slice(0, 5)}
+        seeAllHref={book.genre ? buildBookstoreHref({}, { genre: book.genre }) : "/librari"}
         supabase={supabase}
       />
 
@@ -1780,6 +1803,11 @@ export default async function BookDetailPage({
         </p>
       )}
     </main>
+    {stickyAction && (
+      <StickyBuyBar targetId="blerja" title={book.title} price={formattedPrice}>
+        {stickyAction}
+      </StickyBuyBar>
+    )}
     </div>
   );
 }
@@ -1793,11 +1821,11 @@ const PAGE_SECTION_CLASSES = "mt-12 border-t border-border pt-6";
 const INLINE_LINK_CLASSES =
   "focus-ring rounded-sm font-semibold text-primary underline underline-offset-2 hover:decoration-2";
 const BREADCRUMB_LINK_CLASSES =
-  "focus-ring rounded-sm underline underline-offset-2 hover:text-primary hover:decoration-2";
+  "focus-ring inline-flex min-h-11 items-center rounded-sm underline underline-offset-2 hover:text-primary hover:decoration-2";
 const NOTICE_CLASSES = "mt-4 max-w-[32.5rem] rounded-[8px] px-3 py-2 text-sm";
 const BOX_NOTE_CLASSES = "text-[0.8125rem] text-muted";
 const SHARE_LINK_CLASSES =
-  "focus-ring rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
+  "focus-ring inline-flex min-h-11 items-center rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
 const TILE_ICON_CLASSES = "size-[1.375rem]";
 // BD3 patch 4 -> P1: the role after the translator's name.
 const TRANSLATOR_ROLE = "(Përkthyes)";
@@ -1886,11 +1914,11 @@ const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Ky libër nuk mund të blihet ende.";
 // save for later as a quiet text button. DR1 fix 3 (Q1 a): the main one
 // is dark green, as gold stays for dark green areas only.
 const PRIMARY_ACTION_CLASSES =
-  "focus-ring inline-flex w-full items-center justify-center rounded-full bg-primary px-3 py-2.5 text-center text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
+  "focus-ring inline-flex min-h-12 w-full items-center justify-center rounded-full bg-accent px-4 py-2.5 text-center text-base font-semibold text-accent-foreground transition-[filter] hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50";
 const SECONDARY_ACTION_CLASSES =
-  "focus-ring inline-flex w-full items-center justify-center rounded-full border border-primary bg-surface px-3 py-2 text-center text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
+  "focus-ring inline-flex min-h-11 w-full items-center justify-center rounded-full border border-primary bg-surface px-3 py-2 text-center text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 const WISHLIST_ACTION_CLASSES =
-  "focus-ring w-full rounded-sm py-1 text-center text-[0.8125rem] font-medium text-primary underline underline-offset-2 hover:decoration-2";
+  "focus-ring inline-flex min-h-11 w-full items-center justify-center rounded-sm text-center text-[0.8125rem] font-medium text-primary underline underline-offset-2 hover:decoration-2";
 const COVER_PILL_CLASSES =
   "focus-ring inline-flex items-center whitespace-nowrap rounded-full border border-[#d9d3c3] bg-surface px-3 py-1 text-xs font-semibold text-primary shadow-sm hover:bg-surface-hover";
 // DR1 fix 3 (Q2 a): dark green fill, still unlike the outlined "Po e ndiqni".
@@ -1967,14 +1995,12 @@ function PreorderPanel({
 function PurchasePanel({
   state,
   bookId,
-  formattedPrice,
   wishlisted,
   downloadNote,
   sampleSlot,
 }: {
   state: BookPurchaseState;
   bookId: string;
-  formattedPrice: string;
   wishlisted: boolean;
   // DOWNLOADS-1: the buyer's line under Download EPUB ("owned" only).
   downloadNote: string | null;
@@ -1985,7 +2011,7 @@ function PurchasePanel({
   const wishlistForm = (
     <form action={(wishlisted ? removeFromWishlist : addToWishlist).bind(null, bookId)}>
       <button type="submit" className={WISHLIST_ACTION_CLASSES}>
-        {wishlisted ? "Hiqeni nga Lista e dëshirave" : "Ruajeni për më vonë"}
+        {wishlisted ? "Hiqe nga Lista e dëshirave" : "Ruaje për më vonë"}
       </button>
     </form>
   );
@@ -1995,11 +2021,11 @@ function PurchasePanel({
       <div className="flex flex-col gap-3">
         <span className="text-sm text-muted">Ky është libri juaj</span>
         <Link href={editorPath(bookId, "details")} className={PRIMARY_ACTION_CLASSES}>
-          Menaxhoni librin
+          Menaxho librin
         </Link>
         <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>
           <span>
-            Shkarkoni <Acronym>EPUB</Acronym>
+            Shkarko <Acronym>EPUB</Acronym>
           </span>
         </a>
         {sampleSlot}
@@ -2013,7 +2039,7 @@ function PurchasePanel({
         <span className={STATUS_PILL_CLASSES}>Ky libër është i juaji</span>
         <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
           <span>
-            Shkarkoni <Acronym>EPUB</Acronym>
+            Shkarko <Acronym>EPUB</Acronym>
           </span>
         </a>
         {downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
@@ -2078,7 +2104,7 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
-          {state === "anonymous-free" ? "Hyr për ta marrë këtë libër" : "Hyr për ta blerë"}
+          {state === "anonymous-free" ? "Merre falas" : "Blej librin"}
         </Link>
         {sampleSlot}
       </div>
@@ -2093,21 +2119,26 @@ function PurchasePanel({
       {state === "free-unowned" ? (
         <form action={getFreeBook.bind(null, bookId)}>
           <button type="submit" className={PRIMARY_ACTION_CLASSES}>
-            Merreni e-librin — Falas
+            Merre falas
           </button>
         </form>
       ) : (
-        <form action={buyBook.bind(null, bookId)} className="flex flex-col gap-3">
-          <input
-            name="code"
-            type="text"
-            aria-label="Kodi promocional (opsional)"
-            placeholder="Kodi promocional (opsional)"
-            className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-3 py-2 text-sm"
-          />
+        <form action={buyBook.bind(null, bookId)} className="flex flex-col gap-2">
           <button type="submit" className={PRIMARY_ACTION_CLASSES}>
-            Blini e-librin — {formattedPrice}
+            Blej librin
           </button>
+          <details className="group text-center text-[0.8125rem]">
+            <summary className="focus-ring inline-flex min-h-11 cursor-pointer items-center rounded-sm text-muted underline underline-offset-2">
+              Keni një kod promocional?
+            </summary>
+            <input
+              name="code"
+              type="text"
+              aria-label="Kodi promocional (opsional)"
+              placeholder="Kodi promocional"
+              className="focus-ring mt-1 w-full rounded-[8px] border border-[#8c8472] bg-surface px-3 py-2 text-sm"
+            />
+          </details>
         </form>
       )}
 

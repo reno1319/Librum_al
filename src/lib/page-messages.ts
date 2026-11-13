@@ -92,7 +92,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky libër nuk po pret shqyrtim.",
   "Ky libër po pret tashmë shqyrtimin.",
   "Ky libër u hoq nga Librum dhe nuk mund të fshihet derisa ta shqyrtojmë. Pyetje? Na shkruani te support@librum.al",
-  "Ky libër është falas. Përdorni butonin \"Merreni e-librin — Falas\".",
+  "Ky libër është falas. Përdorni butonin \"Merre falas\".",
   "Ky libër është në një seri ose paketë. Hiqeni prej saj më parë, pastaj ndryshoni pseudonimin.",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose hiqeni librin nga paketa fillimisht",
   "Ky libër është pjesë e një pakete të publikuar. Hiqeni paketën nga publikimi ose ndryshojeni atë fillimisht",

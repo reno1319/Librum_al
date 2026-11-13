@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { BookCard } from "@/components/book-card";
 import { resolveBookByline } from "@/lib/book-byline";
@@ -23,6 +24,7 @@ export function BookShelf({
   supabase,
   inline = false,
   headingClassName,
+  seeAllHref,
 }: {
   title: string;
   books: BookWithAuthor[];
@@ -32,6 +34,8 @@ export function BookShelf({
   inline?: boolean;
   // P1 book page: that page's own section heading look.
   headingClassName?: string;
+  // Patch A: optional "Shiko të gjitha" link next to the heading.
+  seeAllHref?: string;
 }) {
   if (books.length === 0) return null;
 
@@ -40,6 +44,7 @@ export function BookShelf({
     // REDESIGN STEP 3: A2 heading (thin green serif) and the restyled
     // BookCard, in the same sideways-scrolling row.
     <section style={{ marginTop: inline ? "1.75rem" : "3.5rem" }}>
+      <div className="flex flex-wrap items-center justify-between gap-x-4">
       <Heading
         className={
           headingClassName ??
@@ -50,6 +55,15 @@ export function BookShelf({
       >
         {title}
       </Heading>
+      {seeAllHref && (
+        <Link
+          href={seeAllHref}
+          className="focus-ring inline-flex min-h-11 items-center rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
+        >
+          Shiko të gjitha &rarr;
+        </Link>
+      )}
+      </div>
       <div
         className="overflow-x-auto pb-2"
         style={{ display: "flex", gap: inline ? "1rem" : "1.5rem", marginTop: inline ? "0.75rem" : "1.25rem" }}

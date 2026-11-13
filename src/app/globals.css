@@ -207,3 +207,13 @@ body {
     font-size: 16px;
   }
 }
+
+/* Patch A (book page sticky buy bar, phones only): keyboard focus and
+   anchor jumps stop above the bar instead of under it. Only pages that
+   render the bar match, so every other page is unchanged. 48rem is
+   Tailwind's md, the bar's own md:hidden breakpoint. */
+@media (width < 48rem) {
+  html:has([data-sticky-buy-bar]) {
+    scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}
