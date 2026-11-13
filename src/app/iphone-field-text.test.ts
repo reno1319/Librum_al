@@ -72,13 +72,17 @@ describe("no viewport blocks pinch zoom (I1)", () => {
   });
 });
 
-describe("Bookstore filter row is 16px on phones, 14px from 640px (I1b)", () => {
-  it("FILTER_CONTROL_CLASSES uses text-base sm:text-sm, not a bare text-sm", () => {
+describe("Bookstore filter row is 16px on phones (I1b; patch C: 16px at every width)", () => {
+  it("the Filtrat button, the sort select and the search box use text-base, never a bare text-sm", () => {
     const page = readFileSync(join(__dirname, "(public)/librari/page.tsx"), "utf8");
-    const at = page.indexOf("const FILTER_CONTROL_CLASSES =");
+    const at = page.indexOf("const DROPDOWN_SUMMARY_CLASSES =");
     const classes = page.slice(at, page.indexOf(";", at)).match(/"([^"]*)"/)![1].split(" ");
     expect(classes).toContain("text-base");
-    expect(classes).toContain("sm:text-sm");
     expect(classes).not.toContain("text-sm");
+    for (const id of ['id={id}\n          name="sort"', 'id="bookstore-q"']) {
+      const el = page.slice(page.indexOf(id), page.indexOf("/>", page.indexOf(id)) + 2);
+      expect(el, id).toMatch(/className="[^"]*\btext-base\b/);
+      expect(el, id).not.toMatch(/className="[^"]*\btext-sm\b/);
+    }
   });
 });

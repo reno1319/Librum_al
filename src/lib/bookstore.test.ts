@@ -5,6 +5,11 @@ import {
   toggleGenreHref,
   isKnownBookstoreSort,
   BOOKSTORE_SORT_OPTIONS,
+  countCatalogueFacets,
+  sidebarGenres,
+  activePricePreset,
+  togglePriceHref,
+  PRICE_PRESETS,
 } from "./bookstore";
 import { GENRES } from "./genres";
 
@@ -198,5 +203,76 @@ describe("toggleGenreHref", () => {
     expect(toggleGenreHref({ q: "dante", genre: "Letërsi artistike" }, "Letërsi artistike")).toBe(
       "/librari?q=dante",
     );
+  });
+});
+
+// Patch C (Renato 11-13): the sidebar's count and price rules.
+describe("countCatalogueFacets", () => {
+  it("counts a 2-genre book in both, a repeated category once, an unknown one not at all", () => {
+    const f = countCatalogueFacets([
+      { categories: ["Horror", "Poezi", "Horror"], pen: { id: "a", name: "Ana" } },
+      { categories: ["Horror", "Roman"], pen: { id: "b", name: "Bora" } },
+      { categories: null, pen: null },
+    ]);
+    expect(f.total).toBe(3);
+    expect(f.genres).toEqual([
+      { genre: "Horror", count: 2 },
+      { genre: "Poezi", count: 1 },
+    ]);
+  });
+
+  it("orders by count, then by Albanian name; counts only public pen names (null = hidden by BD14)", () => {
+    const pen = (id: string, name: string) => ({ categories: [], pen: { id, name } });
+    const f = countCatalogueFacets([pen("z", "Zana"), pen("c", "Çlirim"), pen("d", "Dea"), pen("z", "Zana"), { categories: [], pen: null }]);
+    expect(f.authors).toEqual([
+      { id: "z", name: "Zana", count: 2 },
+      { id: "c", name: "Çlirim", count: 1 },
+      { id: "d", name: "Dea", count: 1 },
+    ]);
+  });
+});
+
+describe("sidebarGenres", () => {
+  const facets = { total: 2, genres: [{ genre: "Horror", count: 2 }], authors: [] };
+  it("adds the active genre with 0 when it has no books", () => {
+    expect(sidebarGenres(facets, "Poezi")).toEqual([{ genre: "Horror", count: 2 }, { genre: "Poezi", count: 0 }]);
+    expect(sidebarGenres(facets, "Horror")).toEqual([{ genre: "Horror", count: 2 }]);
+  });
+  it("without counts lists every genre with no count", () => {
+    expect(sidebarGenres(null, undefined)).toHaveLength(GENRES.length);
+    expect(sidebarGenres(null, undefined).every((g) => g.count === null)).toBe(true);
+  });
+});
+
+describe("price presets", () => {
+  it("r2 price a: whole-lek bounds with no overlap and no gap: 0, 1–199, 200–399, 400+", () => {
+    expect(PRICE_PRESETS.map((p) => [p.label, p.min, p.max])).toEqual([
+      ["Falas", undefined, 0],
+      ["Deri 199 lekë", 1, 199],
+      ["200–399 lekë", 200, 399],
+      ["400+ lekë", 400, undefined],
+    ]);
+    // Every whole price from 0 to 1000 falls in exactly one row.
+    for (let price = 0; price <= 1000; price++) {
+      const rows = PRICE_PRESETS.filter((p) => (p.min ?? 0) <= price && price <= (p.max ?? Infinity));
+      expect(rows, String(price)).toHaveLength(1);
+    }
+  });
+  it("activePricePreset matches the parsed bounds; min 0 counts as none; anything else is no preset", () => {
+    expect(activePricePreset({ minPrice: "1", maxPrice: "199" })?.label).toBe("Deri 199 lekë");
+    expect(activePricePreset({ minPrice: "0", maxPrice: "0" })?.label).toBe("Falas");
+    expect(activePricePreset({ maxPrice: "0" })?.label).toBe("Falas");
+    expect(activePricePreset({ minPrice: "400" })?.label).toBe("400+ lekë");
+    expect(activePricePreset({ maxPrice: "199" })).toBeNull();
+    expect(activePricePreset({ minPrice: "401" })).toBeNull();
+    expect(activePricePreset({ minPrice: "100", maxPrice: "300" })).toBeNull();
+    expect(activePricePreset({ maxPrice: "abc" })).toBeNull();
+    expect(activePricePreset({})).toBeNull();
+  });
+  it("togglePriceHref sets a row's bounds and clears the active one, keeping the rest", () => {
+    const q = { q: "x", genre: "Horror", sort: "price_asc" };
+    expect(togglePriceHref(q, PRICE_PRESETS[2])).toBe("/librari?q=x&genre=Horror&sort=price_asc&minPrice=200&maxPrice=399");
+    expect(togglePriceHref({ ...q, minPrice: "200", maxPrice: "399" }, PRICE_PRESETS[2])).toBe("/librari?q=x&genre=Horror&sort=price_asc");
+    expect(togglePriceHref({ ...q, maxPrice: "999" }, PRICE_PRESETS[3])).toBe("/librari?q=x&genre=Horror&sort=price_asc&minPrice=400");
   });
 });

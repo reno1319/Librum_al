@@ -62,11 +62,14 @@ type Row = Record<string, unknown>;
 // maybeSingle, still works), to pin that a pick never shows over a
 // failed load.
 let failBookList = false;
+// Patch C: makes only the sidebar count read (select "categories, ...") fail.
+let failFacets = false;
 
 function tableStub(rows: Row[]) {
   let result = [...rows];
+  let isFacetRead = false;
   const builder: Record<string, unknown> = {
-    select: () => builder,
+    select: (cols?: string) => ((isFacetRead = String(cols ?? "").startsWith("categories")), builder),
     eq: (col: string, value: unknown) => ((result = result.filter((r) => r[col] === value)), builder),
     not: (col: string) => ((result = result.filter((r) => r[col] != null)), builder),
     // BD15 P8: array "contains" (categories) and the id re-fetch.
@@ -82,7 +85,7 @@ function tableStub(rows: Row[]) {
     // F5: getLibrumChoiceBook's single-row read.
     maybeSingle: () => Promise.resolve({ data: result[0] ?? null, error: null }),
     then: (resolve: (v: unknown) => unknown) =>
-      resolve(failBookList ? { data: null, error: { message: "boom" } } : { data: result, error: null }),
+      resolve(failBookList || (failFacets && isFacetRead) ? { data: null, error: { message: "boom" } } : { data: result, error: null }),
   };
   return builder;
 }
@@ -113,6 +116,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     signedInUser = null;
     bookRows = BOOKS;
     failBookList = false;
+    failFacets = false;
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
@@ -359,34 +363,6 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(plain.slice(p0, plain.indexOf("</form>", p0))).not.toContain('type="hidden"');
   });
 
-  it("the genre list has every genre plus all genres, each keeping the words, sort and price", async () => {
-    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "500" });
-    const start = html.indexOf('<nav aria-label="Zhanret"');
-    expect(start).toBeGreaterThan(-1);
-    const menu = html.slice(start, html.indexOf("</nav>", start));
-    const links = [...menu.matchAll(/<a [^>]*>/g)];
-    expect(links).toHaveLength(GENRES.length + 1);
-    expect(menu).toContain(">Të gjitha zhanret</a>");
-    expect(menu).toContain('href="/librari?q=book&amp;sort=price_asc&amp;maxPrice=500"');
-    for (const g of GENRES) expect(menu).toContain(`>${g.replace("&", "&amp;")}</a>`);
-    expect(menu).toMatch(/href="\/librari\?q=book&amp;genre=Poezi&amp;sort=price_asc&amp;maxPrice=500"/);
-    expect(menu).toMatch(/aria-current="true"[^>]*>Letërsi artistike</);
-    expect((menu.match(/aria-current/g) ?? []).length).toBe(1);
-  });
-
-  it("Libra falas is a pill to free books that keeps the words, genre and sort", async () => {
-    const html = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", minPrice: "100" });
-    expect(html).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc&amp;maxPrice=0"[^>]*>Libra falas<\/a>/);
-    // P2d: when on, a tick icon comes before the words.
-    expect(await render({ maxPrice: "0" })).toMatch(/aria-current="true"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
-  });
-
-  it("Libra falas switches off when tapped again, keeping the words, genre and sort (P2d)", async () => {
-    const on = await render({ q: "book", genre: "Letërsi artistike", sort: "price_asc", maxPrice: "0" });
-    expect(on).toMatch(/href="\/librari\?q=book&amp;genre=Let%C3%ABrsi\+artistike&amp;sort=price_asc"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
-    expect(await render({ maxPrice: "0" })).toMatch(/href="\/librari"[^>]*><svg[^]*?<\/svg>Libra falas<\/a>/);
-  });
-
   it("the sort is its own form that keeps the words, genre and price", async () => {
     const html = await render({ q: "book", genre: "Letërsi artistike", minPrice: "1", maxPrice: "500", sort: "price_asc" });
     const start = html.lastIndexOf("<form", html.indexOf('id="bookstore-sort"'));
@@ -536,16 +512,243 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(countLine(await render())).toBe("Po shfaqen 48 librat e parë");
   });
 
-  it("Patch B: informal buttons on Libraria; the formal label and placeholder stay", async () => {
+  // ============================================================
+  // Patch C (Renato 11-13, version A): the Kolibër-style sidebar.
+  // ============================================================
+  // The desktop sidebar (the first "Filtrat" nav; the phone panel holds
+  // the same lists).
+  function sidebar(html: string): string {
+    const start = html.indexOf('<nav aria-label="Filtrat"');
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</nav>", start));
+  }
+  // A list's rows as { text, count, href, active }.
+  function rows(nav: string, heading: string) {
+    const start = nav.indexOf(`>${heading}</h2>`);
+    expect(start).toBeGreaterThan(-1);
+    const part = nav.slice(start, nav.indexOf("</section>", start));
+    return [...part.matchAll(/<a ([^>]*)>(?:<span[^>]*>([^<]*)<\/span>(?:<span[^>]*>(\d+)<\/span>)?|([^<]*))<\/a>/g)].map((m) => ({
+      text: (m[2] ?? m[4]).replace(/&amp;/g, "&"),
+      count: m[3] == null ? null : Number(m[3]),
+      href: m[1].match(/href="([^"]*)"/)![1].replace(/&amp;/g, "&"),
+      active: m[1].includes('aria-current="true"'),
+    }));
+  }
+  const PEN = (id: string, name: string) => ({ pen: { id, name } });
+  // 10 books: 6 in Letërsi artistike, 4 in Horror (one also Poezi), 3
+  // pen names, one hidden by the BD14 gate (pen null).
+  function catalogue(): Row[] {
+    return BOOKS.map((b, i) => ({
+      ...b,
+      categories: i < 6 ? ["Letërsi artistike"] : i === 9 ? ["Horror", "Poezi", "Horror"] : ["Horror"],
+      price_all: [0, 150, 200, 201, 399, 400, 401, 500, 199, 250][i],
+      ...(i < 5 ? PEN("pen-a", "Ana") : i < 9 ? PEN("pen-b", "Bora") : { pen: null }),
+    }));
+  }
+
+  it("Patch C: the title row has the serif Libraria, the count, and Renditja with the sort", async () => {
+    const html = await render();
+    expect(html).toMatch(/<h1 class="font-serif[^"]*">Libraria<\/h1>/);
+    expect(countLine(html)).toBe("10 libra");
+    expect(html).toMatch(/<label for="bookstore-sort"[^>]*>Renditja<\/label>/);
+    expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('id="bookstore-sort"'));
+    expect(html.indexOf('id="bookstore-sort"')).toBeLessThan(html.indexOf('id="bookstore-search"'));
+  });
+
+  it("Patch C: genre counts cover the whole catalogue, not the filtered result", async () => {
+    bookRows = catalogue();
+    const html = await render({ genre: "Horror", maxPrice: "200" });
+    const genres = rows(sidebar(html), "Zhanri");
+    expect(genres.map((g) => [g.text, g.count])).toEqual([
+      ["Të gjitha", 10],
+      ["Letërsi artistike", 6],
+      ["Horror", 4],
+      ["Poezi", 1],
+    ]);
+    expect(countLine(html)).toBe("1 libër");
+  });
+
+  it("Patch C: a book in 2 genres counts in both; a repeated or unknown category counts once or not at all", async () => {
+    bookRows = catalogue().map((b, i) => (i === 0 ? { ...b, categories: ["Letërsi artistike", "Roman"] } : b));
+    const genres = rows(sidebar(await render()), "Zhanri");
+    expect(genres.find((g) => g.text === "Horror")!.count).toBe(4);
+    expect(genres.find((g) => g.text === "Poezi")!.count).toBe(1);
+    expect(genres.some((g) => g.text === "Roman")).toBe(false);
+  });
+
+  it("Patch C: only genres with books show, by count then name; the active genre shows even with 0", async () => {
+    bookRows = catalogue();
+    const plain = rows(sidebar(await render()), "Zhanri").map((g) => g.text);
+    expect(plain).not.toContain("Fantazi");
+    const html = await render({ genre: "Fantazi" });
+    const genres = rows(sidebar(html), "Zhanri");
+    expect(genres.at(-1)).toMatchObject({ text: "Fantazi", count: 0, active: true });
+  });
+
+  it("Patch C: tapping the active genre clears it, keeping the words, sort and price", async () => {
+    bookRows = catalogue();
+    const html = await render({ q: "book", genre: "Horror", sort: "price_asc", maxPrice: "200" });
+    const genres = rows(sidebar(html), "Zhanri");
+    const horror = genres.find((g) => g.text === "Horror")!;
+    expect(horror.active).toBe(true);
+    expect(paramsOf(horror.href)).toEqual({ q: "book", sort: "price_asc", maxPrice: "200" });
+    const poezi = genres.find((g) => g.text === "Poezi")!;
+    expect(poezi.active).toBe(false);
+    expect(paramsOf(poezi.href)).toEqual({ q: "book", genre: "Poezi", sort: "price_asc", maxPrice: "200" });
+    expect(genres[0]).toMatchObject({ text: "Të gjitha", active: false });
+    expect(paramsOf(genres[0].href)).toEqual({ q: "book", sort: "price_asc", maxPrice: "200" });
+    expect(rows(sidebar(await render()), "Zhanri")[0].active).toBe(true);
+  });
+
+  it("Patch C: the price rows set their bounds; the active one is marked, clears itself and names the chip", async () => {
+    const html = await render({ q: "book", minPrice: "200", maxPrice: "399" });
+    const prices = rows(sidebar(html), "Çmimi");
+    expect(prices.map((p) => p.text)).toEqual(["Falas", "Deri 199 lekë", "200–399 lekë", "400+ lekë"]);
+    expect(prices.map((p) => p.active)).toEqual([false, false, true, false]);
+    expect(paramsOf(prices[2].href)).toEqual({ q: "book" });
+    expect(paramsOf(prices[0].href)).toEqual({ q: "book", maxPrice: "0" });
+    expect(paramsOf(prices[1].href)).toEqual({ q: "book", minPrice: "1", maxPrice: "199" });
+    expect(paramsOf(prices[3].href)).toEqual({ q: "book", minPrice: "400" });
+    expect(chips(html).map((c) => c.label)).toEqual(["“book”", "200–399 lekë"]);
+  });
+
+  it("Patch C r2 (price a): every book is in exactly one price row; 199|200 and 399|400 split cleanly", async () => {
+    bookRows = catalogue();
+    const titles = async (params: Record<string, string>) =>
+      [...grid(await render(params)).matchAll(/Book (\d\d)/g)].map((m) => Number(m[1])).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+    // prices by book: 1:0 2:150 3:200 4:201 5:399 6:400 7:401 8:500 9:199 10:250
+    expect(await titles({ maxPrice: "0" })).toEqual([1]);
+    expect(await titles({ minPrice: "1", maxPrice: "199" })).toEqual([2, 9]);
+    expect(await titles({ minPrice: "200", maxPrice: "399" })).toEqual([3, 4, 5, 10]);
+    expect(await titles({ minPrice: "400" })).toEqual([6, 7, 8]);
+  });
+
+  it("Patch C: a hand-typed range that is no preset marks no row, but its chip shows", async () => {
+    const html = await render({ minPrice: "100", maxPrice: "300" });
+    expect(rows(sidebar(html), "Çmimi").some((p) => p.active)).toBe(false);
+    expect(chips(html).map((c) => c.label)).toEqual(["Çmimi: 100–300 lekë"]);
+    // A lower bound of 0 filters nothing: 0–0 is Falas.
+    expect(rows(sidebar(await render({ minPrice: "0", maxPrice: "0" })), "Çmimi")[0].active).toBe(true);
+  });
+
+  it("Patch C: authors are public pen names with their counts, linking to the author page; a hidden pen name never shows", async () => {
+    bookRows = catalogue();
+    const authors = rows(sidebar(await render()), "Autorë");
+    expect(authors).toEqual([
+      { text: "Ana", count: 5, href: "/autore/pen-a", active: false },
+      { text: "Bora", count: 4, href: "/autore/pen-b", active: false },
+    ]);
+    expect(sidebar(await render())).not.toContain("Shiko të gjithë");
+  });
+
+  it("Patch C: the top 6 authors show; the rest open in place under Shiko të gjithë", async () => {
+    bookRows = BOOKS.map((b, i) => ({ ...b, ...PEN(`pen-${i}`, `Autor ${String.fromCharCode(65 + i)}`), ...(i === 9 ? PEN("pen-0", "Autor A") : {}) }));
+    const nav = sidebar(await render());
+    const start = nav.indexOf(">Autorë</h2>");
+    const part = nav.slice(start);
+    const shown = part.slice(0, part.indexOf("<details"));
+    const hidden = part.slice(part.indexOf("<details"), part.indexOf("</details>"));
+    expect([...shown.matchAll(/>(Autor [A-Z])</g)].map((m) => m[1])).toEqual(["Autor A", "Autor B", "Autor C", "Autor D", "Autor E", "Autor F"]);
+    // r2 (audit N4): the summary stays (focus stays on it) and reads
+    // "Shiko më pak" once open; its group is named, so the open phone
+    // Filtrat panel never hides it.
+    expect(hidden).toMatch(/<details class="group\/authors"><summary[^>]*><span class="group-open\/authors:hidden">Shiko të gjithë<\/span><span class="hidden group-open\/authors:inline">Shiko më pak<\/span><\/summary>/);
+    expect(hidden).not.toMatch(/class="[^"]*(?<![/\w-])group-open:hidden/);
+    expect([...hidden.matchAll(/>(Autor [A-Z])</g)].map((m) => m[1])).toEqual(["Autor G", "Autor H", "Autor I"]);
+    expect(hidden).not.toContain("href=\"#\"");
+  });
+
+  it("Patch C: a failed count read hides the counts and authors, keeps every genre and price row, and the grid", async () => {
+    failFacets = true;
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html = await render();
+    quiet.mockRestore();
+    const nav = sidebar(html);
+    const genres = rows(nav, "Zhanri");
+    expect(genres.map((g) => g.text)).toEqual(["Të gjitha", ...GENRES]);
+    expect(genres.every((g) => g.count == null)).toBe(true);
+    expect(rows(nav, "Çmimi")).toHaveLength(4);
+    expect(nav).not.toContain(">Autorë</h2>");
+    expect(countLine(html)).toBe("10 libra");
+    expect(grid(html)).toContain("Book 01");
+  });
+
+  it("Patch C: sidebar rows are 44px tap targets; the active row is cream and bold green", async () => {
     const html = await render({ genre: "Letërsi artistike" });
-    expect(html).toMatch(/<button type="submit"[^>]*>Kërko<\/button>/);
-    expect(html).toMatch(/>Zbato<\/button>/);
-    expect(html).toMatch(/<noscript><button type="submit"[^>]*>Rendit<\/button><\/noscript>/);
-    expect(html).toContain('placeholder="Kërkoni libra ose autorë"');
-    for (const old of [">Kërkoni<", ">Zbatoni<", ">Hiqni filtrat<", ">Shikoni të gjitha<", ">Shikoni librin<", ">Renditni<"]) {
+    const tags = [...sidebar(html).matchAll(/<a [^>]*>/g)].map(([t]) => t);
+    expect(tags.length).toBeGreaterThan(5);
+    for (const t of tags) expect(t).toMatch(/class="[^"]*\bmin-h-11\b/);
+    const active = tags.filter((t) => t.includes('aria-current="true"'));
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatch(/bg-\[#f1eee6\] font-semibold text-primary/);
+  });
+
+  it("Patch C: phones get Filtrat (a details panel with the same lists) beside a 44px sort", async () => {
+    const html = await render({ genre: "Horror" });
+    expect(html).toMatch(/<details[^>]*><summary class="[^"]*\bh-11\b[^"]*">Filtrat<svg/);
+    const navs = [...html.matchAll(/<nav aria-label="Filtrat"/g)];
+    expect(navs).toHaveLength(2);
+    const phone = html.slice(navs[1].index, html.indexOf("</nav>", navs[1].index));
+    expect(rows(phone, "Zhanri").find((g) => g.text === "Horror")!.active).toBe(true);
+    expect(html).toMatch(/id="bookstore-sort-phone"/);
+    expect(html).toMatch(/<label for="bookstore-sort-phone" class="sr-only">Renditja<\/label>/);
+  });
+
+  it("Patch C: both sort forms keep the words, genre and price and have Rendit without JavaScript", async () => {
+    const html = await render({ q: "book", genre: "Horror", minPrice: "1", maxPrice: "500", sort: "price_asc" });
+    for (const id of ["bookstore-sort", "bookstore-sort-phone"]) {
+      const at = html.indexOf(`id="${id}"`);
+      const form = html.slice(html.lastIndexOf("<form", at), html.indexOf("</form>", at));
+      expect(form).toContain('<input type="hidden" name="q" value="book"/>');
+      expect(form).toContain('<input type="hidden" name="genre" value="Horror"/>');
+      expect(form).toContain('<input type="hidden" name="minPrice" value="1"/>');
+      expect(form).toContain('<input type="hidden" name="maxPrice" value="500"/>');
+      expect(form).toMatch(/<option value="price_asc" selected="">/);
+      expect(form).toMatch(/<noscript><button type="submit"[^>]*>Rendit<\/button><\/noscript>/);
+    }
+  });
+
+  it("Patch C: one search box: a pill with a round Kërko button, 16px text, the formal label kept", async () => {
+    const html = await render({ genre: "Horror" });
+    expect(html.match(/id="bookstore-q"/g)).toHaveLength(1);
+    expect(html).toContain('placeholder="Kërkoni libra, autorë…"');
+    expect(html).toMatch(/<label for="bookstore-q" class="sr-only">Kërkoni libra ose autorë<\/label>/);
+    expect(html).toMatch(/<input id="bookstore-q"[^>]*class="[^"]*\bh-11\b[^"]*\btext-base\b/);
+    expect(html).toMatch(/<button type="submit" aria-label="Kërko"/);
+    for (const old of [">Kërkoni<", ">Zbatoni<", ">Hiqni filtrat<", ">Renditni<", ">Zhanret<", ">Libra falas</a>"]) {
       expect(html).not.toContain(old);
     }
     const shelf = section(await render(), "Libra falas");
     expect(shelf).toMatch(/>Shiko të gjitha</);
+  });
+
+  it("Patch C: the grid shows 5 per row at xl and 4 at md, 2 on phones", async () => {
+    expect(grid(await render())).toMatch(/<ul class="grid grid-cols-2 [^"]*md:grid-cols-4 xl:grid-cols-5">/);
+  });
+
+  // r2 (audit B1): the phone Filtrat panel closes when a filter is tapped.
+  it("Patch C r2: the phone Filtrat panel closes on a link tap (closeOnLinkClick)", async () => {
+    const element = await BookstorePage({ searchParams: Promise.resolve({ genre: "Horror" }) });
+    const found: Record<string, unknown>[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node !== "object" || !("props" in node)) return;
+      const el = node as { type: unknown; props: Record<string, unknown> };
+      if (typeof el.type === "function" && el.type.name === "DismissableDetails") found.push(el.props);
+      walk(el.props.children);
+    };
+    walk(element);
+    expect(found).toHaveLength(1);
+    expect(found[0].closeOnLinkClick).toBe(true);
+  });
+
+  it("Patch C r2: the search button and the sort select are 44px tap targets", async () => {
+    const html = await render();
+    expect(html).toMatch(/<button type="submit" aria-label="Kërko" class="[^"]*\bsize-11\b[^"]*"><span class="[^"]*\bsize-9\b[^"]*bg-primary/);
+    for (const id of ["bookstore-sort", "bookstore-sort-phone"]) {
+      const sel = html.match(new RegExp(`<select[^>]*id="${id}"[^>]*>`))![0];
+      expect(sel).toMatch(/class="[^"]*\bh-full\b[^"]*\bw-full\b/);
+    }
+    expect(html).toMatch(/<span class="relative flex h-11 [^"]*"><select/);
   });
 });
