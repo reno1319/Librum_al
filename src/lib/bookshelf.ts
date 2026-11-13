@@ -277,6 +277,11 @@ export function parseShelfQuery(params: { sort?: string; filter?: string; view?:
   };
 }
 
+/** DC 4: true when the shelf shows anything but the default view. */
+export function isShelfQueryActive(query: ShelfQuery): boolean {
+  return query.q !== "" || query.sort !== "new" || query.filter !== "all" || query.view !== "series";
+}
+
 export function matchesShelfFilter(state: ShelfState, filter: ShelfFilter): boolean {
   const entry = SHELF_FILTERS.find((option) => option.value === filter);
   if (!entry || entry.states === null) return true;

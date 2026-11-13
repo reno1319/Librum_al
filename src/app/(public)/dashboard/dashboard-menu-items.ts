@@ -18,11 +18,14 @@ export type DashboardMenuItem = {
 export type DashboardMenuGroup = {
   label: string;
   items: DashboardMenuItem[];
+  // DC 1: false = no second menu row on a computer for this group.
+  desktopSubRow?: false;
 };
 
 export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
   {
     label: "Librat",
+    desktopSubRow: false,
     items: [
       // /dashboard itself only; /dashboard/books ("All books", Add a
       // book, book edit) has no item of its own and counts as Books.
@@ -113,5 +116,9 @@ export function groupAriaCurrent(
 ): "page" | "true" | undefined {
   if (match?.group !== group) return undefined;
   if (group.items.length === 1) return itemAriaCurrent(group.items[0], match, pathname);
+  // DC 1: with no second row, the tab stands for its first page too.
+  if (group.desktopSubRow === false && match.item === group.items[0]) {
+    return itemAriaCurrent(group.items[0], match, pathname);
+  }
   return "true";
 }
