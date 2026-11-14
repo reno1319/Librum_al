@@ -75,7 +75,7 @@ export function BookCard({
           {(book.genre || book.is_adult) && (
             <span className="flex flex-wrap items-center gap-x-2">
               {book.genre && (
-                <span className="text-xs uppercase tracking-wide text-muted">
+                <span data-card-genre="" className="text-xs uppercase tracking-wide text-muted">
                   {book.genre}
                 </span>
               )}

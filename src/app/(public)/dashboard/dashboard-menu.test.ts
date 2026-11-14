@@ -74,6 +74,19 @@ describe("DashboardMenu", () => {
     expect(linkTag(tabs, "Pseudonimet")).toContain('href="/dashboard/pen-names"');
   });
 
+  // DC 1 (Renato 11-13, a): the Librat group has one row on a computer;
+  // the phone menu still lists Seritë.
+  it("shows no second row for Librat on a computer, but keeps Seritë on the phone menu", () => {
+    for (const path of ["/dashboard", "/dashboard/series", "/dashboard/books/new"]) {
+      const html = render(path);
+      const tabs = html.slice(0, html.indexOf("<details"));
+      expect(tabs.match(/<ul/g)).toHaveLength(1);
+      expect(linkTag(tabs, "Librat")).toContain(path === "/dashboard" ? 'aria-current="page"' : 'aria-current="true"');
+      expect(tabs).not.toContain(">Seritë<");
+      expect(linkTag(html.slice(html.indexOf("<details")), "Seritë")).toContain('href="/dashboard/series"');
+    }
+  });
+
   it("an unknown path marks nothing", () => {
     const html = render("/dashboard/unknown");
     expect(html).not.toContain("aria-current");

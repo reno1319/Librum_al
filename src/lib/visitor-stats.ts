@@ -20,6 +20,7 @@ export function isVisitorStatsEnabled(env: Record<string, string | undefined>): 
 // numbers. visitor-stats.test.ts fails when a (public) folder is in
 // neither list, so each new page needs a decision.
 export const COUNTED_PATHS = [
+  "/aksesueshmeria",
   "/autore",
   "/blog",
   "/fitimet",

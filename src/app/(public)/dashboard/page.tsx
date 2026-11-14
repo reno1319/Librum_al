@@ -21,9 +21,11 @@ import {
   SHELF_VIEWS,
   groupShelfBooks,
   matchesShelfFilter,
+  isShelfQueryActive,
   parseShelfQuery,
   resolveShelfState,
   sortShelfBooks,
+  type ShelfQuery,
   type ShelfState,
 } from "@/lib/bookshelf";
 import { Alert } from "@/components/ui/alert";
@@ -98,7 +100,7 @@ export const dynamic = "force-dynamic";
 const TEXT_LINK_CLASSES =
   "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
 const BOX_CLASSES = "rounded-[4px] border border-border bg-surface p-5";
-const BOX_LABEL_CLASSES = "text-[0.8125rem] uppercase tracking-[0.06em] text-muted";
+const BOX_LABEL_CLASSES = "text-sm font-medium text-muted";
 const BOX_FIGURE_CLASSES = "font-serif text-[2rem] leading-tight text-primary";
 
 export default async function DashboardPage({
@@ -175,12 +177,6 @@ export default async function DashboardPage({
         </h1>
       </div>
       <div className="flex shrink-0 flex-wrap justify-end gap-2">
-        <Link
-          href="/dashboard/series"
-          className={buttonClasses("outline", "md", "min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold")}
-        >
-          + Seri e re
-        </Link>
         <Link
           href="/dashboard/books/new"
           className={buttonClasses("primary", "md", "min-h-11 rounded-full px-4 font-bold sm:px-5")}
@@ -370,33 +366,26 @@ export default async function DashboardPage({
           Librat tuaj
         </h2>
         <div className="mt-4 rounded-[4px] border border-border bg-surface">
-          <form
-            action="/dashboard"
-            method="get"
-            role="search"
-            className="grid grid-cols-2 items-end gap-3 border-b border-border px-4 py-4 sm:px-5 lg:grid-cols-[repeat(3,minmax(0,11rem))_1fr_auto]"
-          >
-            <ShelfSelect id="shelf-sort" name="sort" label="Rendit sipas" value={query.sort} options={SHELF_SORTS} />
-            <ShelfSelect id="shelf-filter" name="filter" label="Filtro" value={query.filter} options={SHELF_FILTERS} />
-            <ShelfSelect id="shelf-view" name="view" label="Shfaq" value={query.view} options={SHELF_VIEWS} />
-            <label htmlFor="dashboard-book-search" className="col-span-2 flex flex-col gap-1 text-sm text-muted lg:col-span-1">
-              Kërkoni sipas titullit
-              <input
-                id="dashboard-book-search"
-                type="search"
-                name="q"
-                defaultValue={query.q}
-                placeholder="Titulli"
-                className="focus-ring min-h-11 min-w-0 rounded-[3px] border border-[#8c8472] bg-surface px-3 text-sm text-foreground"
-              />
-            </label>
-            <button
-              type="submit"
-              className={buttonClasses("outline", "sm", "col-span-2 min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold lg:col-span-1")}
-            >
-              Shfaqni
-            </button>
-          </form>
+          {/* DC 4 (Renato 11-13, a): on a phone the toolbar folds under
+              one line; it starts open while any choice differs from the
+              default, so an active search or filter is never hidden.
+              Computer and tablet keep the open toolbar. Two forms, one
+              shown at a time (display:none hides the other from screen
+              readers too); a <details> works without JavaScript. */}
+          <details open={isShelfQueryActive(query)} className="group border-b border-border md:hidden">
+            <summary className="focus-ring flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-[0.9375rem] font-semibold text-primary [&::-webkit-details-marker]:hidden">
+              Rendit, filtro, kërko
+              <span aria-hidden="true" className="text-muted transition-transform group-open:rotate-180 motion-reduce:transition-none">
+                ▾
+              </span>
+            </summary>
+            <ShelfToolbar query={query} idPrefix="phone-" className="grid grid-cols-2 items-end gap-3 px-4 pb-4" />
+          </details>
+          <ShelfToolbar
+            query={query}
+            idPrefix=""
+            className="hidden grid-cols-2 items-end gap-3 border-b border-border px-4 py-4 sm:px-5 md:grid lg:grid-cols-[repeat(3,minmax(0,11rem))_1fr_auto]"
+          />
 
           {pendingRead && !pendingRead.ok && (
             <p role="status" className="border-b border-border px-4 py-3 text-sm text-[#b42318] sm:px-5">
@@ -421,14 +410,14 @@ export default async function DashboardPage({
                   <h3 className="flex flex-wrap items-baseline gap-x-3 border-b border-[#efe9dd] px-4 pt-5 pb-2 font-serif text-lg font-normal text-primary sm:px-5">
                     {group.seriesTitle ? (
                       <>
-                        <span className="font-sans text-xs font-bold uppercase tracking-[0.06em] text-muted">Seri</span>
+                        <span className="font-sans text-sm font-medium text-muted">Seria</span>
                         {group.seriesTitle}
                         <span className="font-sans text-sm text-muted">
                           {group.books.length === 1 ? "1 libër" : `${group.books.length} libra`}
                         </span>
                       </>
                     ) : (
-                      <span className="font-sans text-xs font-bold uppercase tracking-[0.06em] text-muted">Libra më vete</span>
+                      <span className="font-sans text-sm font-medium text-muted">Libra më vete</span>
                     )}
                   </h3>
                 )}
@@ -485,6 +474,37 @@ export default async function DashboardPage({
         </ul>
       </section>
     </main>
+  );
+}
+
+// BD15 P6: the shelf toolbar -- plain GET selects and a title search,
+// so it works without JavaScript. DC 4: rendered twice (phone fold and
+// computer row), so each copy gets its own id prefix.
+function ShelfToolbar({ query, idPrefix, className }: { query: ShelfQuery; idPrefix: string; className: string }) {
+  const searchId = `${idPrefix}dashboard-book-search`;
+  return (
+    <form action="/dashboard" method="get" role="search" className={className}>
+      <ShelfSelect id={`${idPrefix}shelf-sort`} name="sort" label="Rendit sipas" value={query.sort} options={SHELF_SORTS} />
+      <ShelfSelect id={`${idPrefix}shelf-filter`} name="filter" label="Filtro" value={query.filter} options={SHELF_FILTERS} />
+      <ShelfSelect id={`${idPrefix}shelf-view`} name="view" label="Shfaq" value={query.view} options={SHELF_VIEWS} />
+      <label htmlFor={searchId} className="col-span-2 flex flex-col gap-1 text-sm text-muted lg:col-span-1">
+        Kërkoni sipas titullit
+        <input
+          id={searchId}
+          type="search"
+          name="q"
+          defaultValue={query.q}
+          placeholder="Titulli"
+          className="focus-ring min-h-11 min-w-0 rounded-[3px] border border-[#8c8472] bg-surface px-3 text-sm text-foreground"
+        />
+      </label>
+      <button
+        type="submit"
+        className={buttonClasses("outline", "sm", "col-span-2 min-h-11 rounded-full border-[#c9c0ae] px-4 font-semibold lg:col-span-1")}
+      >
+        Shfaqni
+      </button>
+    </form>
   );
 }
 

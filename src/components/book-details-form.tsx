@@ -92,6 +92,19 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
+// DC 5: the fields that live in the "Të dhëna shtesë" box.
+const EXTRAS_FIELDS: readonly DetailsField[] = ["seriesPosition", "editionNumber", "contributors"];
+
+export function isExtrasField(field: DetailsField): boolean {
+  return EXTRAS_FIELDS.includes(field);
+}
+
+/** True when the book already uses a series, an edition above 1 or a contributor. */
+export function detailsExtrasInUse(initial: Pick<DetailsFormValues, "seriesId" | "editionNumber" | "contributors">): boolean {
+  const edition = initial.editionNumber.trim();
+  return initial.seriesId !== "" || initial.contributors.length > 0 || (edition !== "" && edition !== "1");
+}
+
 function Section({ title, lead, children }: { title: string; lead?: string; children: React.ReactNode }) {
   const id = `details-section-${title
     .normalize("NFD")
@@ -157,6 +170,16 @@ export function BookDetailsForm({
   const [categories, setCategories] = useState<string[]>(initial.categories);
   const [keywords, setKeywords] = useState(initial.keywords);
   const [rightsBasis, setRightsBasis] = useState<RightsBasis | "">(initial.rightsBasis);
+  // DC 5 (Renato 11-13, a): series, edition and contributors sit in one
+  // closed "Të dhëna shtesë" box. It starts open when the book already
+  // uses one of them or one is marked missing, and opens before a field
+  // inside it is focused for an error. After that only the author's own
+  // tap closes it (never a re-render), so it can't snap shut mid-edit.
+  // Closed fields still belong to the form and are saved as before.
+  const [extrasOpen, setExtrasOpen] = useState(
+    () => detailsExtrasInUse(initial) || markMissing.some((field) => isExtrasField(field)),
+  );
+  const extrasRef = useRef<HTMLDetailsElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
   // Upload notes 1 (Enkelejd 11-06): the pen-name page opens in a new
@@ -197,6 +220,10 @@ export function BookDetailsForm({
       event.preventDefault();
       keepUnsavedMark(form);
       setErrors(result.errors);
+      if (Object.keys(result.errors).some((field) => isExtrasField(field as DetailsField)) && extrasRef.current) {
+        extrasRef.current.open = true;
+        setExtrasOpen(true);
+      }
       const first = Object.keys(result.errors)[0];
       const target = form.querySelector<HTMLElement>(`[data-field="${first}"]`);
       target?.focus();
@@ -355,199 +382,6 @@ export function BookDetailsForm({
           </label>
         )}
 
-        <fieldset className="m-0 flex flex-col gap-3 border-0 p-0" data-field="contributors" tabIndex={-1} aria-describedby={describe("contributors")}>
-          <legend className={EDITOR_LABEL_CLASSES}>
-            Kontribues të tjerë
-            <Optional>opsional, deri në {MAX_CONTRIBUTORS}</Optional>
-          </legend>
-          {contributors.map((c, i) => (
-            <div key={c.id || `new-${i}`} className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="contributorId" value={c.id} />
-              {pdFrozen && (
-                <>
-                  <input type="hidden" name="contributorRole" value={c.role} />
-                  <input type="hidden" name="contributorName" value={c.name} />
-                </>
-              )}
-              <label className={`${EDITOR_FIELD_CLASSES} w-full sm:w-48`}>
-                <span className={EDITOR_HINT_CLASSES}>Roli</span>
-                <select
-                  name="contributorRole"
-                  value={c.role}
-                  disabled={pdFrozen}
-                  onChange={(e) =>
-                    setContributors((list) => list.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))
-                  }
-                  className={editorControlClassesFor(false)}
-                >
-                  {CONTRIBUTOR_ROLES.map((role) => (
-                    <option key={role} value={role}>
-                      {contributorRoleLabel(role)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={`${EDITOR_FIELD_CLASSES} min-w-48 flex-1`}>
-                <span className={EDITOR_HINT_CLASSES}>Emri</span>
-                <input
-                  name="contributorName"
-                  type="text"
-                  maxLength={CONTRIBUTOR_NAME_MAX_LENGTH}
-                  value={c.name}
-                  disabled={pdFrozen}
-                  onChange={(e) =>
-                    setContributors((list) => list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
-                  }
-                  className={editorControlClassesFor(false)}
-                />
-              </label>
-              {!pdFrozen && (
-                <button
-                  type="button"
-                  onClick={() => setContributors((list) => list.filter((_, j) => j !== i))}
-                  className={EDITOR_SMALL_BUTTON}
-                >
-                  Hiq
-                </button>
-              )}
-            </div>
-          ))}
-          {pdFrozen ? null : contributors.length < MAX_CONTRIBUTORS ? (
-            <button
-              type="button"
-              onClick={() => setContributors((list) => [...list, { id: "", name: "", role: "Co-Author" }])}
-              className={EDITOR_LINK_BUTTON}
-            >
-              + Shto kontribues
-            </button>
-          ) : (
-            <p className={EDITOR_HINT_CLASSES}>Keni arritur kufirin prej {MAX_CONTRIBUTORS} kontribuesish.</p>
-          )}
-          <FieldError id="details-contributors-error" message={err("contributors")} />
-        </fieldset>
-      </Section>
-
-      <Section
-        title="Seria"
-        lead="Nëse libri është pjesë e një serie, lidheni këtu. Të gjithë librat e një serie dalin me të njëjtin emër autori."
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <label className={`${EDITOR_FIELD_CLASSES} min-w-56 flex-1`}>
-            <span className={EDITOR_LABEL_CLASSES}>
-              Seria
-              <Optional>opsionale</Optional>
-            </span>
-            <select
-              name="seriesId"
-              value={seriesId}
-              disabled={pdFrozen}
-              onChange={(e) => setSeriesId(e.target.value)}
-              className={editorControlClassesFor(false)}
-            >
-              <option value="">Nuk është pjesë e një serie</option>
-              {seriesForPenName.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={`${EDITOR_FIELD_CLASSES} w-32`}>
-            <span className={EDITOR_LABEL_CLASSES}>Numri në seri</span>
-            <input
-              name="seriesPosition"
-              data-field="seriesPosition"
-              type="text"
-              inputMode="numeric"
-              disabled={!seriesId || pdFrozen}
-              defaultValue={initial.seriesPosition}
-              aria-describedby={describe("seriesPosition")}
-              className={editorControlClassesFor(!!err("seriesPosition"))}
-            />
-          </label>
-        </div>
-        <FieldError id="details-seriesPosition-error" message={err("seriesPosition")} />
-        {pdFrozen && (
-          <>
-            <input type="hidden" name="seriesId" value={seriesId} />
-            {seriesId && <input type="hidden" name="seriesPosition" value={initial.seriesPosition} />}
-          </>
-        )}
-        {pdFrozen ? null : !locked || penNameId ? (
-          newSeriesOpen ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-              <label className={EDITOR_FIELD_CLASSES}>
-                <span className={EDITOR_LABEL_CLASSES}>Emri i serisë së re</span>
-                <input
-                  type="text"
-                  maxLength={300}
-                  value={newSeriesTitle}
-                  onChange={(e) => setNewSeriesTitle(e.target.value)}
-                  className={editorControlClassesFor(!!newSeriesMessage)}
-                />
-              </label>
-              <p className={EDITOR_HINT_CLASSES}>
-                Të gjithë librat e serisë dalin me emrin{" "}
-                {penNames.find((p) => p.id === penNameId)?.name ?? lockedPenName ?? ""}.
-              </p>
-              {newSeriesMessage && <p className={fieldErrorClasses}>{newSeriesMessage}</p>}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={newSeriesBusy}
-                  onClick={createSeries}
-                  className={`${EDITOR_SMALL_BUTTON} border-primary bg-primary text-primary-foreground hover:bg-primary-hover`}
-                >
-                  Krijo serinë
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewSeriesOpen(false);
-                    setNewSeriesMessage("");
-                  }}
-                  className={EDITOR_LINK_BUTTON}
-                >
-                  Anulo
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setNewSeriesOpen(true)}
-              className={EDITOR_LINK_BUTTON}
-            >
-              + Krijo seri të re
-            </button>
-          )
-        ) : null}
-        <p className={EDITOR_HINT_CLASSES}>
-          Draftet nuk shfaqen në faqen e serisë. Nëse një libër hiqet nga shitja, vendi i tij mbetet “Nuk është në
-          dispozicion” dhe numrat nuk ndryshojnë.
-        </p>
-      </Section>
-
-      <Section title="Botimi" lead="Përdoreni kur del një botim i ri i të njëjtit libër.">
-        <label className={`${EDITOR_FIELD_CLASSES} w-40`}>
-          <span className={EDITOR_LABEL_CLASSES}>
-            Numri i botimit
-            <Optional />
-          </span>
-          <input
-            name="editionNumber"
-            data-field="editionNumber"
-            type="text"
-            inputMode="numeric"
-            maxLength={String(EDITION_NUMBER_MAX).length}
-            defaultValue={initial.editionNumber}
-            disabled={pdFrozen}
-            aria-describedby={describe("editionNumber")}
-            className={editorControlClassesFor(!!err("editionNumber"))}
-          />
-        </label>
-        <FieldError id="details-editionNumber-error" message={err("editionNumber")} />
-        {pdFrozen && <input type="hidden" name="editionNumber" value={initial.editionNumber} />}
       </Section>
 
       <Section title="Përshkrimi" lead="Ky tekst del në faqen e librit. Shkruajeni për lexuesin.">
@@ -774,6 +608,222 @@ export function BookDetailsForm({
           {pdFrozen && <input type="hidden" name="keywords" value={keywords} />}
         </label>
       </Section>
+
+      <details
+        ref={extrasRef}
+        open={extrasOpen}
+        onToggle={(event) => setExtrasOpen(event.currentTarget.open)}
+        data-details-extras=""
+        className="group rounded-lg"
+      >
+        <summary className="focus-ring flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-lg bg-surface px-4 py-3 sm:px-8 [&::-webkit-details-marker]:hidden">
+          <span className="flex flex-col">
+            <span className="text-[0.9375rem] font-semibold text-foreground">
+              Të dhëna shtesë <span className="font-normal text-muted">(opsionale)</span>
+            </span>
+            <span className="text-sm text-muted">Seria, numri i botimit, kontribues të tjerë</span>
+          </span>
+          <span aria-hidden="true" className="text-muted transition-transform group-open:rotate-180 motion-reduce:transition-none">▾</span>
+        </summary>
+        <div className="mt-2 flex flex-col gap-2">
+      <Section
+        title="Seria"
+        lead="Nëse libri është pjesë e një serie, lidheni këtu. Të gjithë librat e një serie dalin me të njëjtin emër autori."
+      >
+        <div className="flex flex-wrap items-end gap-3">
+          <label className={`${EDITOR_FIELD_CLASSES} min-w-56 flex-1`}>
+            <span className={EDITOR_LABEL_CLASSES}>
+              Seria
+              <Optional>opsionale</Optional>
+            </span>
+            <select
+              name="seriesId"
+              value={seriesId}
+              disabled={pdFrozen}
+              onChange={(e) => setSeriesId(e.target.value)}
+              className={editorControlClassesFor(false)}
+            >
+              <option value="">Nuk është pjesë e një serie</option>
+              {seriesForPenName.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={`${EDITOR_FIELD_CLASSES} w-32`}>
+            <span className={EDITOR_LABEL_CLASSES}>Numri në seri</span>
+            <input
+              name="seriesPosition"
+              data-field="seriesPosition"
+              type="text"
+              inputMode="numeric"
+              disabled={!seriesId || pdFrozen}
+              defaultValue={initial.seriesPosition}
+              aria-describedby={describe("seriesPosition")}
+              className={editorControlClassesFor(!!err("seriesPosition"))}
+            />
+          </label>
+        </div>
+        <FieldError id="details-seriesPosition-error" message={err("seriesPosition")} />
+        {pdFrozen && (
+          <>
+            <input type="hidden" name="seriesId" value={seriesId} />
+            {seriesId && <input type="hidden" name="seriesPosition" value={initial.seriesPosition} />}
+          </>
+        )}
+        {pdFrozen ? null : !locked || penNameId ? (
+          newSeriesOpen ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+              <label className={EDITOR_FIELD_CLASSES}>
+                <span className={EDITOR_LABEL_CLASSES}>Emri i serisë së re</span>
+                <input
+                  type="text"
+                  maxLength={300}
+                  value={newSeriesTitle}
+                  onChange={(e) => setNewSeriesTitle(e.target.value)}
+                  className={editorControlClassesFor(!!newSeriesMessage)}
+                />
+              </label>
+              <p className={EDITOR_HINT_CLASSES}>
+                Të gjithë librat e serisë dalin me emrin{" "}
+                {penNames.find((p) => p.id === penNameId)?.name ?? lockedPenName ?? ""}.
+              </p>
+              {newSeriesMessage && <p className={fieldErrorClasses}>{newSeriesMessage}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={newSeriesBusy}
+                  onClick={createSeries}
+                  className={`${EDITOR_SMALL_BUTTON} border-primary bg-primary text-primary-foreground hover:bg-primary-hover`}
+                >
+                  Krijo serinë
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewSeriesOpen(false);
+                    setNewSeriesMessage("");
+                  }}
+                  className={EDITOR_LINK_BUTTON}
+                >
+                  Anulo
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setNewSeriesOpen(true)}
+              className={EDITOR_LINK_BUTTON}
+            >
+              + Krijo seri të re
+            </button>
+          )
+        ) : null}
+        <p className={EDITOR_HINT_CLASSES}>
+          Draftet nuk shfaqen në faqen e serisë. Nëse një libër hiqet nga shitja, vendi i tij mbetet “Nuk është në
+          dispozicion” dhe numrat nuk ndryshojnë.
+        </p>
+      </Section>
+
+      <Section title="Botimi" lead="Përdoreni kur del një botim i ri i të njëjtit libër.">
+        <label className={`${EDITOR_FIELD_CLASSES} w-40`}>
+          <span className={EDITOR_LABEL_CLASSES}>
+            Numri i botimit
+            <Optional />
+          </span>
+          <input
+            name="editionNumber"
+            data-field="editionNumber"
+            type="text"
+            inputMode="numeric"
+            maxLength={String(EDITION_NUMBER_MAX).length}
+            defaultValue={initial.editionNumber}
+            disabled={pdFrozen}
+            aria-describedby={describe("editionNumber")}
+            className={editorControlClassesFor(!!err("editionNumber"))}
+          />
+        </label>
+        <FieldError id="details-editionNumber-error" message={err("editionNumber")} />
+        {pdFrozen && <input type="hidden" name="editionNumber" value={initial.editionNumber} />}
+      </Section>
+
+      <Section title="Kontribues të tjerë" lead="Përkthyes, ilustrues, bashkautor ose redaktor.">
+        <fieldset className="m-0 flex flex-col gap-3 border-0 p-0" data-field="contributors" tabIndex={-1} aria-describedby={describe("contributors")}>
+          <legend className={EDITOR_LABEL_CLASSES}>
+            Kontribues të tjerë
+            <Optional>opsional, deri në {MAX_CONTRIBUTORS}</Optional>
+          </legend>
+          {contributors.map((c, i) => (
+            <div key={c.id || `new-${i}`} className="flex flex-wrap items-end gap-3">
+              <input type="hidden" name="contributorId" value={c.id} />
+              {pdFrozen && (
+                <>
+                  <input type="hidden" name="contributorRole" value={c.role} />
+                  <input type="hidden" name="contributorName" value={c.name} />
+                </>
+              )}
+              <label className={`${EDITOR_FIELD_CLASSES} w-full sm:w-48`}>
+                <span className={EDITOR_HINT_CLASSES}>Roli</span>
+                <select
+                  name="contributorRole"
+                  value={c.role}
+                  disabled={pdFrozen}
+                  onChange={(e) =>
+                    setContributors((list) => list.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)))
+                  }
+                  className={editorControlClassesFor(false)}
+                >
+                  {CONTRIBUTOR_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {contributorRoleLabel(role)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={`${EDITOR_FIELD_CLASSES} min-w-48 flex-1`}>
+                <span className={EDITOR_HINT_CLASSES}>Emri</span>
+                <input
+                  name="contributorName"
+                  type="text"
+                  maxLength={CONTRIBUTOR_NAME_MAX_LENGTH}
+                  value={c.name}
+                  disabled={pdFrozen}
+                  onChange={(e) =>
+                    setContributors((list) => list.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
+                  }
+                  className={editorControlClassesFor(false)}
+                />
+              </label>
+              {!pdFrozen && (
+                <button
+                  type="button"
+                  onClick={() => setContributors((list) => list.filter((_, j) => j !== i))}
+                  className={EDITOR_SMALL_BUTTON}
+                >
+                  Hiq
+                </button>
+              )}
+            </div>
+          ))}
+          {pdFrozen ? null : contributors.length < MAX_CONTRIBUTORS ? (
+            <button
+              type="button"
+              onClick={() => setContributors((list) => [...list, { id: "", name: "", role: "Co-Author" }])}
+              className={EDITOR_LINK_BUTTON}
+            >
+              + Shto kontribues
+            </button>
+          ) : (
+            <p className={EDITOR_HINT_CLASSES}>Keni arritur kufirin prej {MAX_CONTRIBUTORS} kontribuesish.</p>
+          )}
+          <FieldError id="details-contributors-error" message={err("contributors")} />
+        </fieldset>
+      </Section>
+
+        </div>
+      </details>
 
       {/* D1b (Renato 11-04): not pinned, like the other two tabs and the mockup. */}
       <div>

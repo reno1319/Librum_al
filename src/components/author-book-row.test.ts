@@ -55,6 +55,16 @@ describe("AuthorBookRow: a book Librum took down", () => {
 
 // Upload notes 3a (Enkelejd 11-06): the shelf line names the file
 // format, "EPUB", not "E-libër".
+// DC 2 (Renato 11-13, a): normal letters, no spaced capitals.
+describe("AuthorBookRow: labels", () => {
+  it("writes Çmimi and the 30-day label in normal case", () => {
+    const html = render({ book: { ...BOOK, status: "published" as const, price_all: 19900 }, recentCopies: 2 });
+    expect(html).toContain(">Çmimi<");
+    expect(html).toContain("Shitje (30 ditë)");
+    expect(html).not.toMatch(/\buppercase\b/);
+  });
+});
+
 describe("AuthorBookRow: format wording", () => {
   it("says EPUB, never E-libër", () => {
     const html = render({ book: { ...BOOK, status: "published" as const } });

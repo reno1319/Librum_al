@@ -78,17 +78,17 @@ async function render(opts: { user: { id: string } | null; book: Record<string, 
 }
 
 describe("the author's preview of an unpublished book", () => {
-  it("shows the Preview strip, Read sample, and the author's own box (Menaxhoni librin, Shkarkoni EPUB)", async () => {
+  it("shows the Preview strip, Read sample, and the author's own box (Menaxho librin, Shkarko EPUB)", async () => {
     const html = await render({ user: { id: AUTHOR_ID }, book: BASE_BOOK });
     expect(html).toContain(STRIP);
     expect(html.indexOf(STRIP)).toBeLessThan(html.indexOf('aria-label="Rruga e navigimit"'));
-    expect(html).toContain("Lexoni një pjesë");
-    expect(html).toContain("Menaxhoni librin");
+    expect(html).toContain("Lexo një pjesë");
+    expect(html).toContain("Menaxho librin");
     expect(html).toContain(`href="/api/books/${BOOK_ID}/download"`);
     expect(html).not.toContain(">Buy");
     // "ShkarkoniEPUB" fix: the words sit in one <span>, so the inline-flex
     // button keeps the space between them.
-    expect(html).toMatch(new RegExp(`/download" class="[^"]*inline-flex[^"]*"><span>Shkarkoni <span[^>]*>EPUB</span></span></a>`));
+    expect(html).toMatch(new RegExp(`/download" class="[^"]*inline-flex[^"]*"><span>Shkarko <span[^>]*>EPUB</span></span></a>`));
   });
 
   it("a live book's author gets Read sample but no Preview strip", async () => {
@@ -97,14 +97,14 @@ describe("the author's preview of an unpublished book", () => {
       book: { ...BASE_BOOK, status: "published", published_at: "2026-09-02T00:00:00Z" },
     });
     expect(html).not.toContain(STRIP);
-    expect(html).toContain("Lexoni një pjesë");
-    expect(html).toContain("Menaxhoni librin");
+    expect(html).toContain("Lexo një pjesë");
+    expect(html).toContain("Menaxho librin");
   });
 
   it("an earlier buyer of an unpublished book sees no Preview strip and no Read sample", async () => {
     const html = await render({ user: { id: READER_ID }, book: BASE_BOOK, owned: true });
     expect(html).not.toContain(STRIP);
-    expect(html).not.toContain("Lexoni një pjesë");
+    expect(html).not.toContain("Lexo një pjesë");
     expect(html).toContain("Ky libër është i juaji");
   });
 

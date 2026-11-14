@@ -114,7 +114,8 @@ describe("book page canonical link", () => {
 describe("book page schema.org data", () => {
   it("a live book has exactly one Book block, naming its pen name, with no price while checkout is off", async () => {
     const blocks = jsonLdBlocks(await render({ user: null, book: LIVE_BOOK }, { error: "x" }));
-    expect(blocks).toHaveLength(1);
+    // B2: the Book block, then the BreadcrumbList block.
+    expect(blocks).toHaveLength(2);
     const data = JSON.parse(blocks[0]);
     expect(data["@type"]).toBe("Book");
     expect(data.url).toBe(`https://librum.al/libra/${BOOK_ID}`);
@@ -125,8 +126,34 @@ describe("book page schema.org data", () => {
 
   it("an author-typed </script> can't end the block early", async () => {
     const html = await render({ user: null, book: LIVE_BOOK });
-    expect(jsonLdBlocks(html)[0]).not.toContain("<");
+    for (const block of jsonLdBlocks(html)) expect(block).not.toContain("<");
     expect(html).not.toContain("<b>x</b>");
+  });
+
+  it("B2: a live book has one BreadcrumbList block, the visible path Libraria > genre > title", async () => {
+    const html = await render({ user: null, book: LIVE_BOOK });
+    const crumbs = jsonLdBlocks(html).map((b) => JSON.parse(b)).filter((d) => d["@type"] === "BreadcrumbList");
+    expect(crumbs).toHaveLength(1);
+    expect(crumbs[0]).toEqual({
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Libraria", item: "https://librum.al/librari" },
+        { "@type": "ListItem", position: 2, name: "Letërsi artistike", item: "https://librum.al/librari?genre=Let%C3%ABrsi+artistike" },
+        { "@type": "ListItem", position: 3, name: LIVE_BOOK.title, item: `https://librum.al/libra/${BOOK_ID}` },
+      ],
+    });
+    // The same links the visible breadcrumbs use.
+    expect(html).toContain('href="/librari?genre=Let%C3%ABrsi+artistike"');
+  });
+
+  it("B2: a book with no genre gets Libraria > title, and a free book still has no price anywhere", async () => {
+    const html = await render({ user: null, book: { ...LIVE_BOOK, genre: null, price_all: 0 } });
+    const blocks = jsonLdBlocks(html).map((b) => JSON.parse(b));
+    const crumbs = blocks.find((d) => d["@type"] === "BreadcrumbList");
+    expect(crumbs.itemListElement.map((c: { name: string }) => c.name)).toEqual(["Libraria", LIVE_BOOK.title]);
+    expect(crumbs.itemListElement.map((c: { position: number }) => c.position)).toEqual([1, 2]);
+    for (const block of blocks) expect(JSON.stringify(block)).not.toMatch(/offers|price/i);
   });
 
   it("the author's preview of an unpublished book has none", async () => {

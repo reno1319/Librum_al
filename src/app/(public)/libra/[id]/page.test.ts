@@ -352,12 +352,12 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
       { book: UNPRICED_BOOK, quoteRows: heldQuote },
     );
 
-    expect(html).not.toContain("Blini e-librin");
-    expect(html).not.toContain("Merreni e-librin");
-    expect(html).not.toContain('placeholder="Kodi promocional (opsional)"');
+    expect(html).not.toContain("Blej librin");
+    expect(html).not.toContain("Merre falas");
     expect(html).not.toContain('name="code"');
-    expect(html).not.toContain("Hyr për ta blerë");
-    expect(html).not.toContain("Hyr për ta marrë këtë libër");
+    expect(html).not.toContain("Kodi promocional");
+    expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Blej librin</);
+    expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Merre falas</);
     // What it DOES show: the unavailable state, and the two things that
     // remain legitimate -- saving it for later, and the sample.
     expect(html).toContain("Nuk mund të blihet tani");
@@ -375,9 +375,9 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     // purchasable price to start a new checkout at.
     expect(html).not.toContain("Mund të nisni një pagesë të re me çmimin aktual");
     expect(html).not.toContain("pagesë të re me çmimin aktual");
-    expect(html).not.toContain("Blini e-librin");
-    expect(html).not.toContain("Merreni e-librin");
-    expect(html).not.toContain('placeholder="Kodi promocional (opsional)"');
+    expect(html).not.toContain("Blej librin");
+    expect(html).not.toContain("Merre falas");
+    expect(html).not.toContain('name="code"');
   });
 
   // The gate is the PURCHASE STATE, not merely "is price_all null" --
@@ -391,7 +391,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(rpc).not.toHaveBeenCalledWith("get_book_checkout_quote", expect.anything());
     expect(html).toContain("Çmimi nuk është i disponueshëm");
     expect(html).not.toContain("Vazhdoni atë pagesë");
-    expect(html).not.toContain("Hyr për ta blerë");
+    expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Blej librin</);
   });
 
   it("a FREE book exposes no paid-checkout resume surface either", async () => {
@@ -403,7 +403,7 @@ describe("BookDetailPage: an unavailable book exposes no checkout-resume surface
     expect(html).not.toContain("tashmë një pagesë të nisur");
     expect(html).not.toContain("Vazhdoni atë pagesë");
     // ...while its own legitimate free acquisition is untouched.
-    expect(html).toContain("Merreni e-librin — Falas");
+    expect(html).toContain(">Merre falas</button>");
   });
 
   // Positive control, in this same block, so the two live side by side:
@@ -512,7 +512,7 @@ describe("BookDetailPage: redesign step 3", () => {
 
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
-    expect(html).toContain("Blini e-librin — 250 lekë");
+    expect(html).toContain(">Blej librin</button>");
     // P1: EPUB and DRM sit in their own smaller spans; the words are the same.
     expect(html.replace(/<[^>]+>/g, "")).toContain("EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.");
     expect(html).toContain("Shkarkojeni kurdo nga Biblioteka juaj në Librum.");
@@ -524,7 +524,7 @@ describe("BookDetailPage: redesign step 3", () => {
 
   it("a free book keeps its existing sentence and none of the paid lines", async () => {
     const html = await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: 0 } });
-    expect(html).toContain("Merreni e-librin — Falas");
+    expect(html).toContain(">Merre falas</button>");
     expect(html).toContain("Falas, pa pagesë.");
     expect(html).not.toContain("Paguani me kartë.");
   });
@@ -551,8 +551,8 @@ describe("BookDetailPage: redesign step 3", () => {
   });
 
   it("About the Author offers Follow to a signed-in reader, Following once followed", async () => {
-    expect(await render({ user: { id: "reader" } })).toMatch(/>Ndiqni<\/button>/);
-    expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Po e ndiqni<\/button>/);
+    expect(await render({ user: { id: "reader" } })).toMatch(/>Ndiq<\/button>/);
+    expect(await render({ user: { id: "reader" }, following: true })).toMatch(/>Po e ndjek<\/button>/);
   });
 
   it("a visitor gets the author page's own Hyr për ta ndjekur link; the author gets no follow control", async () => {
@@ -603,7 +603,7 @@ describe("BookDetailPage: P1 design B", () => {
   const text = (html: string) => html.replace(/<[^>]+>/g, "");
 
   it("draws the page on white", async () => {
-    expect(await render({})).toMatch(/^<div class="flex flex-1 flex-col bg-surface"><main/);
+    expect(await render({})).toMatch(/^<div class="flex flex-1 flex-col bg-surface max-md:pb-20 [^"]*"><main/);
   });
 
   it("tiles: pages and reading time from the counted words (minutes under an hour), Formati always", async () => {
@@ -635,12 +635,15 @@ describe("BookDetailPage: P1 design B", () => {
 
   // DR1 fix 1: on phones the one price box sits under the title block,
   // by visual order only; DR1 fix 4: serif section headings.
-  it("phone order: title block, then the one price box, then the description", async () => {
+  // Patch A: on phones a 7.5rem cover sits beside the title (row 1), the
+  // box is row 2 and the rest row 3.
+  it("phone order: cover beside the title, then the one price box, then the description", async () => {
     const html = await render({});
     expect(html.match(/id="blerja"/g)).toHaveLength(1);
-    expect(html).toContain('<div class="min-w-0 max-md:contents"><div class="max-md:order-1"><h1');
-    expect(html).toMatch(/<div class="max-md:order-3"><hr class="my-4 max-md:mt-0 /);
-    expect(html).toMatch(/<aside aria-label="Çmimi dhe marrja e librit" class="w-full max-md:order-2 md:col-start-2 lg:col-start-3 lg:row-start-1">/);
+    expect(html).toContain('grid grid-cols-[7.5rem_minmax(0,1fr)]');
+    expect(html).toContain('<div class="min-w-0 max-md:contents"><div class="max-md:col-start-2 max-md:row-start-1 max-md:self-center"><h1');
+    expect(html).toMatch(/<div class="max-md:col-span-2 max-md:row-start-3"><hr class="my-4 max-md:mt-0 /);
+    expect(html).toMatch(/<aside aria-label="Çmimi dhe marrja e librit" class="w-full max-md:col-span-2 max-md:row-start-2 md:col-start-2 lg:col-start-3 lg:row-start-1">/);
     expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Rreth autorit</h2>');
     expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Vlerësimet</h2>');
   });
@@ -651,21 +654,21 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).toMatch(/href="\/autore\/pen-an-author"[^>]*>An Author<\/a> <span class="text-muted">\(Autor\)<\/span>/);
   });
 
-  it("the price box: a dark green pill main action (DR1), the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
+  it("the price box: a gold pill main action (patch A, 1a), the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
     const html = await render({ user: { id: "reader" } });
     const box = html.slice(html.indexOf('id="blerja"'), html.indexOf("</aside>"));
-    expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-primary [^"]*">Blini e-librin — 250 lekë<\/button>/);
-    expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexoni një pjesë<\/button>/);
-    expect(box).toContain(">Ruajeni për më vonë</button>");
+    expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-accent [^"]*text-accent-foreground[^"]*">Blej librin<\/button>/);
+    expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexo një pjesë<\/button>/);
+    expect(box).toContain(">Ruaje për më vonë</button>");
     expect(box).toContain('aria-label="Ndajeni në WhatsApp"');
     expect(box).toMatch(/<a href="\/libra\/11111111-1111-4111-8111-111111111111"[^>]*><span aria-live="polite">Kopjo lidhjen<\/span><\/a>/);
-    expect(html).toMatch(/<button type="button" class="[^"]*rounded-full[^"]*">Shikoni brenda<\/button>/);
+    expect(html).toMatch(/<button type="button" class="[^"]*rounded-full[^"]*">Shiko brenda<\/button>/);
   });
 
   it("an owner gets no sample anywhere (unchanged rule)", async () => {
     const html = await render({ user: { id: "reader" }, owns: true });
-    expect(html).not.toContain("Shikoni brenda");
-    expect(html).not.toContain("Lexoni një pjesë");
+    expect(html).not.toContain("Shiko brenda");
+    expect(html).not.toContain("Lexo një pjesë");
   });
 
   it("the cover opens large: a plain link to the image without JavaScript", async () => {
@@ -695,5 +698,100 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).toContain('href="https://www.instagram.com/someone" rel="nofollow ugc noopener noreferrer" target="_blank" aria-label="Instagram: www.instagram.com/someone"');
     expect(html).toContain('aria-label="Facebook: www.facebook.com/someone"');
     expect(html).toContain('aria-label="example.com"');
+  });
+});
+
+// Patch A (Renato 11-13): the buy box and the phone sticky bar. The bar
+// repeats the box's main action only, under the same purchaseState gate.
+describe("BookDetailPage: patch A buy box and sticky bar", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    mockCreateClient.mockReset();
+    mockCreateAdminClient.mockReset();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function render(options: { user?: { id: string } | null; book?: Record<string, unknown>; owns?: boolean; open?: boolean }) {
+    vi.unstubAllEnvs();
+    if (options.open !== false) openPaidCheckout();
+    const { client } = stubSupabase({ user: options.user ?? null, book: options.book, owns: options.owns });
+    mockCreateClient.mockImplementation(() => client);
+    mockCreateAdminClient.mockImplementation(() => ({ from: () => queryStub({ data: null }) }));
+    const element = await BookDetailPage(pageArgs());
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+  const bar = (html: string) => {
+    const at = html.indexOf("data-sticky-buy-bar");
+    return at === -1 ? null : html.slice(at);
+  };
+  const FREE = { ...BOOK_ROW, price_all: 0 };
+  const LOGIN = `href="/login?next=/libra/${BOOK_ID}"`;
+
+  it("signed-in reader, checkout open: the bar's button is a Blej librin submit, with no promo code; starts hidden, phones only", async () => {
+    const b = bar(await render({ user: { id: "reader" } }));
+    expect(b).not.toBeNull();
+    expect(b).toMatch(/^data-sticky-buy-bar="" aria-hidden="true" inert="" class="[^"]*md:hidden[^"]*translate-y-full"/);
+    expect(b).toContain("env(safe-area-inset-bottom)");
+    expect(b).toMatch(/<form[^>]*><button type="submit" class="[^"]*bg-accent[^"]*">Blej librin<\/button><\/form>/);
+    expect(b).toContain("Test Book");
+    expect(b).toContain("250 lekë");
+    expect(b).not.toContain('name="code"');
+  });
+
+  it("anonymous, checkout open: the bar and the box both send to sign-in and back", async () => {
+    const html = await render({ user: null });
+    expect(bar(html)).toContain(`${LOGIN}>Blej librin</a>`);
+    const box = html.slice(html.indexOf('id="blerja"'), html.indexOf("</aside>"));
+    expect(box).toMatch(/<a class="[^"]*bg-accent[^"]*" href="\/login\?next=\/libra\/[^"]+">Blej librin<\/a>/);
+  });
+
+  it("free book: Merre falas, a submit for a reader and a sign-in link for a visitor", async () => {
+    expect(bar(await render({ user: { id: "reader" }, book: FREE }))).toMatch(/<button type="submit" class="[^"]*">Merre falas<\/button>/);
+    expect(bar(await render({ user: null, book: FREE }))).toContain(`${LOGIN}>Merre falas</a>`);
+  });
+
+  it("no bar for the author, an owner, an unavailable price, or a closed checkout (signed in or not)", async () => {
+    expect(bar(await render({ user: { id: "author" } }))).toBeNull();
+    expect(bar(await render({ user: { id: "reader" }, owns: true }))).toBeNull();
+    expect(bar(await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: null } }))).toBeNull();
+    expect(bar(await render({ user: null, book: { ...BOOK_ROW, price_all: null } }))).toBeNull();
+    const closedReader = await render({ user: { id: "reader" }, open: false });
+    const closedAnon = await render({ user: null, open: false });
+    for (const html of [closedReader, closedAnon]) {
+      expect(bar(html)).toBeNull();
+      expect(html).not.toContain("Blej librin");
+      expect(html).not.toContain('name="code"');
+    }
+  });
+
+  it("the promo code sits in a closed <details>, same input name", async () => {
+    const html = await render({ user: { id: "reader" } });
+    expect(html).toMatch(/<details class="[^"]*"><summary class="[^"]*min-h-11[^"]*">Keni një kod promocional\?<\/summary><input type="text" [^>]*name="code"\/><\/details>/);
+    expect(html).not.toMatch(/<details[^>]* open/);
+  });
+
+  it("no rating line under the title before the first review; one quiet line in the empty section, none for the owner", async () => {
+    const reader = await render({ user: { id: "reader" } });
+    expect(reader).not.toContain('href="#vleresimet"');
+    expect(reader).toContain("Ende pa vlerësime. Vlerësimi i parë mund të jetë i juaji, pasi ta lexoni librin.");
+    expect(reader).not.toContain("Ende nuk ka vlerësime.");
+    const owner = await render({ user: { id: "reader" }, owns: true });
+    expect(owner).not.toContain("Vlerësimi i parë mund të jetë i juaji");
+  });
+
+  it("the sample's end link speaks informally", async () => {
+    // The end link label travels to the client reader as a prop; the
+    // server-rendered trigger is what this test can see, so it checks
+    // the page source's own labels instead.
+    const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("./page.tsx", import.meta.url), "utf8"));
+    expect(src).toContain('? "Merre falas"');
+    expect(src).toContain('? "Blej librin"');
+    expect(src).not.toContain("Blini e-librin");
+    expect(src).not.toContain("Merreni e-librin");
+  });
+
+  it("the page leaves room for the bar on phones and sizes card genre labels on this page only", async () => {
+    const html = await render({ user: { id: "reader" } });
+    expect(html).toMatch(/^<div class="flex flex-1 flex-col bg-surface max-md:pb-20 \[&amp;_\[data-card-genre\]\]:text-\[0.8125rem\]/);
   });
 });

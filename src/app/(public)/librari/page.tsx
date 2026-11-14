@@ -7,8 +7,17 @@ import { formatCatalogPriceLabel, resolveCatalogPriceState } from "@/lib/catalog
 import {
   parseBookstoreQuery,
   buildBookstoreHref,
+  toggleGenreHref,
+  togglePriceHref,
+  activePricePreset,
+  countCatalogueFacets,
+  sidebarGenres,
+  PRICE_PRESETS,
   BOOKSTORE_SORT_OPTIONS,
+  sortByAlbanianTitle,
   type BookstoreQuery,
+  type CatalogueFacets,
+  type FacetRow,
 } from "@/lib/bookstore";
 import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -24,7 +33,6 @@ import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
-import { GENRES } from "@/lib/genres";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
@@ -236,6 +244,9 @@ async function fetchSearchResults(
     results = [...results].sort((a, b) => (a.price_all ?? 0) - (b.price_all ?? 0));
   } else if (sort === "price_desc") {
     results = [...results].sort((a, b) => (b.price_all ?? 0) - (a.price_all ?? 0));
+  } else if (sort === "title_asc") {
+    // B2: A–Zh in Albanian alphabet order (see sortByAlbanianTitle).
+    results = sortByAlbanianTitle(results);
   } else if (sort === "bestselling" && results.length > 0) {
     // Real non-refunded purchase counts for exactly the books already in
     // this result set, aggregated server-side (see bestselling_books in
@@ -271,6 +282,32 @@ async function fetchSearchResults(
   const totalMatched = results.length;
 
   return { books: results.slice(0, SEARCH_RESULT_LIMIT), error: hadError, totalMatched };
+}
+
+// Patch C: the sidebar counts read the WHOLE listed catalogue -- the
+// same rows the unfiltered grid lists (listed status, an ALL price) --
+// never the current filtered result and not capped at
+// SEARCH_CANDIDATE_LIMIT. Cost: one extra light query per Libraria
+// view, two small columns per book (categories and the public pen name
+// embed; the embed is null when BD14 hides the pen name). Bounded at
+// FACET_SCAN_LIMIT, the Supabase API's default row cap; past it the
+// counts would undercount, and a counting RPC is the follow-up. A
+// failed read returns null: the lists stay, the counts go.
+const FACET_SCAN_LIMIT = 1000;
+
+async function fetchCatalogueFacets(supabase: SupabaseClient): Promise<CatalogueFacets | null> {
+  const { data, error } = await supabase
+    .from("public_books")
+    .select("categories, pen:public_pen_names(id, name)")
+    .in("status", LISTED_BOOK_STATUSES)
+    .not("price_all", "is", null)
+    .limit(FACET_SCAN_LIMIT)
+    .returns<FacetRow[]>();
+  if (error) {
+    console.error("Bookstore: failed to load the sidebar counts:", error);
+    return null;
+  }
+  return countCatalogueFacets(data ?? []);
 }
 
 // Published bundles only -- the same "published or own author" policy
@@ -392,7 +429,8 @@ export default async function BookstorePage({
   // signed in, so the unfiltered view (the only one with the band) asks.
   // F5: the unfiltered view also asks for Librum's choice (null when
   // nothing is picked, the pick is unpublished, or before the migration).
-  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn, librumChoice] = await Promise.all([
+  // Patch C: the sidebar counts, on every view.
+  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn, librumChoice, facets] = await Promise.all([
     fetchSearchResults(supabase, { q, genre, sort, minPriceAll, maxPriceAll }),
     isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
     isFiltered ? Promise.resolve([]) : fetchFreeBooks(supabase),
@@ -400,6 +438,7 @@ export default async function BookstorePage({
       ? Promise.resolve(false)
       : supabase.auth.getUser().then(({ data }) => !!data.user),
     isFiltered ? Promise.resolve(null) : getLibrumChoiceBook(),
+    fetchCatalogueFacets(supabase),
   ]);
 
   // REDESIGN STEP 3 / F5 (C2): the feature only on the unfiltered view
@@ -408,13 +447,14 @@ export default async function BookstorePage({
   const showShelves = !isFiltered && !error && books.length > 0;
   const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
 
-  // P2 (design B): the big heading and the ornate shelf are gone. The
-  // page is white, opens with a slim feature strip, then "Libraria · N
-  // libra" with the page's own search box, genres, Sort, Price and Libra
-  // falas (P2c, Renato 11-10 option b: the site header is the old one on
-  // every page again, so search and genres are back inside this page),
-  // then the grid. The free shelf follows the grid, then bundles and the
-  // band.
+  // Patch C (Renato 11-13, version A, Kolibër-style): the feature strip
+  // stays on top (A2 a); then a title row (serif "Libraria", the count,
+  // and from lg up "Renditja" with the sort); then two columns from lg
+  // up: a sidebar (search, Zhanri, Çmimi, Autorë with counts) and the
+  // chips over the grid. Under lg: the search, then "Filtrat" (the same
+  // lists in a panel) beside the sort, then the chips and the grid. The
+  // free shelf, bundles and the band follow at full width, as before.
+  const query = { ...rawQuery, genre };
   return (
     <main className="flex-1 bg-surface">
       <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
@@ -426,14 +466,40 @@ export default async function BookstorePage({
           />
         )}
 
-        <BookstoreHeading
-          query={{ ...rawQuery, genre }}
-          isFiltered={isFiltered}
-          countLine={error || books.length === 0 ? null : countLineFor(totalMatched)}
-          hasFeature={!!featured}
-        />
+        <TitleRow query={query} countLine={error ? null : countLineFor(totalMatched)} hasFeature={!!featured} />
 
-        <BookGrid supabase={supabase} books={books} error={error} isFiltered={isFiltered} />
+        <div className="mt-5 lg:mt-8 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
+          <div>
+            <SearchBox query={query} />
+            <nav aria-label="Filtrat" className="mt-6 hidden lg:block">
+              <FilterLists query={query} facets={facets} />
+            </nav>
+          </div>
+
+          <div className="min-w-0">
+            <div className="mt-3 grid grid-cols-2 gap-2 lg:hidden">
+              {/* r2 (audit B1): a tap on a filter closes the panel, so the
+                  new results are not hidden under it. */}
+              <DismissableDetails className="group" closeOnLinkClick>
+                <summary className={`${DROPDOWN_SUMMARY_CLASSES} justify-center`}>
+                  Filtrat
+                  <ChevronIcon />
+                </summary>
+                <nav
+                  aria-label="Filtrat"
+                  className="absolute inset-x-4 z-30 mt-2 max-h-[70vh] overflow-y-auto rounded-[8px] border border-border bg-surface p-4 shadow-md"
+                >
+                  <FilterLists query={query} facets={facets} />
+                </nav>
+              </DismissableDetails>
+              <SortForm query={query} id="bookstore-sort-phone" />
+            </div>
+
+            <FilterChips query={query} />
+
+            <BookGrid supabase={supabase} books={books} error={error} isFiltered={isFiltered} />
+          </div>
+        </div>
 
         {freeBooks.length > 0 && (
           <CoverShelf
@@ -459,257 +525,286 @@ function countLineFor(totalMatched: number): string {
     : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
 }
 
-// P2 (design B): "Libraria · <genre> · “<words>” · N libra" on the left,
-// the search box on the right (full width under 640px). P2c: under them
-// one row of pills: Zhanret, Sort, Price, Libra falas. Each keeps the
-// other current filters: the search box and Sort are small GET forms
-// with hidden fields (Sort sends itself on change, with a button only
-// when JavaScript is off); genres and Libra falas are links.
-function BookstoreHeading({
+// Patch C: the title row. The count sits on the right at every width
+// (none after a failed load); "Renditja" and the sort join it from lg up.
+function TitleRow({
   query,
-  isFiltered,
   countLine,
   hasFeature,
 }: {
   query: BookstoreQuery;
-  isFiltered: boolean;
   countLine: string | null;
   hasFeature: boolean;
 }) {
-  const { q, genre, sort, minPrice, maxPrice } = query;
-  const words = q?.trim();
-  const details = [genre, words ? `“${words}”` : null, countLine].filter(Boolean);
-
-  const freeActive = maxPrice === "0" && !minPrice;
-
   return (
-    <div className={`${hasFeature ? "mt-6" : "mt-1"} border-b border-border pb-3`}>
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
-        <h1 className="min-w-0 text-xl font-semibold text-foreground">
-          Libraria
-          {details.map((part) => (
-            <span key={part} className="text-sm font-normal text-muted">
-              {" · "}
-              {part}
-            </span>
-          ))}
-        </h1>
-
-        {/* P2c: the page's own search box (as before P2). It keeps the
-            current genre, sort and price; a new search replaces the words.
-            16px text on phones so iPhone Safari does not zoom in. */}
-        <form
-          id="bookstore-search"
-          action="/librari"
-          method="get"
-          role="search"
-          className="flex w-full min-w-0 sm:w-auto sm:max-w-[28rem] sm:min-w-[18rem] sm:flex-1"
-        >
-          <label htmlFor="bookstore-q" className="sr-only">
-            Kërkoni libra ose autorë
-          </label>
-          <input
-            id="bookstore-q"
-            type="search"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Kërkoni libra ose autorë"
-            className="focus-ring h-9 min-w-0 flex-1 rounded-l-full border border-r-0 border-control bg-surface px-4 text-base text-foreground sm:h-8 sm:text-sm"
-          />
-          {genre && <input type="hidden" name="genre" value={genre} />}
-          {sort && <input type="hidden" name="sort" value={sort} />}
-          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-          <button
-            type="submit"
-            className="focus-ring h-9 shrink-0 rounded-r-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover sm:h-8"
-          >
-            Kërkoni
-          </button>
-        </form>
-      </div>
-
-      {/* P2d (Renato 11-10): on phones the four pills sit in two tidy rows
-          of two equal pills (a 2x2 grid), all visible with no swiping;
-          "Hiqni filtrat" goes on its own line under them. From 640px up
-          the row wraps as before. */}
-      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2.5">
-        {/* P2c: the genre list, as the old header menu had it. On phones
-            it spans the page, 16px from each edge, so it never runs past
-            the screen; from 640px up it hangs under the button. Each
-            genre keeps the current words, sort and price. */}
-        <DismissableDetails className="group text-sm sm:relative" closeOnLinkClick>
-          <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            Zhanret
-            <ChevronIcon />
-          </summary>
-          <nav
-            aria-label="Zhanret"
-            className="absolute inset-x-4 z-30 mt-2 rounded-[8px] border border-border bg-surface p-2 shadow-md sm:inset-x-auto sm:left-0 sm:w-[26rem]"
-          >
-            <ul className="grid gap-0.5 sm:grid-cols-2">
-              <li>
-                <Link
-                  href={buildBookstoreHref(query, { genre: undefined })}
-                  aria-current={!genre ? "true" : undefined}
-                  className={`${GENRE_LINK_CLASSES} ${!genre ? "font-semibold text-primary" : "font-medium text-foreground"}`}
-                >
-                  Të gjitha zhanret
-                </Link>
-              </li>
-              {GENRES.map((g) => (
-                <li key={g}>
-                  <Link
-                    href={buildBookstoreHref(query, { genre: g })}
-                    aria-current={genre === g ? "true" : undefined}
-                    className={`${GENRE_LINK_CLASSES} ${genre === g ? "font-semibold text-primary" : "font-medium text-foreground"}`}
-                  >
-                    {g}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </DismissableDetails>
-
-        <form action="/librari" method="get" className="contents">
-          {q && <input type="hidden" name="q" value={q} />}
-          {genre && <input type="hidden" name="genre" value={genre} />}
-          {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-          {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-          {/* Still a native select: the box around it (with "Sort by")
-              is drawn to match the Price button beside it. */}
-          <label
-            htmlFor="bookstore-sort"
-            className={`${FILTER_CONTROL_CLASSES} has-[select:focus-visible]:shadow-[var(--focus-ring)]`}
-          >
-            {/* On phones the label is for screen readers only, so Sort and
-                Price fit on one line. */}
-            <span className="sr-only font-normal text-muted sm:not-sr-only">Renditni sipas</span>
-            <span className="relative flex flex-1 items-center">
-              <AutoSubmitSelect
-                id="bookstore-sort"
-                name="sort"
-                defaultValue={sort ?? ""}
-                className="w-full cursor-pointer appearance-none bg-transparent pr-5 font-semibold text-foreground outline-none"
-              >
-                {BOOKSTORE_SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </AutoSubmitSelect>
-              <span className="pointer-events-none absolute right-0 flex">
-                <ChevronIcon />
-              </span>
-            </span>
-          </label>
-          <noscript>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
-              Renditni
-            </button>
-          </noscript>
-        </form>
-
-        {/* P2 r2: on phones the price box spans the page, 16px from each
-            edge (Sort and Price now share one line, so a box hung under
-            the button could run off the screen); from 640px up it hangs
-            under the button, right-aligned. */}
-        <DismissableDetails className="group text-sm sm:relative">
-          <summary className={DROPDOWN_SUMMARY_CLASSES}>
-            Çmimi (lekë)
-            <ChevronIcon />
-          </summary>
-          <form
-            action="/librari"
-            method="get"
-            className="absolute inset-x-4 z-20 mt-2 flex items-end gap-3 rounded-[8px] border border-border bg-surface p-3 shadow-md sm:inset-x-auto sm:right-0 sm:w-max"
-          >
-            {q && <input type="hidden" name="q" value={q} />}
-            {genre && <input type="hidden" name="genre" value={genre} />}
-            {sort && <input type="hidden" name="sort" value={sort} />}
-
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <label htmlFor="bookstore-min-price" className="block text-xs text-muted">
-                Nga
-              </label>
-              <input
-                id="bookstore-min-price"
-                type="number"
-                name="minPrice"
-                defaultValue={minPrice ?? ""}
-                placeholder="0"
-                min="0"
-                step="1"
-                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
-              />
-            </div>
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <label htmlFor="bookstore-max-price" className="block text-xs text-muted">
-                Deri
-              </label>
-              <input
-                id="bookstore-max-price"
-                type="number"
-                name="maxPrice"
-                defaultValue={maxPrice ?? ""}
-                placeholder="Pa kufi"
-                min="0"
-                step="1"
-                className="focus-ring w-full rounded-[8px] border border-[#8c8472] bg-surface px-2 py-1.5 text-sm sm:w-24"
-              />
-            </div>
-            <button type="submit" className={buttonClasses("outline", "sm", "rounded-full")}>
-              Zbatoni
-            </button>
-          </form>
-        </DismissableDetails>
-
-        {/* P2c: Libra falas (the old header link) as a pill: free books,
-            keeping the current words, genre and sort. P2d: when it is on,
-            tapping it again switches it off (all prices, the rest kept). */}
-        <Link
-          href={buildBookstoreHref(
-            query,
-            freeActive ? { maxPrice: undefined } : { minPrice: undefined, maxPrice: "0" },
-          )}
-          aria-current={freeActive ? "true" : undefined}
-          className={`focus-ring ${FILTER_CONTROL_CLASSES} max-sm:justify-center ${freeActive ? "border-primary bg-primary! text-primary-foreground! hover:bg-primary-hover!" : ""}`}
-        >
-          {/* P2d: when on, the pill is filled dark green with a tick, so
-              on and off are clearly different ("!" because the shared
-              pill classes already set a background and text colour). */}
-          {freeActive && (
-            <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3">
-              <path d="M2 6.5l2.5 2.5L10 3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            </svg>
-          )}
-          Libra falas
-        </Link>
-
-        {isFiltered && (
-          <Link href="/librari" className={`${TEXT_LINK_CLASSES} col-span-2 justify-self-start sm:ml-1`}>
-            Hiqni filtrat
-          </Link>
+    <div className={`${hasFeature ? "mt-10" : "mt-1"} flex items-end justify-between gap-6 border-b border-border pb-4`}>
+      <h1 className="font-serif text-[2.5rem] leading-none font-normal text-primary sm:text-[3.25rem]">Libraria</h1>
+      <div className="flex items-center gap-4">
+        {countLine && (
+          <p className="text-base whitespace-nowrap text-muted" aria-live="polite">
+            <span>{countLine}</span>
+          </p>
         )}
+        <div className="hidden items-center gap-3 lg:flex">
+          <label htmlFor="bookstore-sort" className="text-base text-muted">
+            Renditja
+          </label>
+          <div className="w-56">
+            <SortForm query={query} id="bookstore-sort" />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-// V1 (V8): the one look shared by the price button and the box around
-// the Sort select. iPhone step (I1b): 16px on phones, so the row stays
-// matched with the 16px sort select (globals.css), 14px from 640px up.
-// P2 r2 (Renato 13:43Z: "too big and squared"): slim rounded pills,
-// 40px tall on phones and 34px from 640px up; the control border keeps
-// its 3:1 contrast. P2c (Renato 11-10 18:01Z, option a): slimmer still,
-// 36px on phones and 32px from 640px up (the search box too); the text
-// stays 16px on phones so iPhone Safari does not zoom in.
-const FILTER_CONTROL_CLASSES =
-  "flex h-9 cursor-pointer items-center justify-between gap-1.5 rounded-full border border-control bg-surface px-3 text-base font-semibold text-foreground sm:h-8 sm:text-sm";
-const GENRE_LINK_CLASSES =
-  "focus-ring block rounded-[4px] px-3 py-2 text-[0.9375rem] transition-colors hover:bg-surface-hover hover:text-primary";
-const DROPDOWN_SUMMARY_CLASSES = `focus-ring ${FILTER_CONTROL_CLASSES} list-none select-none [&::-webkit-details-marker]:hidden`;
+// The sort: its own small GET form keeping the words, genre and price.
+// It sends itself on change; "Rendit" shows only without JavaScript.
+// The title row's copy has a visible "Renditja" label; the phone copy
+// has a screen-reader one.
+function SortForm({ query, id }: { query: BookstoreQuery; id: string }) {
+  const { q, genre, sort, minPrice, maxPrice } = query;
+  const visibleLabel = id === "bookstore-sort";
+  return (
+    <form action="/librari" method="get" className="flex gap-2">
+      {q && <input type="hidden" name="q" value={q} />}
+      {genre && <input type="hidden" name="genre" value={genre} />}
+      {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
+      {/* r2 (audit N2): the select fills the whole 44px pill, so a tap
+          anywhere on it opens the list. */}
+      <span className="relative flex h-11 min-w-0 flex-1 items-center rounded-full border border-control bg-surface has-[select:focus-visible]:shadow-[var(--focus-ring)]">
+        {!visibleLabel && (
+          <label htmlFor={id} className="sr-only">
+            Renditja
+          </label>
+        )}
+        <AutoSubmitSelect
+          id={id}
+          name="sort"
+          defaultValue={sort ?? ""}
+          className="h-full w-full min-w-0 cursor-pointer appearance-none truncate rounded-full bg-transparent pr-10 pl-4 text-base font-medium text-foreground outline-none"
+        >
+          {BOOKSTORE_SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </AutoSubmitSelect>
+        <span className="pointer-events-none absolute right-4 flex">
+          <ChevronIcon />
+        </span>
+      </span>
+      <noscript>
+        <button type="submit" className={`${buttonClasses("outline", "sm", "rounded-full")} h-11`}>
+          Rendit
+        </button>
+      </noscript>
+    </form>
+  );
+}
+
+// Patch C: a cream pill with a round search button inside. It keeps the
+// genre, sort and price; 16px text so iPhone Safari does not zoom in.
+function SearchBox({ query }: { query: BookstoreQuery }) {
+  const { q, genre, sort, minPrice, maxPrice } = query;
+  return (
+    <form id="bookstore-search" action="/librari" method="get" role="search" className="relative flex">
+      <label htmlFor="bookstore-q" className="sr-only">
+        Kërkoni libra ose autorë
+      </label>
+      <input
+        id="bookstore-q"
+        type="search"
+        name="q"
+        defaultValue={q ?? ""}
+        placeholder="Kërkoni libra, autorë…"
+        className="focus-ring h-11 w-full min-w-0 rounded-full border-0 bg-[#f1eee6] pr-12 pl-5 text-base text-foreground"
+      />
+      {genre && <input type="hidden" name="genre" value={genre} />}
+      {sort && <input type="hidden" name="sort" value={sort} />}
+      {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
+      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
+      {/* r2 (audit N1): a 44px tap area around the 36px green circle. */}
+      <button
+        type="submit"
+        aria-label="Kërko"
+        className="focus-ring group absolute top-0 right-0 flex size-11 items-center justify-center rounded-full"
+      >
+        <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors group-hover:bg-primary-hover">
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4">
+            <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="2" />
+            <path d="M13 13l4.5 4.5" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </span>
+      </button>
+    </form>
+  );
+}
+
+// Each list row is a 44px tap target; the active row is cream and bold
+// green, and tapping it again clears it.
+const SIDEBAR_ROW =
+  "focus-ring flex min-h-11 items-center justify-between gap-3 rounded-[6px] px-3 text-[15px] transition-colors hover:bg-[#f1eee6]";
+const sidebarRow = (active: boolean) =>
+  `${SIDEBAR_ROW} ${active ? "bg-[#f1eee6] font-semibold text-primary" : "text-foreground"}`;
+const SIDEBAR_HEADING = "mb-2 text-base font-semibold text-foreground";
+// How many authors show before "Shiko të gjithë" (A1 a: the rest open
+// in place, no separate page).
+const SIDEBAR_AUTHORS = 6;
+
+function Count({ n }: { n: number | null }) {
+  return n == null ? null : <span className="shrink-0 font-normal text-muted tabular-nums">{n}</span>;
+}
+
+// Zhanri, Çmimi and Autorë. The counts cover the whole listed catalogue
+// (fetchCatalogueFacets); when they failed to load (facets null) the
+// genre and price rows stay, without counts, and Autorë is left out.
+function FilterLists({ query, facets }: { query: BookstoreQuery; facets: CatalogueFacets | null }) {
+  const genres = sidebarGenres(facets, query.genre);
+  const preset = activePricePreset(query);
+  const authors = facets?.authors ?? [];
+  const shown = authors.slice(0, SIDEBAR_AUTHORS);
+  const more = authors.slice(SIDEBAR_AUTHORS);
+  const authorRow = (a: { id: string; name: string; count: number }) => (
+    <li key={a.id}>
+      <Link href={authorPagePath(a.id)} className={sidebarRow(false)}>
+        <span className="min-w-0">{a.name}</span>
+        <Count n={a.count} />
+      </Link>
+    </li>
+  );
+
+  return (
+    <div className="flex flex-col gap-7">
+      <section>
+        <h2 className={SIDEBAR_HEADING}>Zhanri</h2>
+        <ul>
+          <li>
+            <Link
+              href={buildBookstoreHref(query, { genre: undefined })}
+              aria-current={!query.genre ? "true" : undefined}
+              className={sidebarRow(!query.genre)}
+            >
+              <span className="min-w-0">Të gjitha</span>
+              <Count n={facets?.total ?? null} />
+            </Link>
+          </li>
+          {genres.map(({ genre: g, count }) => (
+            <li key={g}>
+              <Link
+                href={toggleGenreHref(query, g)}
+                aria-current={query.genre === g ? "true" : undefined}
+                className={sidebarRow(query.genre === g)}
+              >
+                <span className="min-w-0">{g}</span>
+                <Count n={count} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <h2 className={SIDEBAR_HEADING}>Çmimi</h2>
+        <ul>
+          {PRICE_PRESETS.map((p) => (
+            <li key={p.label}>
+              <Link
+                href={togglePriceHref(query, p)}
+                aria-current={preset === p ? "true" : undefined}
+                className={sidebarRow(preset === p)}
+              >
+                {p.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {shown.length > 0 && (
+        <section>
+          <h2 className={SIDEBAR_HEADING}>Autorë</h2>
+          <ul>{shown.map(authorRow)}</ul>
+          {more.length > 0 && (
+            // r2 (audit N4): the summary stays, so keyboard focus stays on
+            // it and the list can be closed again. A named group, so the
+            // open phone Filtrat panel (also a "group") does not switch it.
+            <details className="group/authors">
+              <summary
+                className={`${TEXT_LINK_CLASSES} ml-3 inline-flex min-h-11 list-none items-center text-[15px]! [&::-webkit-details-marker]:hidden`}
+              >
+                <span className="group-open/authors:hidden">Shiko të gjithë</span>
+                <span className="hidden group-open/authors:inline">Shiko më pak</span>
+              </summary>
+              <ul>{more.map(authorRow)}</ul>
+            </details>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+// Patch B's chips (Renato 11-13), now over the grid: one per filter
+// that is really applied, each removing only itself, then "Hiq të
+// gjitha"; a sort-only view has "Hiq të gjitha" alone. Each link's tap
+// area is 44px tall around a 36px pill. A price that equals a sidebar
+// row reads as that row.
+function FilterChips({ query }: { query: BookstoreQuery }) {
+  const { q, genre } = query;
+  const words = q?.trim();
+  const { minPriceAll, maxPriceAll, isFiltered } = parseBookstoreQuery(query);
+  const preset = activePricePreset(query);
+  const noPrice = { minPrice: undefined, maxPrice: undefined };
+  const chips: { label: string; href: string }[] = [];
+  if (words) chips.push({ label: `“${words}”`, href: buildBookstoreHref(query, { q: undefined }) });
+  if (genre) chips.push({ label: genre, href: buildBookstoreHref(query, { genre: undefined }) });
+  if (preset) {
+    chips.push({ label: preset.label, href: buildBookstoreHref(query, noPrice) });
+  } else if (maxPriceAll === 0 && !minPriceAll) {
+    chips.push({ label: "Falas", href: buildBookstoreHref(query, noPrice) });
+  } else if (minPriceAll != null || maxPriceAll != null) {
+    // r2: an open-ended range reads "Nga X lekë" / "Deri X lekë".
+    const label =
+      minPriceAll != null && maxPriceAll != null
+        ? `Çmimi: ${minPriceAll}–${maxPriceAll} lekë`
+        : minPriceAll != null
+          ? `Nga ${minPriceAll} lekë`
+          : `Deri ${maxPriceAll} lekë`;
+    chips.push({ label, href: buildBookstoreHref(query, noPrice) });
+  }
+  if (chips.length === 0 && !isFiltered) return null;
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 lg:mt-0 lg:mb-6">
+      {chips.map((c) => (
+        <Link
+          key={c.label}
+          href={c.href}
+          aria-label={`Hiq filtrin ${c.label}`}
+          className="focus-ring group -my-1 inline-flex min-h-11 max-w-full min-w-0 items-center rounded-full"
+        >
+          <span className="inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-sm font-semibold text-primary group-hover:bg-primary/15">
+            {/* Long words are cut with "…" so the chip stays in the column. */}
+            <span className="min-w-0 truncate">{c.label}</span>
+            <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 shrink-0">
+              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+          </span>
+        </Link>
+      ))}
+      <Link href="/librari" className={`${TEXT_LINK_CLASSES} -my-1 inline-flex min-h-11 items-center ${chips.length > 0 ? "ml-1" : ""}`}>
+        Hiq të gjitha
+      </Link>
+    </div>
+  );
+}
+
+// The phone "Filtrat" button: a 44px pill, the same look as the sort
+// beside it. 16px text so the row matches the 16px select.
+const DROPDOWN_SUMMARY_CLASSES =
+  "focus-ring flex h-11 cursor-pointer list-none items-center gap-1.5 rounded-full border border-control bg-surface px-4 text-base font-semibold text-foreground select-none [&::-webkit-details-marker]:hidden";
 
 function ChevronIcon() {
   return (
@@ -724,7 +819,7 @@ function ChevronIcon() {
 }
 
 // P2 (design B): the feature is one slim strip -- small cover, label,
-// title, "nga <author> · <genre>", the price and one "Shikoni librin"
+// title, "nga <author> · <genre>", the price and one "Shiko librin"
 // pill to the book's own page, which owns buying and the sample reader.
 // Same byline rule as before: an original author has no Librum page, so
 // it is plain text; the pen name keeps its link.
@@ -799,7 +894,7 @@ function FeaturedStrip({
       </div>
 
       <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
-        Shikoni librin
+        Shiko librin
       </Link>
     </section>
   );
@@ -828,7 +923,7 @@ function CoverShelf({
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className={SECTION_HEADING}>{heading}</h2>
         <Link href={seeAllHref} className={TEXT_LINK_CLASSES}>
-          Shikoni të gjitha
+          Shiko të gjitha
         </Link>
       </div>
       <ul className="-mx-4 mt-5 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
@@ -873,9 +968,10 @@ function BookGrid({
       <EmptyState
         className="mt-10"
         title="Asnjë libër nuk përputhet me kërkimin tuaj."
+        description="Provoni një fjalë tjetër, ose hiqni një filtër."
         action={
           <Link href="/librari" className={buttonClasses("outline", "sm")}>
-            Hiqni filtrat
+            Hiq filtrat
           </Link>
         }
       />
@@ -894,8 +990,9 @@ function BookGrid({
   }
 
   return (
-    <section id="all-books" aria-label="Të gjithë librat" className="mt-6 scroll-mt-6">
-      <ul className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <section id="all-books" aria-label="Të gjithë librat" className="mt-6 scroll-mt-6 lg:mt-0">
+      {/* Patch C: beside the sidebar, 4 per row at md and lg, 5 at xl. */}
+      <ul className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 xl:grid-cols-5">
         {books.map((book) => (
           <li key={book.id}>
             <BookCard
