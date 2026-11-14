@@ -35,6 +35,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/kushtet",
   "/privatesia",
   "/rimbursimet",
+  "/aksesueshmeria",
 ];
 
 // LIBRUM 2.0 BLOG-1D: the first dynamic, DB-backed entries this sitemap

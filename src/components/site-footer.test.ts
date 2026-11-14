@@ -23,8 +23,9 @@ describe("SiteFooter FOOTER_GROUPS", () => {
 });
 
 describe("REFUND POLICY: footer Legal group", () => {
-  it("lists Terms, Privacy and Refunds, in that order", () => {
-    expect(FOOTER_GROUPS.Ligjore.map((l) => l.href)).toEqual(["/kushtet", "/privatesia", "/rimbursimet"]);
+  it("lists Terms, Privacy, Refunds and Accessibility, in that order", () => {
+    expect(FOOTER_GROUPS.Ligjore.map((l) => l.href)).toEqual(["/kushtet", "/privatesia", "/rimbursimet", "/aksesueshmeria"]);
+    expect(FOOTER_GROUPS.Ligjore.find((l) => l.href === "/aksesueshmeria")?.label).toBe("Aksesueshmëria");
     expect(FOOTER_GROUPS.Ligjore.find((l) => l.href === "/rimbursimet")?.label).toBe("Rimbursimet");
   });
 });
