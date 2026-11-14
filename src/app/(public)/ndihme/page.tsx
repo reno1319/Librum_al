@@ -91,6 +91,11 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
         link: { href: "/ndihme/leximi", label: "Si ta lexoni librin tuaj, hap pas hapi" },
       },
       {
+        q: "Pagova, por libri nuk më shfaqet. Çfarë të bëj?",
+        a: "Sigurohuni që keni hyrë me të njëjtën llogari me të cilën e bletë librin, pastaj hapni \"Biblioteka ime\". Pas pagesës, libri shfaqet zakonisht menjëherë. Mos paguani përsëri. Nëse libri nuk shfaqet, na shkruani te support@librum.al me titullin e librit, datën e pagesës dhe emailin e llogarisë: ose jua shtojmë librin, ose jua kthejmë paratë.",
+        link: { href: "/library", label: "Hapni Bibliotekën time" },
+      },
+      {
         q: "Si funksionojnë rimbursimet?",
         a: "Ende nuk mund ta kërkoni vetë një rimbursim në faqe: na shkruani nga faqja e kontaktit. Procesi i rimbursimit për blerjet me POK do të publikohet para se të nisin shitjet me pagesë. Pasi rimbursimi kryhet, humbni automatikisht aksesin te libri (nuk mund ta shkarkoni më, por mbetet në bibliotekën tuaj me shënimin që është rimbursuar).",
       },

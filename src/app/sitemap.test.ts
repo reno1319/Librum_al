@@ -78,6 +78,7 @@ describe("sitemap", () => {
       "/kushtet",
       "/privatesia",
       "/rimbursimet",
+      "/aksesueshmeria",
     ]) {
       expect(paths).toContain(path);
     }

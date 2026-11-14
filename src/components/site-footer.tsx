@@ -35,6 +35,7 @@ export const FOOTER_GROUPS = {
     { href: "/kushtet", label: "Kushtet e përdorimit" },
     { href: "/privatesia", label: "Privatësia" },
     { href: "/rimbursimet", label: "Rimbursimet" },
+    { href: "/aksesueshmeria", label: "Aksesueshmëria" },
   ],
 };
 
