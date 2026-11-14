@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { IconClose } from "@/components/icons";
 import {
+  READER_FONT_FACES,
   READER_FONT_STEPS,
+  READER_FONTS,
   READER_FRAME_SANDBOX,
   READER_THEMES,
   buildReaderFrameDoc,
+  type ReaderFont,
   type ReaderTheme,
 } from "@/lib/reader-frame-doc";
 
@@ -37,17 +40,24 @@ const DEVICE_SIZE: Record<ReaderDevice, { w: number; h: number; label: string }>
   ereader: { w: 600, h: 800, label: "Lexues elektronik" },
 };
 
-const SETTINGS_KEY = "librum-reader-settings";
-type Settings = { theme: ReaderTheme; step: number };
-const DEFAULT_SETTINGS: Settings = { theme: "light", step: 2 };
+// K9 r2: this page's origin never changes while it is open.
+const subscribeNever = () => () => {};
+const readOrigin = () => window.location.origin;
+const readNoOrigin = () => null;
 
-function readSettings(): Settings {
+const SETTINGS_KEY = "librum-reader-settings";
+type Settings = { theme: ReaderTheme; step: number; font: ReaderFont };
+const DEFAULT_SETTINGS: Settings = { theme: "light", step: 2, font: "classic" };
+
+export function readSettings(): Settings {
   try {
     const raw = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? "null") as Partial<Settings> | null;
     const theme = raw?.theme && raw.theme in READER_THEMES ? raw.theme : DEFAULT_SETTINGS.theme;
     const step =
       typeof raw?.step === "number" && raw.step >= 0 && raw.step < READER_FONT_STEPS.length ? Math.floor(raw.step) : DEFAULT_SETTINGS.step;
-    return { theme, step };
+    // K9: a missing or unknown font (older saved settings) reads as Klasike.
+    const font = typeof raw?.font === "string" && Object.prototype.hasOwnProperty.call(READER_FONTS, raw.font) ? raw.font : DEFAULT_SETTINGS.font;
+    return { theme, step, font };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -113,7 +123,11 @@ export function BookReader({
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const srcDoc = useMemo(() => buildReaderFrameDoc(data.html), [data.html]);
+  // K9 r2: the frame may load fonts only from this site's /fonts/. The
+  // origin is read the hydration-safe way: null on the server (fonts
+  // blocked, Klasike shows), the real origin in the browser.
+  const origin = useSyncExternalStore(subscribeNever, readOrigin, readNoOrigin);
+  const srcDoc = useMemo(() => buildReaderFrameDoc(data.html, origin), [data.html, origin]);
 
   const views: View[] = useMemo(() => {
     const list: View[] = [{ kind: "cover" }];
@@ -140,6 +154,7 @@ export function BookReader({
     style.setProperty("--lb-pad-y", `${padY}px`);
     style.setProperty("--lb-h", `${height - padY * 2}px`);
     style.setProperty("--lb-scale", String(READER_FONT_STEPS[settings.step]));
+    style.setProperty("--lb-font", READER_FONTS[settings.font].stack);
     style.setProperty("--lb-page", theme.page);
     style.setProperty("--lb-text", theme.text);
     style.setProperty("--lb-muted", theme.muted);
@@ -424,6 +439,27 @@ export function BookReader({
               >
                 A
               </button>
+            </div>
+            {/* K9 (Renato 11-14, 1a): each choice is written in its own font. */}
+            <style>{READER_FONT_FACES}</style>
+            <div className="flex gap-2 px-4 pb-3" role="radiogroup" aria-label="Shkronjat">
+              {(Object.keys(READER_FONTS) as ReaderFont[]).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.font === key}
+                  onClick={() => updateSettings({ ...settings, font: key })}
+                  className="focus-ring flex h-12 flex-1 items-center justify-center rounded-md border text-[15px]"
+                  style={{
+                    fontFamily: READER_FONTS[key].stack,
+                    borderColor: settings.font === key ? "#c0841a" : chrome.border,
+                    boxShadow: settings.font === key ? "0 0 0 1px #c0841a" : undefined,
+                  }}
+                >
+                  {READER_FONTS[key].label}
+                </button>
+              ))}
             </div>
             <div className="flex gap-2 px-4 pb-4" role="radiogroup" aria-label="Ngjyra e faqes">
               {(

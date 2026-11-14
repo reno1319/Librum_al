@@ -2,13 +2,29 @@
 // frame. The frame is sandboxed WITHOUT allow-scripts (only
 // allow-same-origin, so the reader page can measure and turn pages), and
 // this document carries its own Content Security Policy that blocks every
-// load except inline pictures (data:) and this stylesheet. No fonts,
-// styles, pictures or frames from anywhere else -- the book's own
-// HTML has already been through the server cleaner (reader-content.ts).
+// load except inline pictures (data:), this stylesheet and (K9, Renato
+// 11-14) Librum's own reader fonts from <this site>/fonts/ only (K9 r2:
+// path-limited, so even injected CSS could not reach any other page). No
+// styles, pictures, frames or outside fonts -- the book's own HTML has
+// already been through the server cleaner (reader-content.ts), which
+// drops every <style> and style attribute, so only the @font-face rules
+// below can ask for a font.
 
 export const READER_FRAME_SANDBOX = "allow-same-origin";
-export const READER_FRAME_CSP =
-  "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src 'none'; media-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'";
+const CSP_BASE =
+  "default-src 'none'; img-src data:; style-src 'unsafe-inline'; media-src 'none'; frame-src 'none'; child-src 'none'; form-action 'none'; base-uri 'none'";
+// Only a plain http(s) origin (scheme, host, optional port) is accepted.
+const ORIGIN = /^https?:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i;
+
+/**
+ * The frame's CSP. Fonts load only from `${origin}/fonts/`; with no
+ * usable origin (server render, tests) every font stays blocked and the
+ * reader falls back to the device's own Klasike stack.
+ */
+export function readerFrameCsp(origin?: string | null): string {
+  const fontSrc = origin && ORIGIN.test(origin) ? `${origin}/fonts/` : "'none'";
+  return `${CSP_BASE}; font-src ${fontSrc}`;
+}
 
 export type ReaderTheme = "light" | "sepia" | "dark";
 export const READER_THEMES: Record<ReaderTheme, { page: string; text: string; muted: string; rule: string }> = {
@@ -16,15 +32,36 @@ export const READER_THEMES: Record<ReaderTheme, { page: string; text: string; mu
   sepia: { page: "#f4ecd8", text: "#4a3b2a", muted: "#7c6a55", rule: "#d8c9a8" },
   dark: { page: "#1b1b1d", text: "#d8d4cc", muted: "#9a958c", rule: "#3a3a3e" },
 };
+// K9 (Renato 11-14, 1a): the reader's three typefaces. Classic is the
+// device's own book serif (nothing downloaded); Literata (made for
+// ebooks) and Atkinson Hyperlegible (for low-vision readers) are
+// self-hosted from public/fonts/ (both SIL OFL, licence texts in
+// licenses/fonts/; latin subset: full
+// ë and ç). A font only downloads once a reader picks it.
+export type ReaderFont = "classic" | "literata" | "atkinson";
+export const READER_FONTS: Record<ReaderFont, { label: string; stack: string }> = {
+  classic: { label: "Klasike", stack: `"Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif` },
+  literata: { label: "Literata", stack: `"Lb Literata", Georgia, "Times New Roman", serif` },
+  atkinson: { label: "Atkinson", stack: `"Lb Atkinson", system-ui, -apple-system, "Segoe UI", Arial, sans-serif` },
+};
+/** The @font-face rules for the two downloadable fonts (frame and page). */
+export const READER_FONT_FACES = `
+@font-face { font-family: "Lb Literata"; src: url("/fonts/literata.woff2") format("woff2"); font-weight: 200 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Lb Literata"; src: url("/fonts/literata-italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "Lb Atkinson"; src: url("/fonts/atkinson.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Lb Atkinson"; src: url("/fonts/atkinson-bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Lb Atkinson"; src: url("/fonts/atkinson-italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+`;
+
 // Font size steps (multiples of the base size).
 export const READER_FONT_STEPS = [0.85, 0.95, 1.05, 1.2, 1.35, 1.5] as const;
 
-const CSS = `
+const CSS = `${READER_FONT_FACES}
 html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: var(--lb-page); color: var(--lb-text);
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  font-family: var(--lb-font, ${READER_FONTS.classic.stack});
   font-size: calc(18px * var(--lb-scale, 1.05)); line-height: 1.6;
   -webkit-user-select: none; user-select: none;
   font-kerning: normal; font-variant-ligatures: common-ligatures;
@@ -80,6 +117,6 @@ aside.lb-note, aside { font-size: 0.85em; color: var(--lb-muted); margin: 1em 0 
 .lb-sample-end::after { content: "Këtu mbaron pjesa që shohin lexuesit"; display: inline-block; font: 600 0.7em/1 system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: #c0841a; background: var(--lb-page); padding: 0 0.6em; position: relative; top: -0.55em; }
 `;
 
-export function buildReaderFrameDoc(bodyHtml: string): string {
-  return `<!doctype html><html lang="sq"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${READER_FRAME_CSP}"><style>${CSS}</style></head><body><div id="lb-root">${bodyHtml}</div></body></html>`;
+export function buildReaderFrameDoc(bodyHtml: string, origin?: string | null): string {
+  return `<!doctype html><html lang="sq"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${readerFrameCsp(origin)}"><style>${CSS}</style></head><body><div id="lb-root">${bodyHtml}</div></body></html>`;
 }
