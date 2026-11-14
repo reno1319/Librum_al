@@ -13,6 +13,7 @@ import {
 // BD2 (Renato 11-01: 1a 2a 4a 5a 6a 7b): the public money wording is
 // "Librum sells, the author gets a royalty": 70% from 199 lek, 50% below,
 // 99 lek minimum. No "platform fee", no 80/20, no "not launched yet".
+vi.mock("next/font/google", () => ({ Playfair_Display: () => ({ className: "font-hero-letter" }) }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
@@ -72,8 +73,12 @@ describe("BD2: the public money pages", () => {
     expect(text).toContain(ROYALTY_TIERS_LINE);
   });
 
+  // K5 (Renato 11-14): Si funksionon says the paid-price rule in his own
+  // words instead of the shared sentence.
   it("/si-funksionon also says the paid-price rule", async () => {
-    expect(await pages["/si-funksionon"]()).toContain(ROYALTY_PAID_PRICE_SENTENCE);
+    expect(await pages["/si-funksionon"]()).toContain(
+      "Fitimi juaj llogaritet pas kodit të zbritjes, nëse ka, ose nga çmimi i paketës, nëse libri shitet në paketë.",
+    );
   });
 
   it("the home page source uses the shared sentences and no fee constant", () => {
