@@ -27,6 +27,31 @@ export function attachOutsideTap(
   return () => doc.removeEventListener("pointerdown", onPointerDown);
 }
 
+// K9 (Renato 11-14, 3a): Chrome on Android offers one-tap install with a
+// "beforeinstallprompt" event. We keep it and show "Instalo Librum" in the
+// phone menu; Safari never fires it, so iPhone readers follow the Ndihmë
+// answer instead. Not a standard DOM type yet, hence the local shape.
+export type InstallPromptEvent = Event & { prompt: () => Promise<unknown> };
+
+export type InstallWindow = Pick<Window, "addEventListener" | "removeEventListener">;
+
+/** Keeps the browser's install offer; returns the cleanup. */
+export function watchInstallPrompt(win: InstallWindow, onChange: (event: InstallPromptEvent | null) => void): () => void {
+  function onOffer(event: Event) {
+    event.preventDefault();
+    onChange(event as InstallPromptEvent);
+  }
+  function onInstalled() {
+    onChange(null);
+  }
+  win.addEventListener("beforeinstallprompt", onOffer);
+  win.addEventListener("appinstalled", onInstalled);
+  return () => {
+    win.removeEventListener("beforeinstallprompt", onOffer);
+    win.removeEventListener("appinstalled", onInstalled);
+  };
+}
+
 // Mobile hamburger + collapsible panel. Isolated as its own client
 // component (state: open/closed) so SiteHeader stays a server component.
 // The logout server action is passed down as a prop rather than
@@ -53,6 +78,18 @@ export function MobileNav({
   const pathname = usePathname();
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const [installOffer, setInstallOffer] = useState<InstallPromptEvent | null>(null);
+
+  useEffect(() => watchInstallPrompt(window, setInstallOffer), []);
+
+  async function install() {
+    const offer = installOffer;
+    if (!offer) return;
+    // An offer can be used once; the browser fires a new one if needed.
+    setInstallOffer(null);
+    setOpen(false);
+    await offer.prompt().catch(() => {});
+  }
 
   // Close whenever a navigation actually happens. Adjusting state during
   // render (comparing against the last-seen pathname) rather than in a
@@ -147,6 +184,11 @@ export function MobileNav({
                       Regjistrohu
                     </Link>
                   </>
+                )}
+                {installOffer && (
+                  <button type="button" onClick={install} className={linkClassName}>
+                    Instalo Librum
+                  </button>
                 )}
               </div>
             </>

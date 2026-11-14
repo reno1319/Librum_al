@@ -107,6 +107,12 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
         q: "A janë të sigurta të dhënat e pagesës sime?",
         a: "Pagesa bëhet në faqen e pagesës së POK dhe tarifohet në lekë. Librum nuk i sheh dhe nuk i ruan kurrë të dhënat e kartës suaj.",
       },
+      // K9 (Renato 11-14, 3a): Librum on the home screen. Icon only: it
+      // still needs internet, nothing is stored for offline reading.
+      {
+        q: "Si ta shtoj Librum në ekranin e telefonit?",
+        a: "Në iPhone: hapni librum.al në Safari, shtypni butonin Ndaj (katrori me shigjetë lart), pastaj \"Add to Home Screen\" (Shto në ekranin kryesor). Në Android: hapni librum.al në Chrome, hapni menynë ☰ të Librum dhe shtypni \"Instalo Librum\", ose menynë ⋮ të Chrome dhe \"Install app\" (Instalo aplikacionin). Librum hapet si aplikacion, pa shiritin e shfletuesit. Për të lexuar ju duhet ende internet.",
+      },
       {
         q: "A mund ta shohin lexuesit një pjesë të librit para se ta blejnë?",
         a: "Po. Shtypni \"Lexoni një pjesë\" në faqen e çdo libri të publikuar për të lexuar fillimin e librit, të marrë automatikisht nga dorëshkrimi.",

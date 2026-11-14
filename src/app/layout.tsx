@@ -38,6 +38,11 @@ export const metadata: Metadata = {
   description: "Platformë shqiptare për botimin dhe shitjen e librave elektronikë.",
   // ALBANIAN-2: the whole public site is Albanian (Renato 10-28).
   openGraph: { locale: "sq_AL" },
+  // K9 (Renato 11-14): the home-screen icon on iPhone ("Shto në ekranin
+  // kryesor") and the app name under it. The Android icon comes from
+  // src/app/manifest.ts.
+  icons: { apple: "/icons/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "Librum", statusBarStyle: "default" },
 };
 
 // ADMIN-1A.5 FINAL PRE-COMMIT ADMIN LAYOUT CORRECTION: SiteHeader/
