@@ -1,9 +1,22 @@
 import Link from "next/link";
 import { ROYALTY_RULE_SENTENCE, STANDARD_ROYALTY_FROM_ALL, STANDARD_ROYALTY_PERCENT } from "@/lib/royalty";
+import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
+import { formatAllMinorUnits } from "@/lib/all-money";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { SECTION_HEADING, TEXT_LINK_CLASSES } from "@/components/page-bands";
+import {
+  Bullets,
+  CREAM,
+  Dot,
+  GOLD_BUTTON,
+  HeroLetter,
+  LightClosingBand,
+  OUTLINE_BUTTON,
+  Photo,
+  PhotoShapes,
+  Wave,
+} from "@/components/author-page-kit";
 import type { Metadata } from "next";
-import { Playfair_Display } from "next/font/google";
 
 export const metadata: Metadata = {
   title: "Si funksionon",
@@ -17,95 +30,11 @@ export const metadata: Metadata = {
 // closing band. The words are his, from the wording doc.
 const REDUCED_PERCENT = 50;
 const EXAMPLE_PRICE = 499;
-const EXAMPLE_SHARE = Math.floor((EXAMPLE_PRICE * STANDARD_ROYALTY_PERCENT) / 100);
+// Exact royalty from the same maths as the Fitimet table (Renato 11-14 a: 349,30, not 349).
+const EXAMPLE_SHARE = formatAllMinorUnits(calculateAuthorEarnings(EXAMPLE_PRICE, 1).authorEarningsMinor);
 
 const PHOTO_DIR = "/images/si-funksionon";
-const CREAM = "#fbf8f1";
-
-// The brace shape of the photos: rounded corners and a small point in the
-// middle of each side, like a curly bracket. Drawn once, used by every Photo.
-function PhotoShapes() {
-  return (
-    <svg width="0" height="0" aria-hidden="true" className="absolute">
-      <defs>
-        <clipPath id="lb-brace" clipPathUnits="objectBoundingBox">
-          <path d="M0.17,0 L0.83,0 C0.93,0 0.975,0.06 0.975,0.17 L0.975,0.43 C0.975,0.475 0.985,0.495 1,0.5 C0.985,0.505 0.975,0.525 0.975,0.57 L0.975,0.83 C0.975,0.94 0.93,1 0.83,1 L0.17,1 C0.07,1 0.025,0.94 0.025,0.83 L0.025,0.57 C0.025,0.525 0.015,0.505 0,0.5 C0.015,0.495 0.025,0.475 0.025,0.43 L0.025,0.17 C0.025,0.06 0.07,0 0.17,0 Z" />
-        </clipPath>
-      </defs>
-    </svg>
-  );
-}
-
-function Photo({ name, className = "" }: { name: string; className?: string }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={`${PHOTO_DIR}/${name}.jpg`}
-      alt=""
-      aria-hidden="true"
-      loading="lazy"
-      className={`w-full object-cover [clip-path:url(#lb-brace)] ${className}`}
-    />
-  );
-}
-
-// The hero letter: one big "L" from a real typeface, filled with the
-// bookshelf photo, running off the right edge like the KDP "A".
-const letterFont = Playfair_Display({ weight: "900", style: "italic", subsets: ["latin"], display: "swap" });
-
-function HeroLetter() {
-  return (
-    <span
-      aria-hidden="true"
-      className={`${letterFont.className} block select-none whitespace-nowrap text-right leading-[1.02] text-transparent [-webkit-background-clip:text] [background-clip:text] [font-size:clamp(15rem,40vw,36rem)]`}
-      style={{
-        backgroundImage: `url(${PHOTO_DIR}/hero.jpg)`,
-        backgroundSize: "cover",
-        backgroundPosition: "center 30%",
-      }}
-    >
-      L
-    </span>
-  );
-}
-
-// A soft wave where a white section meets a cream one.
-function Wave({ flip = false }: { flip?: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 1440 60"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-      className={`block h-8 w-full bg-white md:h-14 ${flip ? "rotate-180" : ""}`}
-    >
-      <path d="M0 40 C 360 0, 1080 70, 1440 22 L1440 60 L0 60 Z" fill={CREAM} />
-    </svg>
-  );
-}
-
-function Dot() {
-  return <span aria-hidden="true" className="mt-[0.55em] block size-2.5 shrink-0 rounded-full bg-[#d98e5f]" />;
-}
-
-function Bullets({ items }: { items: React.ReactNode[] }) {
-  return (
-    <ul className="mt-5 flex flex-col gap-4">
-      {items.map((item, i) => (
-        <li key={i} className="flex gap-4 text-base leading-relaxed text-foreground/90 md:text-[1.0625rem]">
-          <Dot />
-          <span>{item}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 const STEP_TITLE = "font-serif text-[1.5rem] font-normal leading-tight text-primary sm:text-[1.75rem]";
-const GOLD_BUTTON =
-  "focus-ring inline-flex min-h-12 shrink-0 items-center rounded-md bg-accent px-7 font-semibold text-accent-foreground hover:brightness-105";
-const OUTLINE_BUTTON =
-  "focus-ring inline-flex min-h-12 items-center rounded-md border-2 border-primary px-7 font-semibold text-primary hover:bg-primary/5";
-
 const TOOLS = [
   { heading: "Seritë", body: "Gruponi librat tuaj, sipas radhës së leximit, në një seri." },
   {
@@ -224,7 +153,7 @@ export default async function HowItWorksPage() {
             </div>
           </div>
           <div className="-mr-4 pt-4 sm:-mr-6 md:pt-8">
-            <HeroLetter />
+            <HeroLetter char="L" src={`${PHOTO_DIR}/hero.jpg`} />
           </div>
         </div>
       </section>
@@ -254,11 +183,11 @@ export default async function HowItWorksPage() {
                   </Link>
                 </p>
               </div>
-              <Photo name="prepare" className="aspect-[6/5] md:order-2" />
+              <Photo src={`${PHOTO_DIR}/prepare.jpg`} className="aspect-[6/5] md:order-2" />
             </article>
 
             <article className="grid items-center gap-8 md:grid-cols-2 md:gap-14">
-              <Photo name="publish" className="aspect-[6/5] md:order-1" />
+              <Photo src={`${PHOTO_DIR}/publish.jpg`} className="aspect-[6/5] md:order-1" />
               <div className="md:order-2">
                 <h3 className={STEP_TITLE}>
                   <span className="font-bold">Hapi 2:</span> Publikoni
@@ -290,7 +219,7 @@ export default async function HowItWorksPage() {
                 </div>
                 <p className="mt-5 rounded-md border border-[#e7dfc9] bg-white px-4 py-3 text-[0.9375rem]">
                   Për një libër që kushton {EXAMPLE_PRICE} lekë →{" "}
-                  <strong className="text-primary">ju fitoni {EXAMPLE_SHARE} lekë</strong>
+                  <strong className="text-primary">ju fitoni {EXAMPLE_SHARE}</strong>
                 </p>
                 <Bullets
                   items={[
@@ -303,7 +232,7 @@ export default async function HowItWorksPage() {
                   ]}
                 />
               </div>
-              <Photo name="earn" className="aspect-[6/5] md:order-2" />
+              <Photo src={`${PHOTO_DIR}/earn.jpg`} className="aspect-[6/5] md:order-2" />
             </article>
           </div>
         </div>
@@ -343,7 +272,7 @@ export default async function HowItWorksPage() {
               ))}
             </ul>
           </div>
-          <Photo name="tools" className="aspect-[5/6]" />
+          <Photo src={`${PHOTO_DIR}/tools.jpg`} className="aspect-[5/6]" />
         </div>
         <div className="page-container pb-10">
           <p className="text-center text-sm text-foreground/90">
@@ -356,22 +285,7 @@ export default async function HowItWorksPage() {
         </div>
       </section>
 
-      {/* Closing band, light, heading and button side by side. */}
-      {cta && (
-        <section className="bg-[#eceae4]">
-          <div className="page-container flex flex-col items-center justify-center gap-5 py-10 text-center md:flex-row md:gap-10 md:py-12 md:text-left">
-            <div>
-              <h2 className="font-serif text-3xl font-normal text-primary sm:text-[2.25rem]">A jeni gati të botoni?</h2>
-              <p className="mt-2 text-foreground/80">
-                Krijoni librin tuaj të parë në Librum dhe botojeni sipas kushteve tuaja.
-              </p>
-            </div>
-            <Link href={cta.href} className={GOLD_BUTTON}>
-              {cta.label}
-            </Link>
-          </div>
-        </section>
-      )}
+      {cta && <LightClosingBand cta={cta} />}
     </main>
   );
 }

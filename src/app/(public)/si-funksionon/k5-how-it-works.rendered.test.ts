@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // K5 (Kolibër list, Renato 11-14): the redesigned Si funksionon page.
-vi.mock("next/font/google", () => ({ Playfair_Display: () => ({ className: "font-hero-letter" }) }));
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
@@ -19,14 +22,14 @@ const render = async () =>
 const root = path.join(__dirname, "..", "..", "..", "..");
 
 describe("K5: Si funksionon", () => {
-  it("shows the 70% split with the 499 → 349 example and the 50% tier", async () => {
+  it("shows the 70% split with the 499 → 349,30 example and the 50% tier", async () => {
     const html = await render();
     expect(html).toContain("70% nga çdo shitje nga 199 lekë e lart");
     expect(html).toContain(">70%</p>");
     expect(html).toContain("nga 199 lekë");
     expect(html).toContain("50% kur çmimi është nën 199 lekë");
     expect(html).toContain("Për një libër që kushton 499 lekë →");
-    expect(html).toContain("ju fitoni 349 lekë");
+    expect(html).toContain("ju fitoni 349,30 lekë");
   });
 
   it("promises the buyer watermark", async () => {

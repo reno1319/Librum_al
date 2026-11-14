@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ROYALTY_TIERS_LINE } from "@/lib/royalty";
 import { formatAllMinorUnits } from "@/lib/all-money";
 import { classifyCatalogPrice, parseCatalogPriceAll } from "@/lib/catalog-price";
-import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
+import { calculateAuthorEarnings, EARNINGS_BEFORE_TAX_NOTE } from "@/lib/earnings-calculator";
 import { formControlClasses } from "@/lib/form-styles";
 
 // LIBRUM 2.0 PRODUCT-4: an estimate, not a claim about take-home pay --
@@ -120,9 +120,7 @@ export function EarningsCalculator() {
               </div>
             </div>
             <p className="mt-4 text-xs text-muted">{ROYALTY_TIERS_LINE}</p>
-            <p className="mt-1 text-xs text-muted">
-              Para taksave dhe tarifave të mundshme bankare ose të këmbimit valutor.
-            </p>
+            <p className="mt-1 text-xs text-muted">{EARNINGS_BEFORE_TAX_NOTE}</p>
           </>
         )}
       </div>

@@ -75,3 +75,6 @@ export function calculateAuthorEarnings(
       perSaleGrossMinor > 0 && safeSales > 0 ? royaltyPercentForPaidMinor(perSaleGrossMinor) : 0,
   };
 }
+
+/** Shown under every earnings figure on /fitimet (Renato 11-14, pick a). */
+export const EARNINGS_BEFORE_TAX_NOTE = "Para taksave dhe tarifave të mundshme bankare ose të këmbimit valutor.";
