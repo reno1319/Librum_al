@@ -20,6 +20,6 @@ export async function proxy(request: NextRequest) {
 // answers like any page, locked while the lock is on.
 export const config = {
   matcher: [
-    "/((?!_next/static/|_next/image$|favicon\\.ico$|images/author-hero\\.jpg$|(?:file|globe|next|vercel|window)\\.svg$).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|images/author-hero\\.jpg$|images/si-funksionon/(?:hero|prepare|publish|earn|tools)\\.jpg$|(?:file|globe|next|vercel|window)\\.svg$).*)",
   ],
 };
