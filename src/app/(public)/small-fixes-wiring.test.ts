@@ -8,7 +8,10 @@ import { RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 
 // AUTHOR PAGES REDESIGN: How it works reads the visitor (closing band),
 // so it is async and renders against a signed-out Supabase client.
-vi.mock("next/font/google", () => ({ Playfair_Display: () => ({ className: "font-hero-letter" }) }));
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
