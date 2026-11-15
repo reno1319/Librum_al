@@ -100,7 +100,9 @@ export default function PrivacyPage() {
                 falas (data, ora dhe cili version i skedarit u përdor). Kur
                 lexoni online një libër që keni blerë, ruajmë edhe vendin ku
                 keni mbetur (që ta vazhdoni në çdo pajisje), faqerojtësit,
-                theksimet dhe shënimet tuaja. I shihni vetëm ju.
+                theksimet dhe shënimet tuaja. I shihni vetëm ju. Faqja e
+                çdo libri tregon sa njerëz e kanë marrë, vetëm si numër, pa
+                treguar kush.
               </p>
               <p className="mt-2">
                 <strong>Si autor:</strong> librat, ballinat dhe skedarët e
@@ -120,7 +122,9 @@ export default function PrivacyPage() {
               <p className="mt-2">
                 <strong>Mesazhet:</strong> emailet
                 {isWhatsappContactLive() && " dhe mesazhet në WhatsApp"} që
-                na dërgoni dhe përgjigjet tona.
+                na dërgoni dhe përgjigjet tona. Ruajmë edhe mesazhet që na
+                dërgoni me butonin «Na tregoni» (lloji, teksti dhe faqja ku
+                ishit).
               </p>
               <p className="mt-2">
                 <strong>Të dhënat teknike:</strong> cookies e përshkruara më
@@ -307,6 +311,10 @@ export default function PrivacyPage() {
                 <li>
                   <strong>Regjistrimet e leximeve online dhe të shkarkimeve:</strong> për aq kohë sa
                   ruhet blerja të cilës i përkasin.
+                </li>
+                <li>
+                  <strong>Mesazhet «Na tregoni»:</strong> derisa ta fshini
+                  llogarinë.
                 </li>
                 <li>
                   <strong>
