@@ -540,6 +540,11 @@ insert into pg_temp.allow values
   ('wishlist_items', 'reader_id', 'own', 'own wishlist'),
   ('preorder_notify_requests', 'user_id', 'own', 'own pre-order notices (BD16 P1)'),
   ('pen_name_follows', 'follower_id', 'own', 'own follows'),
+  -- K8+K10 (20261115160000): a reader's own place, bookmarks and highlights,
+  -- and only while they own the book (gate checked exactly below).
+  ('reading_places', 'user_id', 'own+book', 'own reading place of an owned book'),
+  ('reader_bookmarks', 'user_id', 'own+book', 'own bookmarks of an owned book'),
+  ('reader_highlights', 'user_id', 'own+book', 'own highlights of an owned book'),
   ('discount_codes', 'author_id', 'own', 'own codes'),
   ('author_payout_destinations', 'author_id', 'own', 'own payout destination'),
   ('author_payout_settings', 'author_id', 'own', 'own payout settings'),
@@ -670,8 +675,13 @@ begin
     select al.rel, al.col, al.gate, p.policyname, p.qual
       from pg_temp.allow al
       join pg_catalog.pg_policies p on p.schemaname = 'public' and p.tablename = al.rel and p.cmd in ('SELECT', 'ALL')
-     where al.gate in ('own', 'own+staff', 'staff', 'refunds')
+     where al.gate in ('own', 'own+staff', 'staff', 'refunds', 'own+book')
   loop
+    if rec.gate = 'own+book' then
+      perform pg_temp.assert(rec.qual = '((' || rec.col || ' = auth.uid()) AND user_owns_book(book_id))',
+        format('part4: policy "%s" on %s does not match its allowlist gate own+book: %s', rec.policyname, rec.rel, rec.qual));
+      continue;
+    end if;
     if rec.qual ~ ('^\(auth\.uid\(\) = ' || case when rec.rel = 'staff_members' then 'user_id' when rec.rel = 'profiles' then 'id' else rec.col end || '\)$')
        and rec.gate in ('own', 'own+staff') then
       continue;

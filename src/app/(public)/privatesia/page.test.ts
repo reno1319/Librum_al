@@ -83,6 +83,14 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain("por e ruajmë bashkë me shënimin që emaili u dërgua, derisa ta fshini llogarinë.");
   });
 
+  // K8 + K10 (Renato 11-15): the place, bookmarks, highlights and notes.
+  it("names the synced place, bookmarks, highlights and notes, who sees them and how long they are kept", () => {
+    expect(text).toContain("ruajmë edhe vendin ku keni mbetur (që ta vazhdoni në çdo pajisje), faqerojtësit, theksimet dhe shënimet tuaja. I shihni vetëm ju.");
+    expect(text).toContain(
+      "Vendi ku keni mbetur, faqerojtësit, theksimet dhe shënimet: faqerojtësit, theksimet dhe shënimet derisa t'i fshini vetë; të gjitha derisa libri të rimbursohet ose ta fshini llogarinë, atëherë fshihen përgjithmonë. Nëse pagesa ju kthehet pas një kontestimi me bankën, ato nuk ju shfaqen më, por ruhen derisa ta fshini llogarinë.",
+    );
+  });
+
   it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {
     expect(text).not.toMatch(/stripe/i);
   });
