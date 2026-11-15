@@ -153,6 +153,16 @@ select pg_temp.assert(
       and p.proname in ('book_download_count', 'submit_reader_feedback', 'staff_list_reader_feedback', 'staff_set_reader_feedback_done')
       and p.prosecdef and p.proconfig = array['search_path=""']) = 4,
   'part1: all four are SECURITY DEFINER with an empty search_path');
+-- Staging run 15 Nov: a backslash-u escape in a body sent through the
+-- database tool arrives as the character itself. The four bodies stay
+-- plain ASCII (one byte per character), so what is sent is what is stored.
+select pg_temp.assert(
+  (select pg_catalog.count(*) from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname in ('book_download_count', 'submit_reader_feedback', 'staff_list_reader_feedback', 'staff_set_reader_feedback_done')
+      and pg_catalog.octet_length(p.prosrc) = pg_catalog.char_length(p.prosrc)
+      and pg_catalog.strpos(p.prosrc, chr(92) || 'u') = 0) = 4,
+  'part1: all four bodies are plain ASCII with no backslash-u escape');
 
 -- ============================================================
 -- Part 2: the download count

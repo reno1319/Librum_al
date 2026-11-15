@@ -19152,6 +19152,7 @@ set search_path = ''
 as $$
 declare
   v_uid uuid := auth.uid();
+  v_edge text;
   v_body text;
   v_recent integer;
   v_id uuid;
@@ -19169,13 +19170,14 @@ begin
     raise exception 'submit_reader_feedback: invalid kind' using errcode = 'LB511';
   end if;
   -- Trim spaces, line breaks, no-break and zero-width spaces at both
-  -- ends, so a message of only invisible characters is empty.
-  v_body := pg_catalog.regexp_replace(
-    coalesce(p_body, ''),
-    '^[[:space:]\u00a0\u200b\u200c\u200d\u2060\ufeff]+|[[:space:]\u00a0\u200b\u200c\u200d\u2060\ufeff]+$',
-    '',
-    'g'
-  );
+  -- ends, so a message of only invisible characters is empty. The
+  -- characters are built with chr() (U+00A0, U+200B, U+200C, U+200D,
+  -- U+2060, U+FEFF) so this text stays plain ASCII: on the staging run
+  -- of 15 Nov the tool call turned backslash-u escapes into the
+  -- characters themselves, which changed the stored function bytes.
+  v_edge := '[[:space:]' || pg_catalog.chr(160) || pg_catalog.chr(8203) || pg_catalog.chr(8204)
+            || pg_catalog.chr(8205) || pg_catalog.chr(8288) || pg_catalog.chr(65279) || ']+';
+  v_body := pg_catalog.regexp_replace(coalesce(p_body, ''), '^' || v_edge || '|' || v_edge || '$', '', 'g');
   if pg_catalog.char_length(v_body) < 1 or pg_catalog.char_length(v_body) > 1000 then
     raise exception 'submit_reader_feedback: invalid text' using errcode = 'LB512';
   end if;
