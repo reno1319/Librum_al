@@ -97,7 +97,10 @@ export default function PrivacyPage() {
                 çdo raportim përmbajtjeje dhe kërkesë rimbursimi që na
                 dërgoni, si dhe një regjistrim për çdo herë që hapni për ta
                 lexuar online ose shkarkoni një libër që keni blerë ose marrë
-                falas (data, ora dhe cili version i skedarit u përdor).
+                falas (data, ora dhe cili version i skedarit u përdor). Kur
+                lexoni online një libër që keni blerë, ruajmë edhe vendin ku
+                keni mbetur (që ta vazhdoni në çdo pajisje), faqerojtësit,
+                theksimet dhe shënimet tuaja. I shihni vetëm ju.
               </p>
               <p className="mt-2">
                 <strong>Si autor:</strong> librat, ballinat dhe skedarët e
@@ -292,6 +295,14 @@ export default function PrivacyPage() {
                   kërkesa nuk shfaqet më te Njoftimet e mia, por e ruajmë
                   bashkë me shënimin që emaili u dërgua, derisa ta fshini
                   llogarinë.
+                </li>
+                <li>
+                  <strong>Vendi ku keni mbetur, faqerojtësit, theksimet dhe shënimet:</strong>{" "}
+                  faqerojtësit, theksimet dhe shënimet derisa t&apos;i fshini
+                  vetë; të gjitha derisa libri të rimbursohet ose ta fshini
+                  llogarinë, atëherë fshihen përgjithmonë. Nëse pagesa ju
+                  kthehet pas një kontestimi me bankën, ato nuk ju shfaqen më,
+                  por ruhen derisa ta fshini llogarinë.
                 </li>
                 <li>
                   <strong>Regjistrimet e leximeve online dhe të shkarkimeve:</strong> për aq kohë sa

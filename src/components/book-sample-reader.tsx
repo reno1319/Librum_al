@@ -205,6 +205,7 @@ export function BookSampleReader({
             endAction={endAction}
             devices={mode === "full"}
             positionKey={mode === "owned" ? positionStorageKey(bookId) : null}
+            marksBookId={mode === "owned" ? bookId : null}
           />
         ) : (
           <div className="flex h-full flex-col">

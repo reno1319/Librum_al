@@ -59,6 +59,12 @@ export function RefundRequestForm({
           : "Kjo do të kërkojë rimbursim për këtë blerje."}{" "}
         Kërkesa nuk ju rimburson menjëherë: fillimisht do të shqyrtohet.
       </p>
+      {/* K8 + K10 (Renato 11-15, Q5 a): a refund deletes the marks for good. */}
+      <p className="mt-1 text-xs text-muted">
+        {bookCount > 1
+          ? "Nëse rimbursoheni, faqerojtësit, theksimet dhe shënimet tuaja në këta libra fshihen përgjithmonë."
+          : "Nëse rimbursoheni, faqerojtësit, theksimet dhe shënimet tuaja në këtë libër fshihen përgjithmonë."}
+      </p>
       <label className="mt-3 flex flex-col gap-1 text-sm">
         Arsyeja (nuk është e detyrueshme)
         <textarea

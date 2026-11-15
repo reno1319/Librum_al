@@ -39,6 +39,27 @@ describe("LibraryBookCard: Lexo + Shkarko EPUB", () => {
   });
 });
 
+// K8 (Renato 11-15, pictures r1 with his change): the bar and "N% e
+// lexuar" only; no highlight count; nothing before the book is started.
+describe("LibraryBookCard: how much is read", () => {
+  const render = (progress: number | null) =>
+    renderToStaticMarkup(createElement(LibraryBookCard, { ...base, downloadable: true, progress }));
+  it("a started book shows the bar and the share read", () => {
+    const html = render(0.356);
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('aria-valuenow="36"');
+    expect(html).toContain("35% e lexuar");
+    expect(html).not.toMatch(/theksim/);
+  });
+  it("a finished book says Përfunduar", () => {
+    expect(render(1)).toContain("Përfunduar");
+  });
+  it("a book not started (or no place) shows nothing", () => {
+    expect(render(null)).not.toContain("progressbar");
+    expect(render(0)).not.toContain("progressbar");
+  });
+});
+
 describe("BookReader in owned mode", () => {
   it("shows 'nga [autori]' with no 'Pjesë falas' and no end-of-sample page", () => {
     const data: ReaderData = {
@@ -55,5 +76,14 @@ describe("BookReader in owned mode", () => {
     expect(html).toContain("nga Autor Prove");
     expect(html).not.toContain("Pjesë falas");
     expect(html).not.toContain("Pamja paraprake");
+  });
+
+  it("K8: no bookmark ribbon until the buyer's marks have loaded (never for the sample)", () => {
+    const data: ReaderData = { title: "L", author: null, mode: "owned", html: "<p>T.</p>", toc: [], approximatePercent: 100 };
+    const html = renderToStaticMarkup(
+      createElement(BookReader, { data, coverUrl: null, onClose: () => {}, endAction: null, positionKey: "k", marksBookId: "b1" }),
+    );
+    expect(html).not.toContain("faqerojtës");
+    expect(html).toContain('aria-label="Përmbajtja"');
   });
 });
