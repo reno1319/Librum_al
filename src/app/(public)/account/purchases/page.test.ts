@@ -264,8 +264,8 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       ],
     });
     expect(rpc).toHaveBeenCalledWith("my_purchase_download_states");
-    expect(html).toContain("Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
-    expect(html.match(/Shkarkimi i jep fund të drejtës suaj/g)).toHaveLength(1);
+    expect(html).toContain("Leximi ose shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
+    expect(html.match(/Leximi ose shkarkimi i jep fund të drejtës suaj/g)).toHaveLength(1);
     expect(html).toContain("Shkarkuar më ");
   });
 
@@ -274,7 +274,7 @@ describe("AccountPurchasesPage: download line (DOWNLOADS-1)", () => {
       purchases: [purchaseRow("p1", "b1", 0, null, RECENT)],
       currencies: [{ purchase_id: "p1", currency_state: "free", currency: null }],
     });
-    expect(html).not.toContain("Shkarkimi i jep fund të drejtës suaj");
+    expect(html).not.toContain("Leximi ose shkarkimi i jep fund të drejtës suaj");
     expect(html).not.toContain("Shkarkuar më ");
   });
 });

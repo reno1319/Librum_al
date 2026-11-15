@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { authorPagePath } from "@/lib/pen-names";
+import { BookSampleReader } from "@/components/book-sample-reader";
+import { DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
 
 // LIBRUM 2.0 UI-8: the Reader Library's card -- deliberately NOT the
 // commerce-oriented BookCard (src/components/book-card.tsx). A Library
@@ -75,12 +77,23 @@ export function LibraryBookCard({
       {!isPublished && <p className="text-xs text-muted">Nuk ofrohet në Librari</p>}
 
       {downloadable && (
-        <a
-          href={`/api/books/${bookId}/download`}
-          className="focus-ring mt-1 w-fit rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-        >
-          Shkarkoni EPUB
-        </a>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <BookSampleReader
+            bookId={bookId}
+            bookTitle={title}
+            mode="owned"
+            label="Lexo"
+            coverUrl={coverUrl}
+            confirmFirst={downloadNote === DOWNLOAD_CANCEL_WARNING}
+            triggerClassName="focus-ring min-h-9 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          />
+          <a
+            href={`/api/books/${bookId}/download`}
+            className="focus-ring min-h-9 rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+          >
+            Shkarko EPUB
+          </a>
+        </div>
       )}
       {downloadable && downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
     </li>

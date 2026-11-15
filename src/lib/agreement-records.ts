@@ -23,8 +23,11 @@ import { AUTHOR_AGE_STATEMENT_VERSION } from "@/lib/author-age-statement";
 // 11-04: a book cover is "ballinë", not "kopertinë"; the meaning is the
 // same, nobody is asked to accept again). "terms-sq-4" is PL1's
 // pre-order paragraph in section 5 (Renato 11-10; nobody is asked to
-// accept again). Its date is TERMS_LAST_UPDATED.
-export const TERMS_VERSION = "terms-sq-4";
+// accept again). "terms-sq-5" is the buyer reader's §9 change (Renato
+// 11-15, 1a: reading online also ends the 14-day cancel right, as a
+// download does; nobody is asked to accept again). Its date is
+// TERMS_LAST_UPDATED.
+export const TERMS_VERSION = "terms-sq-5";
 
 // The sign-up form's and the Become-an-author form's Terms checkbox.
 export const TERMS_FIELD = "accept_terms";

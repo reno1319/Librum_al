@@ -242,6 +242,24 @@ describe("buildReaderContent: the sample cut", () => {
     expect(r.toc).toHaveLength(10);
   });
 
+  it("owned mode (buyer reader, 11-15) sends the whole book with no sample marker", async () => {
+    const full = await buildReaderContent(await epub({ docs: chapters }), "full");
+    const r = await buildReaderContent(await epub({ docs: chapters }), "owned");
+    if (!r.available || !full.available) throw new Error("unavailable");
+    expect(r.html).toContain("w9");
+    expect(r.html).not.toContain("lb-sample-end");
+    expect(r.html).toBe(full.html.replace('<div class="lb-sample-end" id="lb-sample-end"></div>', ""));
+    expect(r.toc).toEqual(full.toc);
+  });
+
+  it("owned mode never cuts inside a block (the capped point of a long book)", async () => {
+    const full = await buildReaderContent(await epub({ docs: book(20, 50) }), "full");
+    const r = await buildReaderContent(await epub({ docs: book(20, 50) }), "owned");
+    if (!r.available || !full.available) throw new Error("unavailable");
+    expect(r.html).not.toContain("lb-sample-end");
+    expect(wordsIn(r.html)).toBe(wordsIn(full.html));
+  });
+
   it("front matter before the bodymatter landmark is free up to 3% of the book", async () => {
     const front = { id: "f", href: "f.xhtml", body: para("front", 20) };
     const docs = [front, ...chapters];

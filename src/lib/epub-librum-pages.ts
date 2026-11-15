@@ -43,6 +43,13 @@ export type LibrumFrontPage = {
   buyer: { email: string; date: string; code: string; free: boolean } | null;
 };
 
+// D13 1b: the buyer line. Buyer reader (Renato 11-15, 2a): the online
+// reader shows the very same line at the start of the book.
+export function buyerLineText(buyer: NonNullable<LibrumFrontPage["buyer"]>): string {
+  const verb = buyer.free ? "Shkarkuar falas nga" : "Blerë nga";
+  return `${verb} ${buyer.email} më ${buyer.date} · Kodi i blerjes: ${buyer.code}`;
+}
+
 export type LibrumLastPage = {
   penName: string;
   // 5a: up to 5 other live books under the same pen name, newest first.
@@ -183,10 +190,7 @@ export function frontPageBody(p: LibrumFrontPage): string {
   if (p.edition && clean(p.edition)) out.push(line(p.edition));
   out.push(line(`Botuar në Librum, ${p.librumYear} · librum.al`, "gap"));
   if (p.rights !== "public_domain") out.push(line(PERSONAL_USE_LINE, "gap small"));
-  if (p.buyer) {
-    const verb = p.buyer.free ? "Shkarkuar falas nga" : "Blerë nga";
-    out.push(line(`${verb} ${p.buyer.email} më ${p.buyer.date} · Kodi i blerjes: ${p.buyer.code}`, "gap small"));
-  }
+  if (p.buyer) out.push(line(buyerLineText(p.buyer), "gap small"));
   return out.join("\n");
 }
 

@@ -5,7 +5,9 @@
 // POL-1 (Renato 10-29, "1. a"): release 9 goes to Production on Friday
 // 30 October 2026, Tirana time. If the release moves to another day,
 // this line changes with it before the release.
-export const POLICY_LAST_UPDATED = "30 tetor 2026";
+// Buyer reader (Renato 11-15, 1a): "read online or download" in the
+// cancel section; the release that ships it sets the final day.
+export const POLICY_LAST_UPDATED = "15 nëntor 2026";
 
 export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATED}`;
 
@@ -22,7 +24,9 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // text to Production on 7 November 2026.
 // PL1 (Release 21): the pre-order «Më njofto» text ships to Production
 // on Wednesday 11 November 2026; if it moves, this line moves with it.
-export const PRIVACY_LAST_UPDATED = "11 nëntor 2026";
+// Buyer reader (11-15): online opens are logged too; the release that
+// ships it sets the final day.
+export const PRIVACY_LAST_UPDATED = "15 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
 
@@ -38,6 +42,8 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // PL1 (Release 21): the Terms §5 "Parapublikimi" text ships to
 // Production on Wednesday 11 November 2026; if it moves, this line
 // moves with it.
-export const TERMS_LAST_UPDATED = "11 nëntor 2026";
+// Buyer reader (11-15, terms-sq-5): §9 "read online or download"; the
+// release that ships it sets the final day.
+export const TERMS_LAST_UPDATED = "15 nëntor 2026";
 
 export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;

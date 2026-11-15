@@ -12,6 +12,7 @@ import {
   type ReaderFont,
   type ReaderTheme,
 } from "@/lib/reader-frame-doc";
+import { parseSavedPosition } from "@/lib/owned-reader";
 
 // PREVIEW-READER-1: the page-turning reader (readers' sample and the
 // author's whole-book preview). The book text lives in an iframe that is
@@ -25,7 +26,7 @@ import {
 export type ReaderData = {
   title: string;
   author: string | null;
-  mode: "sample" | "full";
+  mode: "sample" | "full" | "owned";
   html: string;
   toc: { id: string; label: string }[];
   approximatePercent: number;
@@ -71,6 +72,24 @@ function writeSettings(s: Settings) {
   }
 }
 
+// 3a: the reading place, in this browser only. Blocked storage (private
+// mode) just means the book opens at the cover.
+function readPosition(key: string): number | null {
+  try {
+    return parseSavedPosition(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function writePosition(key: string, value: number) {
+  try {
+    window.localStorage.setItem(key, String(Math.round(value * 10000) / 10000));
+  } catch {
+    // Not remembered; nothing else changes.
+  }
+}
+
 type Layout = { width: number; cols: number; contentViews: number; sampleEndView: number | null; anchors: Map<string, number> };
 
 // The views, in order: cover, the text, then (sample) the end page.
@@ -102,6 +121,7 @@ export function BookReader({
   onClose,
   endAction,
   devices = false,
+  positionKey = null,
 }: {
   data: ReaderData;
   coverUrl: string | null;
@@ -109,6 +129,9 @@ export function BookReader({
   endAction: ReaderEndAction;
   // Build 2: the author's preview shows Phone / Tablet / E-reader frames.
   devices?: boolean;
+  // Buyer reader (Renato 11-15, 3a): where this book's place is kept in
+  // this browser (owned books only); null keeps no place.
+  positionKey?: string | null;
 }) {
   // Only ever rendered in the browser (after the sample has loaded).
   const [settings, setSettings] = useState<Settings>(() => (typeof window === "undefined" ? DEFAULT_SETTINGS : readSettings()));
@@ -120,6 +143,9 @@ export function BookReader({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageWrapRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(0);
+  // 3a: the saved place, used once, when the first layout is known.
+  const restoreRef = useRef<number | null | undefined>(undefined);
+  if (restoreRef.current === undefined) restoreRef.current = positionKey ? readPosition(positionKey) : null;
   const pointerRef = useRef<{ x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -174,8 +200,16 @@ export function BookReader({
   // Keep the reader on the same place in the book when the layout changes.
   useLayoutEffect(() => {
     if (!layout) return;
+    // 3a: the saved place is used once, decided here and not inside the
+    // updater (audit r1 M2: StrictMode runs updaters twice).
+    const saved = restoreRef.current;
+    if (saved != null) {
+      restoreRef.current = null;
+      progressRef.current = saved;
+    }
     setViewIndex((current) => {
       const total = 1 + layout.contentViews + (data.mode === "sample" ? 1 : 0);
+      if (saved != null) return Math.min(total - 1, 1 + Math.round(saved * (layout.contentViews - 1)));
       if (current === 0) return 0;
       const k = Math.round(progressRef.current * (layout.contentViews - 1));
       return Math.min(total - 1, 1 + k);
@@ -208,8 +242,9 @@ export function BookReader({
     if (view.kind === "content") {
       root.scrollLeft = view.k * layout.width;
       progressRef.current = layout.contentViews > 1 ? view.k / (layout.contentViews - 1) : 0;
+      if (positionKey && restoreRef.current === null) writePosition(positionKey, progressRef.current);
     }
-  }, [view, layout]);
+  }, [view, layout, positionKey]);
 
   // DD: with Contents or the page-look menu open, Escape closes only that
   // menu and puts focus back on the button that opened it. Listened for on
@@ -370,7 +405,7 @@ export function BookReader({
         <div className="min-w-0 flex-1 text-center">
           <p className="truncate font-serif text-[15px] font-semibold leading-tight">{data.title}</p>
           <p className="truncate text-xs leading-tight" style={{ color: chrome.muted }}>
-            {data.mode === "full" ? "Pamja paraprake e librit të plotë" : data.author ? `nga ${data.author} · Pjesë falas` : "Pjesë falas"}
+            {data.mode === "full" ? "Pamja paraprake e librit të plotë" : data.mode === "owned" ? (data.author ? `nga ${data.author}` : "") : data.author ? `nga ${data.author} · Pjesë falas` : "Pjesë falas"}
           </p>
         </div>
         <ToolbarButton label="Përmbajtja" word="Përmbajtja" panelKey="toc" active={panel === "toc"} onClick={() => setPanel(panel === "toc" ? "none" : "toc")}>
@@ -388,7 +423,7 @@ export function BookReader({
           <Panel chrome={chrome} title="Përmbajtja">
             {data.toc.length === 0 ? (
               <p className="px-4 py-3 text-sm" style={{ color: chrome.muted }}>
-                Kjo pjesë nuk ka tituj kapitujsh.
+                {data.mode === "owned" ? "Ky libër nuk ka tituj kapitujsh." : "Kjo pjesë nuk ka tituj kapitujsh."}
               </p>
             ) : (
               <ul className="max-h-[60vh] overflow-y-auto py-1">

@@ -32,8 +32,8 @@ describe("POLICY PAGES: /kushtet", () => {
       "merrni një licencë personale për ta shkarkuar dhe për ta lexuar në pajisjet tuaja",
       "Nuk blini të drejtën e autorit të librit",
       "ju pranoni të mbuloni kostot dhe humbjet e arsyeshme të Librum nga ai pretendim",
-      "Mund ta anuloni një blerje për çfarëdo arsye brenda 14 ditëve nga blerja, për sa kohë nuk e keni shkarkuar ende librin.",
-      "Një paketë mund të anulohet vetëm nëse asnjë nga librat e saj nuk është shkarkuar.",
+      "Mund ta anuloni një blerje për çfarëdo arsye brenda 14 ditëve nga blerja, për sa kohë nuk e keni lexuar online ose shkarkuar ende librin.",
+      "Një paketë mund të anulohet vetëm nëse asnjë nga librat e saj nuk është hapur online ose shkarkuar.",
       "kufizohet në shumën që paguat për të",
       "rregullohen nga ligji i Republikës së Shqipërisë, dhe mosmarrëveshjet shqyrtohen nga gjykata kompetente në Tiranë",
       "kjo nuk ju heq mbrojtjen e ligjeve të detyrueshme të vendit ku jetoni",
@@ -93,7 +93,7 @@ describe("POLICY PAGES: /kushtet", () => {
   it("takes its date from its own line (BD2, 3. a)", () => {
     expect(text).toContain(TERMS_LAST_UPDATED_LINE);
     // Release 21: the Production release day of the PL1 Terms (11 November 2026).
-    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 11 nëntor 2026");
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 15 nëntor 2026");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 

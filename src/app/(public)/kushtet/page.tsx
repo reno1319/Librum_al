@@ -324,12 +324,13 @@ export default function TermsPage() {
               </h2>
               <p className="mt-2">
                 Mund ta anuloni një blerje për çfarëdo arsye brenda 14
-                ditëve nga blerja, për sa kohë nuk e keni shkarkuar ende
-                librin. Para se të paguani, ju kërkohet të pranoni që libri
-                dorëzohet menjëherë në bibliotekën tuaj dhe që e humbni këtë
-                të drejtë anulimi kur e shkarkoni për herë të parë. Një
-                paketë mund të anulohet vetëm nëse asnjë nga librat e saj
-                nuk është shkarkuar.
+                ditëve nga blerja, për sa kohë nuk e keni lexuar online ose
+                shkarkuar ende librin. Para se të paguani, ju kërkohet të
+                pranoni që libri dorëzohet menjëherë në bibliotekën tuaj dhe
+                që e humbni këtë të drejtë anulimi kur e hapni për ta lexuar
+                online ose e shkarkoni për herë të parë. Një paketë mund të
+                anulohet vetëm nëse asnjë nga librat e saj nuk është hapur
+                online ose shkarkuar.
               </p>
               <p className="mt-2">
                 Pas kësaj, rimbursimi është ende i mundur nëse diçka shkon

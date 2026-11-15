@@ -61,7 +61,7 @@ describe("buyerDownloadNote", () => {
     expect(buyerDownloadNote({ firstDownloadedAt: null, cancelOpenUntil: "2026-11-06T10:00:00Z" }, NOW)).toBe(
       DOWNLOAD_CANCEL_WARNING,
     );
-    expect(DOWNLOAD_CANCEL_WARNING).toBe("Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
+    expect(DOWNLOAD_CANCEL_WARNING).toBe("Leximi ose shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.");
   });
 
   it("does not warn once the window has passed, even if the read is stale", () => {
