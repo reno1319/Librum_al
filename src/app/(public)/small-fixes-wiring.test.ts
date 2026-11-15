@@ -8,6 +8,10 @@ import { RIGHTS_STATEMENTS } from "@/lib/rights-statements";
 
 // AUTHOR PAGES REDESIGN: How it works reads the visitor (closing band),
 // so it is async and renders against a signed-out Supabase client.
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
@@ -40,22 +44,23 @@ describe("FIX1 X2: every header Sign up preselects Author", () => {
 });
 
 describe("FIX1 X3: How it works numbers each step once", () => {
-  // AUTHOR PAGES REDESIGN: the numbers are the grid's numerals (01-06),
-  // shown once; the titles still carry none.
-  it("the titles carry no typed number and the numerals number them once", async () => {
+  // K5 (Renato 11-14): three steps, "Hapi 1:" to "Hapi 3:", each once,
+  // under a heading that says three.
+  it("the three step titles are numbered once each", async () => {
     const html = await renderHowItWorks();
-    const numerals = [...html.matchAll(/<span class="[^"]*italic[^"]*">(\d\d)<\/span>/g)].map((m) => m[1]);
-    // BD2 (7b): the "Author payouts: not activated yet" step is gone.
-    expect(numerals).toEqual(["01", "02", "03", "04", "05"]);
-    expect(html).toContain(">Regjistrohuni si autor</h3>");
-    expect(html).not.toMatch(/>\d\. /);
+    const steps = [...html.matchAll(/>Hapi (\d):<\/span>/g)].map((m) => m[1]);
+    expect(steps).toEqual(["1", "2", "3"]);
+    expect(html).toContain(">Botoni në tre hapa</h2>");
+    expect(html).not.toContain("Gjashtë hapa");
     expect(html).not.toContain("list-decimal");
   });
 
-  it("step 4 shows both rights sentences exactly, from RIGHTS_STATEMENTS", async () => {
+  // K5 (his pick): one rights line, no list of the statements.
+  it("step 2 has one rights line and does not list the statements", async () => {
     const html = await renderHowItWorks();
+    expect(html).toContain("Zgjidhni deklaratën e të drejtave që i korrespondon librit tuaj.");
     for (const { text } of Object.values(RIGHTS_STATEMENTS)) {
-      expect(html).toContain(`>${text.replace("'", "&#x27;")}</li>`);
+      expect(html).not.toContain(text.replace("'", "&#x27;"));
     }
   });
 });

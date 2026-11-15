@@ -20,6 +20,6 @@ export async function proxy(request: NextRequest) {
 // answers like any page, locked while the lock is on.
 export const config = {
   matcher: [
-    "/((?!_next/static/|_next/image$|favicon\\.ico$|images/author-hero\\.jpg$|(?:file|globe|next|vercel|window)\\.svg$).*)",
+    "/((?!_next/static/|_next/image$|favicon\\.ico$|images/author-hero\\.jpg$|images/si-funksionon/(?:hero|prepare|publish|earn|tools)\\.jpg$|images/fitimet/(?:hero|income)\\.jpg$|fonts/(?:literata|literata-italic|atkinson|atkinson-bold|atkinson-italic)\\.woff2$|icons/(?:icon-192|icon-512|icon-maskable-512|apple-touch-icon)\\.png$|manifest\\.webmanifest$|(?:file|globe|next|vercel|window)\\.svg$).*)",
   ],
 };

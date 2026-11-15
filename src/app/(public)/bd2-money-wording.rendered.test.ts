@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ROYALTY_DISCOUNT_NOTE,
-  ROYALTY_HEADLINE_CAPTION,
   ROYALTY_PAID_PRICE_SENTENCE,
   ROYALTY_RULE_SENTENCE,
   ROYALTY_TIERS_LINE,
@@ -13,6 +12,10 @@ import {
 // BD2 (Renato 11-01: 1a 2a 4a 5a 6a 7b): the public money wording is
 // "Librum sells, the author gets a royalty": 70% from 199 lek, 50% below,
 // 99 lek minimum. No "platform fee", no 80/20, no "not launched yet".
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: () => Promise.resolve({ data: { user: null } }) } }),
@@ -57,7 +60,10 @@ describe("BD2: the public money pages", () => {
 
   it("/fitimet shows 70% with its caption, the paid-price rule and Librum's share", async () => {
     const text = await pages["/fitimet"]();
-    expect(text).toContain("70% Pjesa e autorit " + ROYALTY_HEADLINE_CAPTION);
+    // Fitimet redesign (Renato 11-14): the two tiers as big numbers, each
+    // with its own price range, instead of the 70% + caption band.
+    expect(text).toContain("70% Pjesa e autorit Për libra me çmim nga 199 lekë e lart: 70% e çmimit që paguan lexuesi.");
+    expect(text).toContain("50% Pjesa e autorit Për libra me çmim nga 99 deri në 198 lekë: 50% e çmimit që paguan lexuesi.");
     expect(text).toContain(ROYALTY_PAID_PRICE_SENTENCE);
     expect(text).toContain("Librum mban pjesën tjetër (30%, ose 50% nën 199 lekë) dhe nuk ju zbret asgjë tjetër.");
     expect(text).toContain("Çmimin e librit e vendosni ju: falas, ose nga 99 deri në 100.000 lekë.");
@@ -72,8 +78,12 @@ describe("BD2: the public money pages", () => {
     expect(text).toContain(ROYALTY_TIERS_LINE);
   });
 
+  // K5 (Renato 11-14): Si funksionon says the paid-price rule in his own
+  // words instead of the shared sentence.
   it("/si-funksionon also says the paid-price rule", async () => {
-    expect(await pages["/si-funksionon"]()).toContain(ROYALTY_PAID_PRICE_SENTENCE);
+    expect(await pages["/si-funksionon"]()).toContain(
+      "Fitimi juaj llogaritet pas kodit të zbritjes, nëse ka, ose nga çmimi i paketës, nëse libri shitet në paketë.",
+    );
   });
 
   it("the home page source uses the shared sentences and no fee constant", () => {

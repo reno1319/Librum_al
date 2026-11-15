@@ -52,8 +52,24 @@ const runsProxy = (url: string) => unstable_doesMiddlewareMatch({ config, url })
 // exact-path list gets updated in the same patch.
 const PUBLIC_FILES = [
   "/file.svg",
+  "/fonts/atkinson-bold.woff2",
+  "/fonts/atkinson-italic.woff2",
+  "/fonts/atkinson.woff2",
+  "/fonts/literata-italic.woff2",
+  "/fonts/literata.woff2",
   "/globe.svg",
+  "/icons/apple-touch-icon.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-maskable-512.png",
   "/images/author-hero.jpg",
+  "/images/fitimet/hero.jpg",
+  "/images/fitimet/income.jpg",
+  "/images/si-funksionon/earn.jpg",
+  "/images/si-funksionon/hero.jpg",
+  "/images/si-funksionon/prepare.jpg",
+  "/images/si-funksionon/publish.jpg",
+  "/images/si-funksionon/tools.jpg",
   "/next.svg",
   "/vercel.svg",
   "/window.svg",
@@ -72,7 +88,10 @@ describe("proxy matcher", () => {
     expect(onDisk.sort()).toEqual([...PUBLIC_FILES].sort());
   });
 
-  it.each([...PUBLIC_FILES, "/favicon.ico", "/_next/static/chunks/app.js", "/_next/static/media/font.woff2", "/_next/image?url=%2Fimages%2Fauthor-hero.jpg&w=640&q=75"])(
+  // K9: the app manifest is a generated route (src/app/manifest.ts), not a
+  // public/ file; browsers fetch it without cookies, so the lock must not
+  // answer for it.
+  it.each([...PUBLIC_FILES, "/manifest.webmanifest", "/favicon.ico", "/_next/static/chunks/app.js", "/_next/static/media/font.woff2", "/_next/image?url=%2Fimages%2Fauthor-hero.jpg&w=640&q=75"])(
     "skips the real static file %s",
     (url) => {
       expect(runsProxy(url)).toBe(false);
@@ -94,7 +113,18 @@ describe("proxy matcher", () => {
     "/_next/imagefoo",
     "/_next/image/x",
     "/images/other.jpg",
+    "/images/si-funksionon/other.jpg",
+    "/images/si-funksionon/hero.jpgx",
+    "/images/fitimet/other.jpg",
+    "/images/fitimet/income.jpgx",
     "/images/author-hero.jpgx",
+    "/fonts/other.woff2",
+    "/fonts/literata.woff2x",
+    "/fonts/literata.woff",
+    "/icons/other.png",
+    "/icons/icon-192.pngx",
+    "/manifest.webmanifestx",
+    "/libra/manifest.webmanifest",
     "/images/author-hero.jpg/x",
     "/libra/next.svg",
     "/nextXsvg",

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { attachOutsideTap, type OutsideTapDocument } from "./mobile-nav";
+import { attachOutsideTap, watchInstallPrompt, type InstallWindow, type OutsideTapDocument } from "./mobile-nav";
 
 // PHONE PASS (D5): the site ☰ menu closes on a tap outside it. Called
 // with fake root/document objects (vitest runs in `node` with no DOM,
@@ -68,5 +70,47 @@ describe("MobileNav panel tap targets", () => {
     const linkClass = source.match(/const linkClassName =\s*"([^"]+)"/)?.[1] ?? "";
     expect(linkClass.split(/\s+/)).toContain("min-h-11");
     expect(linkClass.split(/\s+/)).not.toContain("py-1");
+  });
+});
+
+// K9 (Renato 11-14, 3a): "Instalo Librum" shows only while the browser
+// has offered an install (Chrome on Android), and goes away once used.
+describe("watchInstallPrompt (Instalo Librum)", () => {
+  function setupInstall() {
+    const listeners = new Map<string, Listener>();
+    const win = {
+      addEventListener: vi.fn((type: string, fn: Listener) => listeners.set(type, fn)),
+      removeEventListener: vi.fn((type: string, fn: Listener) => {
+        if (listeners.get(type) === fn) listeners.delete(type);
+      }),
+    };
+    const onChange = vi.fn();
+    const cleanup = watchInstallPrompt(win as unknown as InstallWindow, onChange);
+    return { listeners, onChange, cleanup };
+  }
+
+  it("keeps the browser's offer and hands it over", () => {
+    const { listeners, onChange } = setupInstall();
+    const offer = { preventDefault: vi.fn(), prompt: vi.fn() };
+    listeners.get("beforeinstallprompt")?.(offer as unknown as Event);
+    expect(offer.preventDefault).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(offer);
+  });
+
+  it("clears the offer once the app is installed", () => {
+    const { listeners, onChange } = setupInstall();
+    listeners.get("appinstalled")?.(new Event("appinstalled"));
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("cleanup removes both listeners", () => {
+    const { listeners, cleanup } = setupInstall();
+    cleanup();
+    expect(listeners.size).toBe(0);
+  });
+
+  it("the menu shows the item only while an offer is kept", () => {
+    const source = readFileSync(join(process.cwd(), "src/components/mobile-nav.tsx"), "utf8");
+    expect(source).toMatch(/\{installOffer && \(\s*<button type="button" onClick=\{install\} className=\{linkClassName\}>\s*Instalo Librum/);
   });
 });

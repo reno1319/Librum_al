@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BookReader, READER_TAP_CLASSES, closesOpenMenu, type ReaderData } from "./book-reader";
+import { readFileSync } from "node:fs";
+import { BookReader, READER_TAP_CLASSES, closesOpenMenu, readSettings, type ReaderData } from "./book-reader";
 
 // DD (13 Nov): every reader control is at least 44 px (size-11 / h-11 /
 // min-h-11); Contents shows its word from tablet up, the page-look button
@@ -82,5 +83,37 @@ describe("closesOpenMenu (DD Escape)", () => {
   it("other keys never close a menu", () => {
     expect(closesOpenMenu("ArrowRight", "aa", true)).toBe(false);
     expect(closesOpenMenu("Enter", "toc", true)).toBe(false);
+  });
+});
+
+// K9 (Renato 11-14, 1a): Klasike, Literata and Atkinson in the Aa menu,
+// remembered with the other reader settings on this device.
+describe("BookReader fonts (K9)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const stored = (value: unknown) =>
+    vi.stubGlobal("window", { localStorage: { getItem: () => (value === undefined ? null : JSON.stringify(value)) } });
+
+  it("remembers a picked font", () => {
+    stored({ theme: "sepia", step: 3, font: "atkinson" });
+    expect(readSettings()).toEqual({ theme: "sepia", step: 3, font: "atkinson" });
+  });
+
+  it("older saved settings without a font, and unknown fonts, read as Klasike", () => {
+    stored({ theme: "dark", step: 1 });
+    expect(readSettings().font).toBe("classic");
+    stored({ theme: "dark", step: 1, font: "toString" });
+    expect(readSettings().font).toBe("classic");
+    stored({ font: "comic" });
+    expect(readSettings().font).toBe("classic");
+    stored(undefined);
+    expect(readSettings()).toEqual({ theme: "light", step: 2, font: "classic" });
+  });
+
+  it("the Aa menu has a 'Shkronjat' choice of the three fonts, 48 px tall, each in its own font", () => {
+    const src = readFileSync("src/components/book-reader.tsx", "utf8");
+    expect(src).toContain('role="radiogroup" aria-label="Shkronjat"');
+    expect(src).toMatch(/aria-checked=\{settings\.font === key\}[\s\S]{0,200}className="focus-ring flex h-12 flex-1/);
+    expect(src).toContain("fontFamily: READER_FONTS[key].stack");
+    expect(src).toContain('style.setProperty("--lb-font", READER_FONTS[settings.font].stack);');
   });
 });
