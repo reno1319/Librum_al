@@ -46,18 +46,19 @@ export default function RefundsPage() {
               </h2>
               <p className="mt-2">
                 Mund ta anuloni një blerje për çfarëdo arsye brenda 14
-                ditëve nga blerja, për sa kohë nuk e keni shkarkuar ende
-                librin.
+                ditëve nga blerja, për sa kohë nuk e keni lexuar online ose
+                shkarkuar ende librin.
               </p>
               <p className="mt-2">
                 Para se të paguani, ju kërkohet të pranoni që libri
                 dorëzohet menjëherë në bibliotekën tuaj dhe që e humbni këtë
-                të drejtë anulimi kur e shkarkoni për herë të parë. Emaili i
+                të drejtë anulimi kur e hapni për ta lexuar online ose e
+                shkarkoni për herë të parë. Emaili i
                 konfirmimit të blerjes e përsërit këtë.
               </p>
               <p className="mt-2">
                 Një paketë mund të anulohet vetëm nëse asnjë nga librat e
-                saj nuk është shkarkuar.
+                saj nuk është hapur online ose shkarkuar.
               </p>
             </section>
 
@@ -66,8 +67,8 @@ export default function RefundsPage() {
                 Probleme me një libër
               </h2>
               <p className="mt-2">
-                Në çdo kohë, edhe pasi ta keni shkarkuar librin, jua
-                rimbursojmë blerjen nëse:
+                Në çdo kohë, edhe pasi ta keni lexuar online ose shkarkuar
+                librin, jua rimbursojmë blerjen nëse:
               </p>
               <ul className="mt-2 list-disc pl-5">
                 <li>
@@ -90,7 +91,7 @@ export default function RefundsPage() {
               <p className="mt-2">Na tregoni sapo ta vini re problemin.</p>
               <p className="mt-2">
                 Përveç këtyre problemeve, nuk e rimbursojmë një libër pasi ta
-                keni shkarkuar. Për librat falas nuk ka asgjë për
+                keni lexuar online ose shkarkuar. Për librat falas nuk ka asgjë për
                 t&apos;u rimbursuar.
               </p>
             </section>

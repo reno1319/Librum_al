@@ -61,8 +61,8 @@ describe("TRUST PACK 1-2: How to read your book", () => {
 
   it("says where downloads are and repeats the 14-day rule with a Refund Policy link", () => {
     expect(html).toContain('href="/library"');
-    expect(text).toContain("brenda 14 ditëve, për sa kohë nuk e keni shkarkuar ende librin");
-    expect(text).toContain("Shkarkimi i parë e mbyll këtë të drejtë.");
+    expect(text).toContain("brenda 14 ditëve, për sa kohë nuk e keni lexuar online ose shkarkuar ende librin");
+    expect(text).toContain("Hapja e parë për lexim online ose shkarkimi i parë e mbyll këtë të drejtë.");
     expect(html).toContain('href="/rimbursimet"');
   });
 

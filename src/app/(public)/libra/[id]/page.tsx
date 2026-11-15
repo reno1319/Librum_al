@@ -72,7 +72,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
-import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER } from "@/lib/book-downloads";
+import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER, DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
@@ -877,6 +877,17 @@ export default async function BookDetailPage({
     />
   );
   const boxSample = showSample ? sampleReader("Lexo një pjesë", SECONDARY_ACTION_CLASSES) : null;
+  const ownedRead = (
+    <BookSampleReader
+      bookId={book.id}
+      bookTitle={book.title}
+      mode="owned"
+      label="Lexo librin"
+      triggerClassName={PRIMARY_ACTION_CLASSES}
+      coverUrl={coverUrl}
+      confirmFirst={downloadNote === DOWNLOAD_CANCEL_WARNING}
+    />
+  );
   // P1 (Renato 11-10): pages and reading time come from the same count.
   const pagesText = pageEstimateText(book.word_count);
   const readingTime = readingTimeText(book.word_count);
@@ -1383,6 +1394,7 @@ export default async function BookDetailPage({
                 wishlisted={wishlisted}
                 downloadNote={downloadNote}
                 sampleSlot={boxSample}
+                readSlot={ownedRead}
               />
             )}
             {preorder && <p className={BOX_NOTE_CLASSES}>{PREORDER_PRICE_NOTE}</p>}
@@ -2006,7 +2018,9 @@ function PurchasePanel({
   wishlisted,
   downloadNote,
   sampleSlot,
+  readSlot,
 }: {
+  readSlot: React.ReactNode;
   state: BookPurchaseState;
   bookId: string;
   wishlisted: boolean;
@@ -2045,7 +2059,8 @@ function PurchasePanel({
     return (
       <div className="flex flex-col gap-3">
         <span className={STATUS_PILL_CLASSES}>Ky libër është i juaji</span>
-        <a href={`/api/books/${bookId}/download`} className={PRIMARY_ACTION_CLASSES}>
+        {readSlot}
+        <a href={`/api/books/${bookId}/download`} className={SECONDARY_ACTION_CLASSES}>
           <span>
             Shkarko <Acronym>EPUB</Acronym>
           </span>

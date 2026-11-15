@@ -95,9 +95,9 @@ export default function PrivacyPage() {
                 që merrni, lista e dëshirave, autorët që ndiqni, kërkesat
                 «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,
                 çdo raportim përmbajtjeje dhe kërkesë rimbursimi që na
-                dërgoni, si dhe një regjistrim për çdo herë që shkarkoni një
-                libër që keni blerë ose marrë falas (data, ora dhe cili
-                version i skedarit u shkarkua).
+                dërgoni, si dhe një regjistrim për çdo herë që hapni për ta
+                lexuar online ose shkarkoni një libër që keni blerë ose marrë
+                falas (data, ora dhe cili version i skedarit u përdor).
               </p>
               <p className="mt-2">
                 <strong>Si autor:</strong> librat, ballinat dhe skedarët e
@@ -294,7 +294,7 @@ export default function PrivacyPage() {
                   llogarinë.
                 </li>
                 <li>
-                  <strong>Regjistrimet e shkarkimeve:</strong> për aq kohë sa
+                  <strong>Regjistrimet e leximeve online dhe të shkarkimeve:</strong> për aq kohë sa
                   ruhet blerja të cilës i përkasin.
                 </li>
                 <li>
