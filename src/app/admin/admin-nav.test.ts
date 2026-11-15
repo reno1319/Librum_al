@@ -22,7 +22,7 @@ function groupsFor(role: StaffRole) {
 describe("ADMIN_NAV_GROUPS", () => {
   it("lists the existing pages in the agreed groups and order", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => ({ label: g.label, items: g.items.map((i) => i.label) }))).toEqual([
-      { label: "Daily", items: ["Today", "Reader reviews", "Book reports", "Refund requests"] },
+      { label: "Daily", items: ["Today", "Reader reviews", "Book reports", "Feedback", "Refund requests"] },
       { label: "Catalog", items: ["Books", "Featured picks", "Blog"] },
       { label: "Money", items: ["Finance"] },
       { label: "Team", items: ["People", "Staff", "Audit log"] },
@@ -49,6 +49,8 @@ describe("ADMIN_NAV_GROUPS", () => {
       // BD13: the reader review queue's own gate.
       "/admin/reader-reviews": "reports.resolve",
       "/admin/reports": "reports.view",
+      // K4 feedback d a: the Feedback page's own gate.
+      "/admin/feedback": "reports.view",
       // ADMIN-2-TAKEDOWN: the books list's own gate.
       "/admin/books": "reports.view",
       "/admin/refunds": "refunds.view",
@@ -70,7 +72,7 @@ describe("ADMIN_NAV_GROUPS", () => {
 describe("resolveVisibleAdminNavGroups", () => {
   it("owner sees every group and page", () => {
     expect(groupsFor("owner")).toEqual([
-      { label: "Daily", hrefs: ["/admin", "/admin/reader-reviews", "/admin/reports", "/admin/refunds"] },
+      { label: "Daily", hrefs: ["/admin", "/admin/reader-reviews", "/admin/reports", "/admin/feedback", "/admin/refunds"] },
       { label: "Catalog", hrefs: ["/admin/books", "/admin/librum-choice", "/admin/blog"] },
       { label: "Money", hrefs: ["/admin/finance"] },
       { label: "Team", hrefs: ["/admin/people", "/admin/staff", "/admin/audit"] },
@@ -90,9 +92,9 @@ describe("resolveVisibleAdminNavGroups", () => {
 
   // ADMIN-2-TAKEDOWN: Books is gated on reports.view, so a moderator now
   // also sees Catalog, with Books only.
-  it("moderator sees Today, Reader reviews and Book reports in Daily, and Books in Catalog", () => {
+  it("moderator sees Today, Reader reviews, Book reports and Feedback in Daily, and Books in Catalog", () => {
     expect(groupsFor("moderator")).toEqual([
-      { label: "Daily", hrefs: ["/admin", "/admin/reader-reviews", "/admin/reports"] },
+      { label: "Daily", hrefs: ["/admin", "/admin/reader-reviews", "/admin/reports", "/admin/feedback"] },
       { label: "Catalog", hrefs: ["/admin/books"] },
     ]);
   });

@@ -178,6 +178,16 @@ export function IconUnlock({ className, style }: IconProps) {
 }
 
 // P1 book page (design B): the detail tiles' pictures.
+export function IconReaders({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" />
+      <path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.7 2.6 2.3 3 4.6" />
+    </svg>
+  );
+}
+
 export function IconPage({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>

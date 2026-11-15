@@ -32,6 +32,7 @@ import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
 import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
+import { downloadCountText, parseDownloadCount } from "@/lib/reader-feedback";
 import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
@@ -100,6 +101,7 @@ import {
   IconGlobe,
   IconInstagram,
   IconPage,
+  IconReaders,
 } from "@/components/icons";
 import {
   ANONYMOUS_REVIEWER_NAME,
@@ -498,6 +500,7 @@ export default async function BookDetailPage({
     { data: youMightLikeData },
     { data: followRow },
     { count: penBookCount },
+    { data: downloadCountData },
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -607,6 +610,13 @@ export default async function BookDetailPage({
           .not("price_all", "is", null)
           .eq("pen_name_id", book.pen_name_id)
       : Promise.resolve({ count: null }),
+    // Download count (Renato 11-15): "N shkarkime" under the genre -- one
+    // per person who got this published book (bought or free), refunds
+    // not counted. The database gives 0 for anything not published, and
+    // only a number, never who.
+    book.status === "published"
+      ? supabase.rpc("book_download_count", { p_book_id: id })
+      : Promise.resolve({ data: null }),
     // A basic view count, not deduplicated unique visitors — a reload
     // or a repeat visit counts again. Only published books, and never
     // the author's own visits (so previewing/editing doesn't inflate
@@ -890,6 +900,7 @@ export default async function BookDetailPage({
   );
   // P1 (Renato 11-10): pages and reading time come from the same count.
   const pagesText = pageEstimateText(book.word_count);
+  const downloadText = downloadCountText(parseDownloadCount(downloadCountData));
   const readingTime = readingTimeText(book.word_count);
   const publishedOnLibrum =
     book.status === "published" && book.published_at ? formatTimestampAsDate(book.published_at) : null;
@@ -1247,6 +1258,16 @@ export default async function BookDetailPage({
                 {`${averageRating.toFixed(1).replace(".", ",")} · ${reviewCount} ${reviewCount === 1 ? "vlerësim" : "vlerësime"}`}
               </span>
             </a>
+          )}
+
+          {/* Download count (count b a): nothing while it is 0. */}
+          {downloadText && (
+            <p data-download-count="" className="mt-1 inline-flex min-h-8 items-center gap-2 text-sm text-muted">
+              <IconReaders className="size-[1.125rem] text-primary" />
+              <span>
+                <span className="font-semibold text-foreground">{downloadText.number}</span> {downloadText.word}
+              </span>
+            </p>
           )}
           </div>
 

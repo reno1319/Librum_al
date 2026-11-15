@@ -6,6 +6,7 @@ import { isRecoverySessionActive } from "@/lib/recovery-session";
 import { IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
+import { FeedbackButton } from "@/components/feedback-button";
 import { accountFirstName } from "@/lib/account-first-name";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
@@ -255,6 +256,8 @@ export async function SiteHeader() {
           />
         </div>
       </div>
+      {/* K4 feedback b a: signed-in people only, never mid password reset. */}
+      {user && !recoveryActive && <FeedbackButton />}
     </header>
   );
 }

@@ -186,3 +186,15 @@ describe("SiteHeader name link (source)", () => {
     expect(source).not.toContain("xl:inline");
   });
 });
+
+// K4 feedback b a: the corner button is for signed-in people only, never
+// during a password reset (source guard, like the name link above).
+describe("SiteHeader feedback button (source)", () => {
+  it("renders FeedbackButton only for a signed-in user outside a password reset", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const source = readFileSync(fileURLToPath(new URL("./site-header.tsx", import.meta.url)), "utf8");
+    expect(source).toContain("{user && !recoveryActive && <FeedbackButton />}");
+    expect(source.match(/<FeedbackButton/g)).toHaveLength(1);
+  });
+});

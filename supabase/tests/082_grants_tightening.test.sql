@@ -275,13 +275,15 @@ select pg_temp.assert(
   -- (migration 20261103200000): book_is_publicly_listed(books), called
   -- by public_books as the caller. BD15 P7 (migration 20261105180000):
   -- pd_edition_redirect(uuid), a replaced edition's old book page.
-  = 'book_is_publicly_listed(books) ; book_makes_pen_name_public(books) ; '
+  -- Download count (migration 20261115200000): book_download_count(uuid),
+  -- the number on the book page for signed-out visitors (a count, no one named).
+  = 'book_download_count(uuid) ; book_is_publicly_listed(books) ; book_makes_pen_name_public(books) ; '
     || 'enforce_author_payouts_immutability() ; enforce_book_rights_declarations_append_only() ; '
     || 'enforce_bundle_checkout_snapshots_financial_facts_immutability() ; enforce_payout_reversal_matches_original() ; '
     || 'pd_edition_redirect(uuid) ; '
     || 'pen_name_links_valid(jsonb) ; reject_payout_destination_snapshot_mutation() ; '
     || 'search_books(text,text,integer,integer,integer) ; staff_has_permission(text) ; user_owns_book(uuid)',
-  'part4: anon can EXECUTE exactly the twelve allowed public functions');
+  'part4: anon can EXECUTE exactly the thirteen allowed public functions');
 
 do $$
 begin

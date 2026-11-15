@@ -91,6 +91,13 @@ describe("POLICY PAGES: /privatesia", () => {
     );
   });
 
+  // Download count + K4 feedback (Renato 11-15).
+  it("says the book page shows only a number of people, and names the feedback messages and how long they are kept", () => {
+    expect(text).toContain("Faqja e çdo libri tregon sa njerëz e kanë marrë, vetëm si numër, pa treguar kush.");
+    expect(text).toContain("Ruajmë edhe mesazhet që na dërgoni me butonin «Na tregoni» (lloji, teksti dhe faqja ku ishit).");
+    expect(text).toContain("Mesazhet «Na tregoni»: derisa ta fshini llogarinë.");
+  });
+
   it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {
     expect(text).not.toMatch(/stripe/i);
   });
