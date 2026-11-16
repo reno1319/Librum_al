@@ -24,6 +24,11 @@ export const CONFIRMATION_LINK_INVALID_MESSAGE =
 export const RECOVERY_LINK_INVALID_MESSAGE =
   "Kjo lidhje për rivendosjen e fjalëkalimit nuk vlen ose ka skaduar. Kërkoni një të re.";
 
+// K7: Google sign-in did not finish (cancelled on Google's screen, an
+// expired or refused code, or a suspended account). One message for all,
+// so it never tells whether an address has an account.
+export const GOOGLE_SIGN_IN_FAILED_MESSAGE = "Hyrja me Google nuk u krye. Provoni përsëri.";
+
 export const AUTH_PASSWORD_CHANGED_MESSAGE = "Fjalëkalimi u ndryshua. Hyni me fjalëkalimin e ri.";
 
 // Shown for anything in `?error=` that is neither ours nor a known
@@ -44,6 +49,7 @@ export const OWN_AUTH_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   AUTH_PASSWORDS_DIFFER_MESSAGE,
   CONFIRMATION_LINK_INVALID_MESSAGE,
   RECOVERY_LINK_INVALID_MESSAGE,
+  GOOGLE_SIGN_IN_FAILED_MESSAGE,
   AUTH_GENERIC_ERROR_MESSAGE,
 ]);
 

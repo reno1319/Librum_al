@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 // account page's "Become an author" form. The server checks are tested
 // in auth/actions.test.ts and account/become-author.test.ts.
 
-vi.mock("@/app/(public)/auth/actions", () => ({ signup: async () => undefined }));
+vi.mock("@/app/(public)/auth/actions", () => ({ signup: async () => undefined, signInWithGoogle: async () => undefined, signUpWithGoogle: async () => undefined }));
 
 const { default: SignupPage } = await import("./page");
 

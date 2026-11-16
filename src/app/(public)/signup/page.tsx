@@ -4,6 +4,7 @@ import { translateAuthErrorMessage } from "@/lib/auth-error";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import { AUTHOR_AGE_FIELD, AUTHOR_AGE_STATEMENT } from "@/lib/author-age-statement";
 import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Metadata } from "next";
@@ -31,7 +32,7 @@ export default async function SignupPage({
         </Alert>
       )}
 
-      <form action={signup} className="group mt-6 flex flex-col gap-4">
+      <form id="signup-form" action={signup} className="group mt-6 flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
           Emri
           <input
@@ -133,6 +134,8 @@ export default async function SignupPage({
           Krijo llogarinë
         </button>
       </form>
+
+      <GoogleSignIn from="signup" signupFormId="signup-form" />
 
       <p className="mt-6 text-sm text-muted">
         Keni tashmë llogari?{" "}
