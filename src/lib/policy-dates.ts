@@ -6,8 +6,9 @@
 // 30 October 2026, Tirana time. If the release moves to another day,
 // this line changes with it before the release.
 // Buyer reader (Renato 11-15, 1a): "read online or download" in the
-// cancel section; the release that ships it sets the final day.
-export const POLICY_LAST_UPDATED = "15 nëntor 2026";
+// cancel section. Release 26 ships it to Production on Monday
+// 16 November 2026; if it moves, this line moves with it.
+export const POLICY_LAST_UPDATED = "16 nëntor 2026";
 
 export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATED}`;
 
@@ -24,9 +25,10 @@ export const POLICY_LAST_UPDATED_LINE = `Përditësuar më: ${POLICY_LAST_UPDATE
 // text to Production on 7 November 2026.
 // PL1 (Release 21): the pre-order «Më njofto» text ships to Production
 // on Wednesday 11 November 2026; if it moves, this line moves with it.
-// Buyer reader (11-15): online opens are logged too; the release that
-// ships it sets the final day.
-export const PRIVACY_LAST_UPDATED = "15 nëntor 2026";
+// Buyer reader (11-15): online opens are logged too. Release 26 ships
+// it to Production on Monday 16 November 2026; if it moves, this line
+// moves with it.
+export const PRIVACY_LAST_UPDATED = "16 nëntor 2026";
 
 export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDATED}`;
 
@@ -42,8 +44,9 @@ export const PRIVACY_LAST_UPDATED_LINE = `Përditësuar më: ${PRIVACY_LAST_UPDA
 // PL1 (Release 21): the Terms §5 "Parapublikimi" text ships to
 // Production on Wednesday 11 November 2026; if it moves, this line
 // moves with it.
-// Buyer reader (11-15, terms-sq-5): §9 "read online or download"; the
-// release that ships it sets the final day.
-export const TERMS_LAST_UPDATED = "15 nëntor 2026";
+// Buyer reader (11-15, terms-sq-5): §9 "read online or download".
+// Release 26 ships it to Production on Monday 16 November 2026; if it
+// moves, this line moves with it.
+export const TERMS_LAST_UPDATED = "16 nëntor 2026";
 
 export const TERMS_LAST_UPDATED_LINE = `Përditësuar më: ${TERMS_LAST_UPDATED}`;

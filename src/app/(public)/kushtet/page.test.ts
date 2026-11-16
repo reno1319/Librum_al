@@ -93,7 +93,7 @@ describe("POLICY PAGES: /kushtet", () => {
   it("takes its date from its own line (BD2, 3. a)", () => {
     expect(text).toContain(TERMS_LAST_UPDATED_LINE);
     // Release 21: the Production release day of the PL1 Terms (11 November 2026).
-    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 15 nëntor 2026");
+    expect(TERMS_LAST_UPDATED_LINE).toBe("Përditësuar më: 16 nëntor 2026");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
   });
 
