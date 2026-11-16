@@ -134,9 +134,9 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain(PRIVACY_LAST_UPDATED_LINE);
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
-    expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 15 nëntor 2026");
+    expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 16 nëntor 2026");
     // Release 21: the Production release day of the PL1 Privacy text (11 November 2026).
-    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 15 nëntor 2026");
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 16 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {
