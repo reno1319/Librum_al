@@ -20,6 +20,7 @@ import { getActionLabel, resolveAuditActorDisplay } from "./audit/audit-log-logi
 import { readBookTitlesForStaff, readPendingReviewsForStaff } from "./books/admin-book-reads";
 import type { AuditEventRow } from "@/lib/types";
 import { loadStaffDisplayNames } from "@/lib/staff-display-names";
+import { parseAdminFeedbackRows } from "@/lib/reader-feedback";
 import type { Metadata } from "next";
 import { pageErrorMessage } from "@/lib/page-messages";
 import {
@@ -176,6 +177,11 @@ export default async function AdminPage({
   const readerReviewsFailed = Boolean(readerReviewsResult?.error);
   const waitingReaderReviews = ((readerReviewsResult?.data as { updated_at: string }[] | null) ?? []);
 
+  // K4 feedback d a: the open messages, newest first (so the oldest is last).
+  const feedbackResult = showReports ? await supabase.rpc("staff_list_reader_feedback", { p_status: "open" }) : null;
+  const feedbackFailed = Boolean(feedbackResult?.error);
+  const openFeedback = parseAdminFeedbackRows(feedbackResult?.data);
+
   const activityResult = showActivity ? await listAdminAuditEvents({ limit: 5 }) : null;
   const activity: AuditEventRow[] = activityResult?.ok ? activityResult.data : [];
 
@@ -214,6 +220,15 @@ export default async function AdminPage({
       failed: reportsFailed,
       count: openReports.length,
       oldestAt: openReports[0]?.created_at ?? null,
+    },
+    // K4 feedback d a: open "Na tregoni" messages (no email is sent).
+    showReports && {
+      key: "feedback",
+      href: "/admin/feedback",
+      label: "Open feedback",
+      failed: feedbackFailed,
+      count: openFeedback.length,
+      oldestAt: openFeedback[openFeedback.length - 1]?.createdAt ?? null,
     },
     showRefunds && {
       key: "refunds",

@@ -18900,3 +18900,400 @@ as
   where public.book_is_publicly_listed(b)
      or b.author_id = auth.uid()
      or public.user_owns_book(b.id);
+
+
+-- ============================================================
+-- K8 + K10 (migration 20261115160000_reader_marks.sql): reading_places,
+-- reader_bookmarks, reader_highlights. Same statements and reasoning as the
+-- migration.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The tables.
+-- ------------------------------------------------------------
+create table public.reading_places (
+  user_id uuid not null default auth.uid() references public.profiles(id) on delete cascade,
+  book_id uuid not null references public.books(id) on delete cascade,
+  char_offset integer not null constraint reading_places_char_offset_check check (char_offset >= 0),
+  progress numeric(5, 4) not null constraint reading_places_progress_check check (progress >= 0 and progress <= 1),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, book_id)
+);
+
+create table public.reader_bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references public.profiles(id) on delete cascade,
+  book_id uuid not null references public.books(id) on delete cascade,
+  char_offset integer not null constraint reader_bookmarks_char_offset_check check (char_offset >= 0),
+  created_at timestamptz not null default now(),
+  constraint reader_bookmarks_unique_place unique (user_id, book_id, char_offset)
+);
+
+create table public.reader_highlights (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references public.profiles(id) on delete cascade,
+  book_id uuid not null references public.books(id) on delete cascade,
+  start_offset integer not null constraint reader_highlights_start_offset_check check (start_offset >= 0),
+  end_offset integer not null,
+  quote text not null constraint reader_highlights_quote_check check (char_length(quote) between 1 and 4000),
+  prefix text not null default '' constraint reader_highlights_prefix_check check (char_length(prefix) <= 64),
+  suffix text not null default '' constraint reader_highlights_suffix_check check (char_length(suffix) <= 64),
+  color text not null constraint reader_highlights_color_check check (color in ('yellow', 'green', 'blue', 'pink')),
+  note text constraint reader_highlights_note_check check (note is null or char_length(note) between 1 and 1000),
+  orphaned_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint reader_highlights_span_check check (end_offset > start_offset)
+);
+
+create index reader_bookmarks_user_book_idx on public.reader_bookmarks (user_id, book_id);
+create index reader_highlights_user_book_idx on public.reader_highlights (user_id, book_id);
+-- The FK to books is ON DELETE CASCADE; these keep a book delete cheap.
+create index reading_places_book_idx on public.reading_places (book_id);
+create index reader_bookmarks_book_idx on public.reader_bookmarks (book_id);
+create index reader_highlights_book_idx on public.reader_highlights (book_id);
+
+-- ------------------------------------------------------------
+-- 4. Row rules and grants.
+-- ------------------------------------------------------------
+alter table public.reading_places enable row level security;
+alter table public.reader_bookmarks enable row level security;
+alter table public.reader_highlights enable row level security;
+
+create policy "Readers manage their own place in books they own"
+  on public.reading_places for all to authenticated
+  using (user_id = auth.uid() and public.user_owns_book(book_id))
+  with check (user_id = auth.uid() and public.user_owns_book(book_id));
+
+create policy "Readers manage their own bookmarks in books they own"
+  on public.reader_bookmarks for all to authenticated
+  using (user_id = auth.uid() and public.user_owns_book(book_id))
+  with check (user_id = auth.uid() and public.user_owns_book(book_id));
+
+create policy "Readers manage their own highlights in books they own"
+  on public.reader_highlights for all to authenticated
+  using (user_id = auth.uid() and public.user_owns_book(book_id))
+  with check (user_id = auth.uid() and public.user_owns_book(book_id));
+
+revoke all on public.reading_places from public, anon, authenticated, service_role;
+revoke all on public.reader_bookmarks from public, anon, authenticated, service_role;
+revoke all on public.reader_highlights from public, anon, authenticated, service_role;
+
+-- A place is written whole (upsert); a bookmark is added or removed,
+-- never changed; a highlight keeps its owner, book and creation time.
+grant select, insert, delete on public.reading_places to authenticated;
+grant update (char_offset, progress, updated_at) on public.reading_places to authenticated;
+grant select, insert, delete on public.reader_bookmarks to authenticated;
+grant select, insert, delete on public.reader_highlights to authenticated;
+grant update (start_offset, end_offset, color, note, orphaned_at, updated_at) on public.reader_highlights to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. The per-book limits.
+-- ------------------------------------------------------------
+create or replace function public.reader_marks_enforce_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_limit integer;
+  v_count integer;
+begin
+  v_limit := case tg_table_name when 'reader_highlights' then 3000 when 'reader_bookmarks' then 500 end;
+  if v_limit is null then
+    raise exception 'reader_marks_enforce_limit: unexpected table %', tg_table_name;
+  end if;
+  -- One lock per (table, reader, book) for the rest of the transaction.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext(tg_table_name),
+    pg_catalog.hashtext(new.user_id::text || '/' || new.book_id::text)
+  );
+  if tg_table_name = 'reader_highlights' then
+    select pg_catalog.count(*) into v_count
+      from public.reader_highlights h
+     where h.user_id = new.user_id and h.book_id = new.book_id;
+  else
+    select pg_catalog.count(*) into v_count
+      from public.reader_bookmarks m
+     where m.user_id = new.user_id and m.book_id = new.book_id;
+  end if;
+  if v_count >= v_limit then
+    raise exception 'reader_marks_limit' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.reader_marks_enforce_limit() from public, anon, authenticated, service_role;
+
+create trigger reader_highlights_enforce_limit
+  before insert on public.reader_highlights
+  for each row execute function public.reader_marks_enforce_limit();
+
+create trigger reader_bookmarks_enforce_limit
+  before insert on public.reader_bookmarks
+  for each row execute function public.reader_marks_enforce_limit();
+
+-- ------------------------------------------------------------
+-- 6. A refund deletes the reader's marks in that book (Q5 a).
+-- ------------------------------------------------------------
+create or replace function public.reader_marks_delete_on_refund()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.refunded_at is null and new.refunded_at is not null and new.reader_id is not null then
+    delete from public.reading_places where user_id = new.reader_id and book_id = new.book_id;
+    delete from public.reader_bookmarks where user_id = new.reader_id and book_id = new.book_id;
+    delete from public.reader_highlights where user_id = new.reader_id and book_id = new.book_id;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function public.reader_marks_delete_on_refund() from public, anon, authenticated, service_role;
+
+create trigger purchases_delete_reader_marks_on_refund
+  after update of refunded_at on public.purchases
+  for each row execute function public.reader_marks_delete_on_refund();
+
+-- ------------------------------------------------------------
+-- 7. After the author's new version: move the highlights found again and
+--    mark the ones not found, in one call. SECURITY INVOKER: it runs as
+--    the reader, so the row rules and column grants above still decide.
+--    p_moves = [{"id": uuid, "start": int, "end": int}, ...]
+-- ------------------------------------------------------------
+create or replace function public.reader_highlights_reanchor(p_book_id uuid, p_moves jsonb, p_orphaned uuid[])
+returns void
+language sql
+security invoker
+set search_path = ''
+as $$
+  update public.reader_highlights h
+     set start_offset = m.start_offset, end_offset = m.end_offset, orphaned_at = null, updated_at = pg_catalog.now()
+    from pg_catalog.jsonb_to_recordset(coalesce(p_moves, '[]'::jsonb)) as m(id uuid, start_offset integer, end_offset integer)
+   where h.id = m.id and h.book_id = p_book_id;
+  update public.reader_highlights h
+     set orphaned_at = pg_catalog.now(), updated_at = pg_catalog.now()
+   where h.book_id = p_book_id and h.id = any(coalesce(p_orphaned, '{}'::uuid[])) and h.orphaned_at is null;
+$$;
+
+revoke all on function public.reader_highlights_reanchor(uuid, jsonb, uuid[]) from public, anon, authenticated, service_role;
+grant execute on function public.reader_highlights_reanchor(uuid, jsonb, uuid[]) to authenticated;
+
+-- ============================================================
+-- KOLIBER download count + K4 feedback button (migration
+-- 20261115200000_download_count_feedback.sql): book_download_count()
+-- for the book page's "N shkarkime", and reader_feedback with
+-- submit_reader_feedback(), staff_list_reader_feedback() and
+-- staff_set_reader_feedback_done(). Same statements as the migration;
+-- see its header for the rules.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. The download count
+-- ------------------------------------------------------------
+create function public.book_download_count(p_book_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.count(*)::integer
+    from public.purchases p
+    join public.books b on b.id = p.book_id
+   where p.book_id = p_book_id
+     and b.status = 'published'
+     and p.refunded_at is null
+     and not public.payment_intent_has_lost_dispute(p.stripe_payment_intent_id);
+$$;
+
+revoke all on function public.book_download_count(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.book_download_count(uuid) to anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 2. The feedback table
+-- ------------------------------------------------------------
+create table public.reader_feedback (
+  id uuid primary key default gen_random_uuid(),
+  reader_id uuid not null references public.profiles(id) on delete cascade,
+  kind text not null
+    constraint reader_feedback_kind_check check (kind in ('problem', 'idea')),
+  body text not null
+    constraint reader_feedback_body_check check (char_length(body) between 1 and 1000),
+  page_path text not null
+    constraint reader_feedback_page_path_check check (
+      char_length(page_path) between 1 and 300 and page_path like '/%' and page_path not like '//%'
+      and page_path !~ '[\\[:cntrl:]]'
+    ),
+  created_at timestamptz not null default now(),
+  done_at timestamptz,
+  done_by uuid references public.profiles(id) on delete set null
+);
+
+create index reader_feedback_reader_created_idx on public.reader_feedback (reader_id, created_at);
+create index reader_feedback_open_created_idx on public.reader_feedback (created_at) where done_at is null;
+
+alter table public.reader_feedback enable row level security;
+
+revoke all on public.reader_feedback from public, anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. Sending a message
+-- ------------------------------------------------------------
+create function public.submit_reader_feedback(p_kind text, p_body text, p_page_path text)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_edge text;
+  v_body text;
+  v_recent integer;
+  v_id uuid;
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if exists (
+    select 1 from public.account_suspensions s
+     where s.user_id = v_uid and s.lifted_at is null
+  ) then
+    raise exception 'submit_reader_feedback: account suspended' using errcode = 'LB510';
+  end if;
+  if p_kind is null or p_kind not in ('problem', 'idea') then
+    raise exception 'submit_reader_feedback: invalid kind' using errcode = 'LB511';
+  end if;
+  -- Trim spaces, line breaks, no-break and zero-width spaces at both
+  -- ends, so a message of only invisible characters is empty. The
+  -- characters are built with chr() (U+00A0, U+200B, U+200C, U+200D,
+  -- U+2060, U+FEFF) so this text stays plain ASCII: on the staging run
+  -- of 15 Nov the tool call turned backslash-u escapes into the
+  -- characters themselves, which changed the stored function bytes.
+  v_edge := '[[:space:]' || pg_catalog.chr(160) || pg_catalog.chr(8203) || pg_catalog.chr(8204)
+            || pg_catalog.chr(8205) || pg_catalog.chr(8288) || pg_catalog.chr(65279) || ']+';
+  v_body := pg_catalog.regexp_replace(coalesce(p_body, ''), '^' || v_edge || '|' || v_edge || '$', '', 'g');
+  if pg_catalog.char_length(v_body) < 1 or pg_catalog.char_length(v_body) > 1000 then
+    raise exception 'submit_reader_feedback: invalid text' using errcode = 'LB512';
+  end if;
+  if p_page_path is null
+     or pg_catalog.char_length(p_page_path) not between 1 and 300
+     or p_page_path not like '/%'
+     or p_page_path like '//%'
+     or p_page_path ~ '[\\[:cntrl:]]' then
+    raise exception 'submit_reader_feedback: invalid page' using errcode = 'LB513';
+  end if;
+
+  -- One lock per sender, so two quick sends cannot both slip under the limit.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('reader_feedback'),
+    pg_catalog.hashtext(v_uid::text)
+  );
+  select pg_catalog.count(*) into v_recent
+    from public.reader_feedback f
+   where f.reader_id = v_uid
+     and f.created_at > pg_catalog.now() - interval '1 hour';
+  if v_recent >= 10 then
+    raise exception 'submit_reader_feedback: too many messages' using errcode = 'LB514';
+  end if;
+
+  insert into public.reader_feedback (reader_id, kind, body, page_path)
+  values (v_uid, p_kind, v_body, p_page_path)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke all on function public.submit_reader_feedback(text, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.submit_reader_feedback(text, text, text) to authenticated;
+
+-- ------------------------------------------------------------
+-- 4. The admin list
+-- ------------------------------------------------------------
+create function public.staff_list_reader_feedback(p_status text default 'open')
+returns table (
+  id uuid,
+  kind text,
+  body text,
+  page_path text,
+  sender_email text,
+  created_at timestamptz,
+  done_at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_show_email boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.view') then
+    raise exception 'not authorized';
+  end if;
+  if coalesce(p_status, 'open') not in ('open', 'done', 'all') then
+    raise exception 'invalid status';
+  end if;
+
+  -- Audit r1 F2 (Renato 11-15, mod a): a reader's email only for staff
+  -- who may see people (owner, admin), as on the People page.
+  v_show_email := public.staff_has_permission('people.view');
+
+  return query
+    select f.id, f.kind, f.body, f.page_path,
+           case when v_show_email then au.email::text end,
+           f.created_at, f.done_at
+      from public.reader_feedback f
+      left join auth.users au on au.id = f.reader_id
+     where coalesce(p_status, 'open') = 'all'
+        or (coalesce(p_status, 'open') = 'open' and f.done_at is null)
+        or (p_status = 'done' and f.done_at is not null)
+     order by f.created_at desc, f.id
+     limit 200;
+end;
+$$;
+
+revoke all on function public.staff_list_reader_feedback(text) from public, anon, authenticated, service_role;
+grant execute on function public.staff_list_reader_feedback(text) to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Marking a message done
+-- ------------------------------------------------------------
+create function public.staff_set_reader_feedback_done(p_id uuid, p_done boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_found boolean;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('reports.resolve') then
+    raise exception 'not authorized';
+  end if;
+  if p_id is null or p_done is null then
+    raise exception 'invalid arguments';
+  end if;
+
+  update public.reader_feedback f
+     set done_at = case when p_done then coalesce(f.done_at, pg_catalog.now()) else null end,
+         done_by = case when p_done then coalesce(f.done_by, auth.uid()) else null end
+   where f.id = p_id;
+  v_found := found;
+  return v_found;
+end;
+$$;
+
+revoke all on function public.staff_set_reader_feedback_done(uuid, boolean) from public, anon, authenticated, service_role;
+grant execute on function public.staff_set_reader_feedback_done(uuid, boolean) to authenticated;

@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { authorPagePath } from "@/lib/pen-names";
+import { BookSampleReader } from "@/components/book-sample-reader";
+import { DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
+import { progressLabel } from "@/lib/reader-anchors";
 
 // LIBRUM 2.0 UI-8: the Reader Library's card -- deliberately NOT the
 // commerce-oriented BookCard (src/components/book-card.tsx). A Library
@@ -21,6 +24,7 @@ export function LibraryBookCard({
   isPublished,
   downloadable,
   downloadNote = null,
+  progress = null,
 }: {
   bookId: string;
   title: string;
@@ -34,6 +38,10 @@ export function LibraryBookCard({
   // while the 14 days are open, else "Downloaded <date>"), decided by
   // the Library page.
   downloadNote?: string | null;
+  // K8 (Renato 11-15): how much of the book the buyer has read in the
+  // online reader, on any device (0..1); null = not started. Pictures r1:
+  // the bar and "N% e lexuar" only, no highlight count.
+  progress?: number | null;
 }) {
   return (
     <li className="flex flex-col gap-1.5">
@@ -74,13 +82,40 @@ export function LibraryBookCard({
 
       {!isPublished && <p className="text-xs text-muted">Nuk ofrohet në Librari</p>}
 
+      {progress !== null && progress > 0 && (
+        <div className="mt-0.5 flex flex-col gap-1">
+          <div
+            className="h-1 w-full overflow-hidden rounded-full bg-border"
+            role="progressbar"
+            aria-label="Sa keni lexuar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <div className="h-full rounded-full bg-[#c0841a]" style={{ width: `${Math.max(2, Math.round(progress * 100))}%` }} />
+          </div>
+          <p className="text-xs tabular-nums text-muted">{progressLabel(progress)}</p>
+        </div>
+      )}
+
       {downloadable && (
-        <a
-          href={`/api/books/${bookId}/download`}
-          className="focus-ring mt-1 w-fit rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
-        >
-          Shkarkoni EPUB
-        </a>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <BookSampleReader
+            bookId={bookId}
+            bookTitle={title}
+            mode="owned"
+            label="Lexo"
+            coverUrl={coverUrl}
+            confirmFirst={downloadNote === DOWNLOAD_CANCEL_WARNING}
+            triggerClassName="focus-ring min-h-9 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+          />
+          <a
+            href={`/api/books/${bookId}/download`}
+            className="focus-ring min-h-9 rounded-full border border-border px-3 py-1.5 text-sm hover:bg-surface-hover"
+          >
+            Shkarko EPUB
+          </a>
+        </div>
       )}
       {downloadable && downloadNote && <p className="text-xs text-muted">{downloadNote}</p>}
     </li>

@@ -85,6 +85,14 @@ export default async function LibraryPage({
   // under each Download button.
   const downloadStates = await readMyDownloadStates(supabase);
 
+  // K8 (Renato 11-15): how far the buyer has read each book online (the
+  // synced place). Only the reader's own rows in books they own come back
+  // (row rules); a failed read just shows no bars.
+  const { data: placeRows } = await supabase.from("reading_places").select("book_id, progress");
+  const progressByBookId = new Map(
+    ((placeRows ?? []) as { book_id: string; progress: number | string }[]).map((r) => [r.book_id, Number(r.progress)] as const),
+  );
+
   // The Library grid: every currently-owned book, as a flat list --
   // never grouped by bundle/transaction (that grouping lives entirely
   // at /account/purchases now). A refunded or lost-disputed purchase's
@@ -149,6 +157,7 @@ export default async function LibraryPage({
                 isPublished={book.status === "published"}
                 downloadable={ownedByBookId.get(book.id) ?? false}
                 downloadNote={buyerDownloadNote(downloadStates.get(book.id))}
+                progress={progressByBookId.get(book.id) ?? null}
               />
             );
           })}

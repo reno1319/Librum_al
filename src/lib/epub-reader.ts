@@ -30,7 +30,9 @@ import {
 // reader never gets a URL to the book's file and the reader frame can
 // block every network load.
 
-export type ReaderMode = "sample" | "full";
+// Buyer reader (11-15): "owned" = the whole book for its buyer, with no
+// sample-end marker (that marker is only for the author's preview).
+export type ReaderMode = "sample" | "full" | "owned";
 export type ReaderTocEntry = { id: string; label: string };
 export type ReaderContent =
   | {
@@ -248,6 +250,9 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
 const IMAGE_LIMITS: Record<ReaderMode, { count: number; bytes: number }> = {
   sample: { count: 40, bytes: 6 * 1024 * 1024 },
   full: { count: 400, bytes: 40 * 1024 * 1024 },
+  // Audit r1 B2: the whole answer must stay under 4.5 MB, so pictures
+  // past ~2.5 MB are left out (the text always comes).
+  owned: { count: 200, bytes: 2_500_000 },
 };
 const MAX_SOURCE_PIXELS = 40_000_000;
 const RASTER_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);

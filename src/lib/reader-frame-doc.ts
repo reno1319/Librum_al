@@ -113,6 +113,12 @@ aside.lb-note, aside { font-size: 0.85em; color: var(--lb-muted); margin: 1em 0 
 .lb-gap { margin: 0; text-indent: 0; min-height: 1em; }
 .lb-epi { text-indent: 0; margin: 0 1.5em 0 3em; font-style: italic; }
 .lb-episrc { text-indent: 0; text-align: right; margin: 0.4em 1.5em 1.8em 3em; color: var(--lb-muted); }
+mark { background: none; color: inherit; }
+mark.lb-hl { color: inherit; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.lb-hl-yellow { background: rgba(240, 200, 40, 0.42); }
+.lb-hl-green { background: rgba(110, 190, 90, 0.38); }
+.lb-hl-blue { background: rgba(90, 150, 230, 0.36); }
+.lb-hl-pink { background: rgba(235, 110, 160, 0.36); }
 .lb-sample-end { margin: 1.6em 0; border-top: 2px dashed #c0841a; text-align: center; break-inside: avoid; }
 .lb-sample-end::after { content: "Këtu mbaron pjesa që shohin lexuesit"; display: inline-block; font: 600 0.7em/1 system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: #c0841a; background: var(--lb-page); padding: 0 0.6em; position: relative; top: -0.55em; }
 `;

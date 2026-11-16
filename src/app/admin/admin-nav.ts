@@ -79,6 +79,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { href: "/admin", label: "Today", permission: "admin.access" },
       { href: "/admin/reader-reviews", label: "Reader reviews", permission: "reports.resolve" },
       { href: "/admin/reports", label: "Book reports", permission: "reports.view" },
+      { href: "/admin/feedback", label: "Feedback", permission: "reports.view" },
       { href: "/admin/refunds", label: "Refund requests", permission: "refunds.view" },
     ],
   },

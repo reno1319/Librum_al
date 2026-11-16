@@ -95,9 +95,14 @@ export default function PrivacyPage() {
                 që merrni, lista e dëshirave, autorët që ndiqni, kërkesat
                 «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,
                 çdo raportim përmbajtjeje dhe kërkesë rimbursimi që na
-                dërgoni, si dhe një regjistrim për çdo herë që shkarkoni një
-                libër që keni blerë ose marrë falas (data, ora dhe cili
-                version i skedarit u shkarkua).
+                dërgoni, si dhe një regjistrim për çdo herë që hapni për ta
+                lexuar online ose shkarkoni një libër që keni blerë ose marrë
+                falas (data, ora dhe cili version i skedarit u përdor). Kur
+                lexoni online një libër që keni blerë, ruajmë edhe vendin ku
+                keni mbetur (që ta vazhdoni në çdo pajisje), faqerojtësit,
+                theksimet dhe shënimet tuaja. I shihni vetëm ju. Faqja e
+                çdo libri tregon sa njerëz e kanë marrë, vetëm si numër, pa
+                treguar kush.
               </p>
               <p className="mt-2">
                 <strong>Si autor:</strong> librat, ballinat dhe skedarët e
@@ -117,7 +122,9 @@ export default function PrivacyPage() {
               <p className="mt-2">
                 <strong>Mesazhet:</strong> emailet
                 {isWhatsappContactLive() && " dhe mesazhet në WhatsApp"} që
-                na dërgoni dhe përgjigjet tona.
+                na dërgoni dhe përgjigjet tona. Ruajmë edhe mesazhet që na
+                dërgoni me butonin «Na tregoni» (lloji, teksti dhe faqja ku
+                ishit).
               </p>
               <p className="mt-2">
                 <strong>Të dhënat teknike:</strong> cookies e përshkruara më
@@ -294,8 +301,20 @@ export default function PrivacyPage() {
                   llogarinë.
                 </li>
                 <li>
-                  <strong>Regjistrimet e shkarkimeve:</strong> për aq kohë sa
+                  <strong>Vendi ku keni mbetur, faqerojtësit, theksimet dhe shënimet:</strong>{" "}
+                  faqerojtësit, theksimet dhe shënimet derisa t&apos;i fshini
+                  vetë; të gjitha derisa libri të rimbursohet ose ta fshini
+                  llogarinë, atëherë fshihen përgjithmonë. Nëse pagesa ju
+                  kthehet pas një kontestimi me bankën, ato nuk ju shfaqen më,
+                  por ruhen derisa ta fshini llogarinë.
+                </li>
+                <li>
+                  <strong>Regjistrimet e leximeve online dhe të shkarkimeve:</strong> për aq kohë sa
                   ruhet blerja të cilës i përkasin.
+                </li>
+                <li>
+                  <strong>Mesazhet «Na tregoni»:</strong> derisa ta fshini
+                  llogarinë.
                 </li>
                 <li>
                   <strong>

@@ -94,13 +94,14 @@ export default function ReadingHelpPage() {
 
           <section aria-labelledby="cancel-heading">
             <h2 id="cancel-heading" className="font-serif text-2xl font-normal text-primary">
-              Para shkarkimit të parë
+              Para leximit ose shkarkimit të parë
             </h2>
             <p className="mt-3">
               Mund ta anuloni një blerje me pagesë brenda 14 ditëve, për sa kohë
-              nuk e keni shkarkuar ende librin. Shkarkimi i parë e mbyll këtë
-              të drejtë. Sa kohë që mund ta anuloni ende, do të shihni një
-              kujtesë pranë butonit të shkarkimit. Librat falas nuk kanë asgjë
+              nuk e keni lexuar online ose shkarkuar ende librin. Hapja e parë
+              për lexim online ose shkarkimi i parë e mbyll këtë të drejtë. Sa
+              kohë që mund ta anuloni ende, do të shihni një kujtesë pranë
+              butonave Lexo dhe Shkarko. Librat falas nuk kanë asgjë
               për të anuluar. Hollësitë janë te faqja{" "}
               <Link href="/rimbursimet" className={LINK_CLASSES}>
                 Rimbursimet

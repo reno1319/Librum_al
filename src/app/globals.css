@@ -217,3 +217,10 @@ body {
     scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }
 }
+
+/* K4 feedback button: on phones it moves above the buy bar while that shows. */
+@media (max-width: 767px) {
+  body:has([data-sticky-buy-bar][aria-hidden="false"]) [data-feedback-fab] {
+    bottom: calc(5.25rem + env(safe-area-inset-bottom));
+  }
+}

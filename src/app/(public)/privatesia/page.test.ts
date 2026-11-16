@@ -57,7 +57,7 @@ describe("POLICY PAGES: /privatesia", () => {
   // ALBANIAN-14: what the site stores, brought up to date.
   it("says free-book downloads and the file version are logged (DOWNLOADS-1 audit note A)", () => {
     expect(text).toContain(
-      "një regjistrim për çdo herë që shkarkoni një libër që keni blerë ose marrë falas (data, ora dhe cili version i skedarit u shkarkua).",
+      "një regjistrim për çdo herë që hapni për ta lexuar online ose shkarkoni një libër që keni blerë ose marrë falas (data, ora dhe cili version i skedarit u përdor).",
     );
   });
 
@@ -81,6 +81,21 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain("Për një libër në parapublikim, autori sheh vetëm sa lexues presin njoftimin, jo kush janë.");
     expect(text).toContain("Kërkesat «Më njofto»: derisa ta hiqni kërkesën ose ta fshini llogarinë.");
     expect(text).toContain("por e ruajmë bashkë me shënimin që emaili u dërgua, derisa ta fshini llogarinë.");
+  });
+
+  // K8 + K10 (Renato 11-15): the place, bookmarks, highlights and notes.
+  it("names the synced place, bookmarks, highlights and notes, who sees them and how long they are kept", () => {
+    expect(text).toContain("ruajmë edhe vendin ku keni mbetur (që ta vazhdoni në çdo pajisje), faqerojtësit, theksimet dhe shënimet tuaja. I shihni vetëm ju.");
+    expect(text).toContain(
+      "Vendi ku keni mbetur, faqerojtësit, theksimet dhe shënimet: faqerojtësit, theksimet dhe shënimet derisa t'i fshini vetë; të gjitha derisa libri të rimbursohet ose ta fshini llogarinë, atëherë fshihen përgjithmonë. Nëse pagesa ju kthehet pas një kontestimi me bankën, ato nuk ju shfaqen më, por ruhen derisa ta fshini llogarinë.",
+    );
+  });
+
+  // Download count + K4 feedback (Renato 11-15).
+  it("says the book page shows only a number of people, and names the feedback messages and how long they are kept", () => {
+    expect(text).toContain("Faqja e çdo libri tregon sa njerëz e kanë marrë, vetëm si numër, pa treguar kush.");
+    expect(text).toContain("Ruajmë edhe mesazhet që na dërgoni me butonin «Na tregoni» (lloji, teksti dhe faqja ku ishit).");
+    expect(text).toContain("Mesazhet «Na tregoni»: derisa ta fshini llogarinë.");
   });
 
   it("no longer mentions Stripe (STRIPE REMOVAL, item 10, 5. a)", () => {
@@ -119,9 +134,9 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain(PRIVACY_LAST_UPDATED_LINE);
     expect(source).toContain("{PRIVACY_LAST_UPDATED_LINE}");
     expect(source).not.toContain("POLICY_LAST_UPDATED_LINE");
-    expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 30 tetor 2026");
+    expect(POLICY_LAST_UPDATED_LINE).toBe("Përditësuar më: 16 nëntor 2026");
     // Release 21: the Production release day of the PL1 Privacy text (11 November 2026).
-    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 11 nëntor 2026");
+    expect(PRIVACY_LAST_UPDATED_LINE).toBe("Përditësuar më: 16 nëntor 2026");
   });
 
   it("is a lawyer-review draft in the code only, with no blank slots", () => {

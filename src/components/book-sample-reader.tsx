@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buttonClasses } from "@/components/ui/button";
 import { BookReader, type ReaderData, type ReaderEndAction } from "@/components/book-reader";
+import { OPEN_CANCEL_CONFIRM, positionStorageKey } from "@/lib/owned-reader";
 
 // PREVIEW-READER-1: "Lexoni një pjesë" opens the page-turning reader as a
 // popup over the book page (Renato 9 Nov: popup, not its own page). The
@@ -15,7 +16,7 @@ import { BookReader, type ReaderData, type ReaderEndAction } from "@/components/
 //
 // Native <dialog> + showModal(): focus trap, Escape, focus return.
 
-type LoadState = { status: "idle" | "loading" | "error" } | { status: "ready"; data: ReaderData };
+type LoadState = { status: "idle" | "loading" | "error" | "too_large" } | { status: "ready"; data: ReaderData };
 
 export type SampleEndLink = { label: string; targetId?: string; href?: string };
 
@@ -30,12 +31,16 @@ export function BookSampleReader({
   coverUrl = null,
   endLink = null,
   triggerClassName,
+  confirmFirst = false,
 }: {
   bookId: string;
   bookTitle: string;
   variant?: "button" | "text";
   label?: string;
-  mode?: "sample" | "full";
+  mode?: "sample" | "full" | "owned";
+  // Buyer reader (11-15, 1a): mode "owned" while the 14-day cancel
+  // window is open: ask once before the first open.
+  confirmFirst?: boolean;
   coverUrl?: string | null;
   // The end page's main button: scroll to an element on this page (the
   // price card) or follow a link.
@@ -51,20 +56,44 @@ export function BookSampleReader({
   const afterCloseRef = useRef<(() => void) | null>(null);
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [openKey, setOpenKey] = useState(0);
+  const [confirmed, setConfirmed] = useState(false);
+  // The server can also ask for the check (409), e.g. a page opened
+  // before the purchase finished.
+  const [needsConfirm, setNeedsConfirm] = useState(mode === "owned" && confirmFirst);
+  const askConfirm = mode === "owned" && needsConfirm && !confirmed;
 
-  const load = useCallback(() => {
-    setState({ status: "loading" });
-    fetch(`/api/books/${bookId}/sample${mode === "full" ? "?mode=full" : ""}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("unavailable");
-        return res.json() as Promise<ReaderData & { html?: unknown }>;
-      })
-      .then((data) => {
-        if (typeof data.html !== "string" || !Array.isArray(data.toc)) throw new Error("bad");
-        setState({ status: "ready", data });
-      })
-      .catch(() => setState({ status: "error" }));
-  }, [bookId, mode]);
+  const load = useCallback(
+    (accept = false) => {
+      setState({ status: "loading" });
+      const url =
+        mode === "owned"
+          ? `/api/books/${bookId}/read${accept ? "?accept=1" : ""}`
+          : `/api/books/${bookId}/sample${mode === "full" ? "?mode=full" : ""}`;
+      fetch(url)
+        .then((res) => {
+          if (mode === "owned" && res.status === 409) {
+            setNeedsConfirm(true);
+            setConfirmed(false);
+            setState({ status: "idle" });
+            return null;
+          }
+          // Audit r1 B2: too big to open online (nothing was recorded).
+          if (mode === "owned" && res.status === 413) {
+            setState({ status: "too_large" });
+            return null;
+          }
+          if (!res.ok) throw new Error("unavailable");
+          return res.json() as Promise<ReaderData & { html?: unknown }>;
+        })
+        .then((data) => {
+          if (data === null) return;
+          if (typeof data.html !== "string" || !Array.isArray(data.toc)) throw new Error("bad");
+          setState({ status: "ready", data });
+        })
+        .catch(() => setState({ status: "error" }));
+    },
+    [bookId, mode],
+  );
 
   // Back button (popstate) closes the popup.
   useEffect(() => {
@@ -89,7 +118,7 @@ export function BookSampleReader({
     } catch {
       pushedRef.current = false;
     }
-    if (state.status !== "ready" && state.status !== "loading") load();
+    if (!askConfirm && state.status !== "ready" && state.status !== "loading") load(confirmed);
   }
 
   // Every way of closing (button, Escape, end-page action) goes through
@@ -140,14 +169,34 @@ export function BookSampleReader({
 
       <dialog
         ref={dialogRef}
-        aria-label={mode === "full" ? `Pamja paraprake e ${bookTitle}` : `Pjesë nga ${bookTitle}`}
+        aria-label={mode === "full" ? `Pamja paraprake e ${bookTitle}` : mode === "owned" ? bookTitle : `Pjesë nga ${bookTitle}`}
         onCancel={(e) => {
           e.preventDefault();
           close();
         }}
         className="hidden open:flex m-0 h-[100dvh] max-h-none w-screen max-w-none flex-col overflow-hidden bg-[#efebe3] p-0 backdrop:bg-black/50 sm:m-auto sm:h-[min(56rem,calc(100dvh-2rem))] sm:w-[min(78rem,calc(100vw-2rem))] sm:rounded-lg"
       >
-        {state.status === "ready" ? (
+        {askConfirm ? (
+          <div className="flex h-full flex-col">
+            <div className="flex justify-end p-2">
+              <button type="button" onClick={() => close()} className={buttonClasses("text", "sm")}>
+                Mbyll
+              </button>
+            </div>
+            <div className="mx-auto flex max-w-md flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+              <p className="font-serif text-xl font-semibold">{bookTitle}</p>
+              <p className="text-sm text-muted">{OPEN_CANCEL_CONFIRM}</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button type="button" onClick={() => (setConfirmed(true), load(true))} className={buttonClasses("primary", "md")}>
+                  Hapeni librin
+                </button>
+                <button type="button" onClick={() => close()} className={buttonClasses("outline", "md")}>
+                  Jo tani
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : state.status === "ready" ? (
           <BookReader
             key={openKey}
             data={state.data}
@@ -155,6 +204,8 @@ export function BookSampleReader({
             onClose={() => close()}
             endAction={endAction}
             devices={mode === "full"}
+            positionKey={mode === "owned" ? positionStorageKey(bookId) : null}
+            marksBookId={mode === "owned" ? bookId : null}
           />
         ) : (
           <div className="flex h-full flex-col">
@@ -164,15 +215,17 @@ export function BookSampleReader({
               </button>
             </div>
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-              {state.status === "error" ? (
+              {state.status === "too_large" ? (
+                <p className="text-sm text-muted">Ky libër është shumë i madh për t&apos;u lexuar këtu. Shkarkojeni EPUB-in dhe lexojeni në aplikacionin tuaj.</p>
+              ) : state.status === "error" ? (
                 <>
-                  <p className="text-sm text-muted">Për këtë libër nuk ka pjesë për lexim.</p>
-                  <button type="button" onClick={load} className={buttonClasses("outline", "sm")}>
+                  <p className="text-sm text-muted">{mode === "owned" ? "Libri nuk u hap dot." : "Për këtë libër nuk ka pjesë për lexim."}</p>
+                  <button type="button" onClick={() => load(confirmed)} className={buttonClasses("outline", "sm")}>
                     Provoni përsëri
                   </button>
                 </>
               ) : (
-                <p className="text-sm text-muted">{mode === "full" ? "Po përgatitet libri…" : "Po përgatitet pjesa…"}</p>
+                <p className="text-sm text-muted">{mode === "sample" ? "Po përgatitet pjesa…" : "Po përgatitet libri…"}</p>
               )}
             </div>
           </div>

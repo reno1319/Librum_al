@@ -25,7 +25,8 @@ import {
 type SessionClient = Awaited<ReturnType<typeof createClient>>;
 type ServiceClient = ReturnType<typeof createAdminClient>;
 
-export const DOWNLOAD_CANCEL_WARNING = "Shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.";
+// Buyer reader (Renato 11-15, 1a): reading online ends the right too.
+export const DOWNLOAD_CANCEL_WARNING = "Leximi ose shkarkimi i jep fund të drejtës suaj për ta anuluar këtë blerje.";
 
 // D13 2a / BD4: the one-line reminder next to the buyer's Download
 // button. The first page of every downloaded book shows the buyer's

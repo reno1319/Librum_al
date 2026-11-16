@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 240 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 261 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -28,7 +28,11 @@
 --   book_pending_changes_version_seq rows, no privilege for any role
 --   (migration 20261105120000), plus BD16 P1's three
 --   preorder_notify_requests rows (migration 20261106120000), plus Upload
---   notes D's three book_file_words rows (migration 20261107140000). A relation with no
+--   notes D's three book_file_words rows (migration 20261107140000), plus K8+K10's
+--   nine reading_places, reader_bookmarks and reader_highlights rows and nine
+--   column UPDATE rows (migration 20261115160000), plus the feedback button's
+--   three reader_feedback rows, no privilege for any role (migration
+--   20261115200000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -118,6 +122,15 @@ insert into grant_contract_expected (kind, line) values
 ('col','pen_names.name | authenticated | UPDATE'),
 ('col','profiles.display_name | authenticated | UPDATE'),
 ('col','profiles.public_author_name | authenticated | UPDATE'),
+('col','reader_highlights.color | authenticated | UPDATE'),
+('col','reader_highlights.end_offset | authenticated | UPDATE'),
+('col','reader_highlights.note | authenticated | UPDATE'),
+('col','reader_highlights.orphaned_at | authenticated | UPDATE'),
+('col','reader_highlights.start_offset | authenticated | UPDATE'),
+('col','reader_highlights.updated_at | authenticated | UPDATE'),
+('col','reading_places.char_offset | authenticated | UPDATE'),
+('col','reading_places.progress | authenticated | UPDATE'),
+('col','reading_places.updated_at | authenticated | UPDATE'),
 ('col','series.author_id | authenticated | INSERT'),
 ('col','series.pen_name_id | authenticated | INSERT'),
 ('col','series.title | authenticated | INSERT'),
@@ -247,6 +260,18 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r purchases | anon | -'),
 ('rel','r purchases | authenticated | SELECT'),
 ('rel','r purchases | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
+('rel','r reader_bookmarks | anon | -'),
+('rel','r reader_bookmarks | authenticated | DELETE,INSERT,SELECT'),
+('rel','r reader_bookmarks | service_role | -'),
+('rel','r reader_feedback | anon | -'),
+('rel','r reader_feedback | authenticated | -'),
+('rel','r reader_feedback | service_role | -'),
+('rel','r reader_highlights | anon | -'),
+('rel','r reader_highlights | authenticated | DELETE,INSERT,SELECT'),
+('rel','r reader_highlights | service_role | -'),
+('rel','r reading_places | anon | -'),
+('rel','r reading_places | authenticated | DELETE,INSERT,SELECT'),
+('rel','r reading_places | service_role | -'),
 ('rel','r refund_issuance_attempts | anon | -'),
 ('rel','r refund_issuance_attempts | authenticated | -'),
 ('rel','r refund_issuance_attempts | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -329,8 +354,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 240 then
-    raise exception 'FAIL: part1: the snapshot must hold 240 rows, holds %', v_expected;
+  if v_expected <> 261 then
+    raise exception 'FAIL: part1: the snapshot must hold 261 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)
