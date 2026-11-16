@@ -21,6 +21,8 @@ function booksTable() {
     eq: (col: string, value: unknown) => ((result = result.filter((r) => r[col] === value)), builder),
     not: (col: string) => ((result = result.filter((r) => r[col] != null)), builder),
     in: (col: string, values: unknown[]) => ((result = result.filter((r) => values.includes(r[col]))), builder),
+    // K6: `.is("pd_work_id", null)` (the row leaves out the classics).
+    is: (col: string, value: null) => ((result = result.filter((r) => (r[col] ?? null) === value)), builder),
     order: (col: string) =>
       ((result = [...result].sort((a, b) => String(b[col]).localeCompare(String(a[col])))), builder),
     limit: (n: number) => ((result = result.slice(0, n)), builder),
@@ -99,6 +101,15 @@ describe("home cover fan", () => {
     const { fan, newest } = await fanAndShowcase();
     expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
     expect(newest).toEqual(NEWEST_NINE);
+  });
+
+  // K6 (Q2 a): public-domain editions (the free classics) stay out of
+  // the "Botuar me Librum" row; the fan still falls back to every book.
+  it("K6: the row leaves out public-domain editions; the fan still uses them", async () => {
+    rows = Array.from({ length: 9 }, (_, i) => (i + 1 === 9 || i + 1 === 4 ? book(i + 1, { price_all: 0, pd_work_id: `work-${i + 1}` }) : book(i + 1)));
+    const { fan, newest } = await fanAndShowcase();
+    expect(newest).toEqual(["Book 08", "Book 07", "Book 06", "Book 05", "Book 03", "Book 02", "Book 01"]);
+    expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
   });
 
   it("the row holds at most the 15 newest books, newest first; no row heading, one Libraria link", async () => {
