@@ -55,6 +55,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.",
   "Fotoja nuk u ruajt dot. Provoni përsëri.",
   "Hiqeni këtë llogari nga stafi i Librum para se ta fshini.",
+  "Hyrja me Google nuk u krye. Provoni përsëri.",
   "Imazhi i ballinës duhet të jetë nën 5 MB",
   "Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri",
   "Invalid decision.",

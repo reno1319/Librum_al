@@ -11,7 +11,7 @@ import type { SignupRole } from "@/lib/types";
 import { hasAuthorAgeTick } from "@/lib/author-age";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 import { recordAgreements } from "@/lib/agreement-records";
-import { createAuthorRoleWriteClient } from "@/lib/author-role-write-client";
+import { switchNewAccountToAuthor } from "@/lib/author-signup-switch";
 import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
 import {
   AUTH_ENTER_EMAIL_MESSAGE,
@@ -24,7 +24,12 @@ import {
   AUTH_RESET_LINK_EXPIRED_MESSAGE,
   AUTH_RESET_SEND_FAILED_MESSAGE,
   AUTH_TERMS_REQUIRED_MESSAGE,
+  GOOGLE_SIGN_IN_FAILED_MESSAGE,
 } from "@/lib/auth-page-messages";
+import {
+  GOOGLE_AUTHOR_INTENT_COOKIE,
+  GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS,
+} from "@/lib/google-sign-in";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
@@ -168,35 +173,62 @@ export async function signup(formData: FormData) {
 const AUTHOR_PENDING_MESSAGE =
   "Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni \"Bëhuni autor\" në këtë faqe.";
 
-// SECURITY-9A: the database makes every new account a reader, so an
-// author sign-up is switched here, with the author-role writer (the
-// rules in src/lib/author-role-write-client.ts): only reader -> author,
-// only the row of the account signUp() just created, only role and
-// public_author_name = the trimmed sign-up name (the row
-// handle_new_user() used to write for an author; the database then
-// gives the default pen name). Exactly one changed row, now an author,
-// or it fails closed. Logged without the id.
-async function switchNewAccountToAuthor(userId: string, publicAuthorName: string): Promise<boolean> {
-  const { data: rows, error } = await createAuthorRoleWriteClient()
-    .from("profiles")
-    .update({ role: "author", public_author_name: publicAuthorName })
-    .eq("id", userId)
-    .eq("role", "reader")
-    .select("id, role");
-  if (
-    error ||
-    !Array.isArray(rows) ||
-    rows.length !== 1 ||
-    rows[0]?.id !== userId ||
-    rows[0]?.role !== "author"
-  ) {
-    console.error("signup: the switch to author failed", {
-      code: error?.code ?? null,
-      rowCount: Array.isArray(rows) ? rows.length : null,
-    });
-    return false;
+// K7: "Vazhdo me Google". From /login (signInWithGoogle) it only signs
+// in, keeping a safe `next`; from /signup (signUpWithGoogle, the button
+// submits the sign-up form) it reads the page's own "Regjistrohem si..."
+// choice and 18+ tick: an author choice without the tick gets the same
+// refusal as the form. The Terms line sits under the button, so there is
+// no Terms box to check here. Two actions, not a button value: React
+// does not send a button's name with a function formAction.
+export async function signInWithGoogle(formData: FormData) {
+  return startGoogle(formData, false);
+}
+
+export async function signUpWithGoogle(formData: FormData) {
+  return startGoogle(formData, true);
+}
+
+async function startGoogle(formData: FormData, fromSignup: boolean) {
+  const wantsAuthor = fromSignup && resolveSignupRole(formData.get("role")) === "author";
+  const failedPath = fromSignup
+    ? `/signup?error=${encodeURIComponent(GOOGLE_SIGN_IN_FAILED_MESSAGE)}`
+    : loginErrorPath(GOOGLE_SIGN_IN_FAILED_MESSAGE, String(formData.get("next") ?? ""));
+
+  if (wantsAuthor && !hasAuthorAgeTick(formData)) {
+    redirect(`/signup?role=author&error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`);
   }
-  return true;
+
+  const next = fromSignup ? null : resolveSafeInternalPath(String(formData.get("next") ?? ""));
+  const callback =
+    // "google" = GOOGLE_CALLBACK_PARAM, written out for the page-messages
+    // source check (google-action.test.ts pins it).
+    `${resolveSiteOrigin()}/auth/callback?google=1` +
+    (next ? `&next=${encodeURIComponent(next)}` : "");
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: callback },
+  });
+  if (error || !data?.url) {
+    redirect(failedPath);
+  }
+
+  // Always set or cleared, so an old hint never outlives this attempt.
+  const cookieStore = await cookies();
+  if (wantsAuthor) {
+    cookieStore.set(GOOGLE_AUTHOR_INTENT_COOKIE, "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/auth/callback",
+      maxAge: GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS,
+    });
+  } else {
+    cookieStore.delete({ name: GOOGLE_AUTHOR_INTENT_COOKIE, path: "/auth/callback" });
+  }
+
+  redirect(data.url);
 }
 
 export async function login(formData: FormData) {

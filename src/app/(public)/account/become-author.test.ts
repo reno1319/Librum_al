@@ -515,13 +515,15 @@ describe("author role write boundary (static)", () => {
     expect(read("src/lib/author-role-write-client.ts")).toMatch(/^import "server-only";/);
   });
 
-  it("becomeAuthor and signup (SECURITY-9A) are the writer's only importers", () => {
+  // K7: signup's switch moved to src/lib/author-signup-switch.ts, which
+  // signup and the Google sign-in finish both use.
+  it("becomeAuthor and the sign-up switch (SECURITY-9A) are the writer's only importers", () => {
     const out = execFileSync("grep", ["-rl", "author-role-write-client", "src"], { cwd: root, encoding: "utf8" });
     const importers = out
       .split("\n")
       .filter(Boolean)
       .filter((f) => !f.endsWith(".test.ts") && f !== "src/lib/author-role-write-client.ts");
-    expect(importers.sort()).toEqual(["src/app/(public)/account/become-author.ts", "src/app/(public)/auth/actions.ts"]);
+    expect(importers.sort()).toEqual(["src/app/(public)/account/become-author.ts", "src/lib/author-signup-switch.ts"]);
   });
 });
 

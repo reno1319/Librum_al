@@ -43,15 +43,23 @@ export function hasTermsTick(formData: FormData): boolean {
 // caller of "Become an author" (auth.getUser()). GoTrue merges
 // app_metadata keys, so provider/providers stay as they are. A failure
 // is logged without the id or e-mail.
+//
+// K7 (Renato 11-16, "b"): a Google sign-up has no Terms box, only the
+// line under the Google button ("Duke vazhduar me Google, pranoni ...").
+// Its record says so: terms_method "google_notice". A record from a
+// ticked box has no terms_method, as before.
+export const GOOGLE_NOTICE_TERMS_METHOD = "google_notice";
+
 export async function recordAgreements(
   userId: string,
-  { authorAge }: { authorAge: boolean },
+  { authorAge, viaGoogleNotice = false }: { authorAge: boolean; viaGoogleNotice?: boolean },
 ): Promise<boolean> {
   const now = new Date().toISOString();
   const { error } = await createAdminClient().auth.admin.updateUserById(userId, {
     app_metadata: {
       terms_accepted_at: now,
       terms_version: TERMS_VERSION,
+      ...(viaGoogleNotice ? { terms_method: GOOGLE_NOTICE_TERMS_METHOD } : {}),
       ...(authorAge
         ? { author_age_confirmed_at: now, author_age_statement_version: AUTHOR_AGE_STATEMENT_VERSION }
         : {}),
