@@ -52,7 +52,7 @@ describe("BookstorePage: maintenance-mode gate", () => {
 // ============================================================
 // REDESIGN STEP 3: the unfiltered bookstore leads with the newest book
 // under one label (Renato D1/D7), then "I ri në Librum" starting after it
-// (Q7 a), "Libra falas", the "Të gjithë librat" grid and the author
+// (Q7 a), "Libra falas" (K6: "Klasikët shqiptarë"), the "Të gjithë librat" grid and the author
 // band; a filtered view is the grid alone. Rendered against a small
 // in-memory double that evaluates the filters the page asks for.
 // ============================================================
@@ -76,6 +76,9 @@ function tableStub(rows: Row[]) {
     contains: (col: string, values: unknown[]) =>
       ((result = result.filter((r) => values.every((v) => ((r[col] as unknown[]) ?? []).includes(v)))), builder),
     in: (col: string, values: unknown[]) => ((result = result.filter((r) => values.includes(r[col]))), builder),
+    // K6: public_classic_authors.pd_work_ids && the shelf's work ids.
+    overlaps: (col: string, values: unknown[]) =>
+      ((result = result.filter((r) => ((r[col] as unknown[]) ?? []).some((v) => values.includes(v)))), builder),
     gte: (col: string, v: number) => ((result = result.filter((r) => (r[col] as number) >= v)), builder),
     lte: (col: string, v: number) => ((result = result.filter((r) => (r[col] as number) <= v)), builder),
     order: (col: string) =>
@@ -109,6 +112,7 @@ let bookRows: Row[] = BOOKS;
 let signedInUser: { id: string } | null = null;
 let rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 let bundleRows: Row[] = [];
+let classicRows: Row[] = [];
 
 describe("BookstorePage: redesign step 3 layout", () => {
   beforeEach(() => {
@@ -121,7 +125,15 @@ describe("BookstorePage: redesign step 3 layout", () => {
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
       from: (table: string) =>
-        tableStub(table === "public_books" ? bookRows : table === "public_bundles" ? bundleRows : []),
+        tableStub(
+          table === "public_books"
+            ? bookRows
+            : table === "public_bundles"
+              ? bundleRows
+              : table === "public_classic_authors"
+                ? classicRows
+                : [],
+        ),
       // BD15 P8: search_books returns every published, priced title match;
       // the page must pass no genre to it (the category is applied in the
       // id re-fetch).
@@ -140,6 +152,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     }));
     rpcCalls = [];
     bundleRows = [];
+    classicRows = [];
   });
 
   async function render(params: Record<string, string> = {}) {
@@ -306,12 +319,31 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html.match(/I ri në Librum/g)?.length).toBe(1);
   });
 
-  it("shows free books under Libra falas, linking to the free filter", async () => {
-    const shelf = section(await render(), "Libra falas");
+  it("K6: shows free books under Klasikët shqiptarë on the warm panel, linking to the free filter", async () => {
+    const html = await render();
+    const shelf = section(html, "Klasikët shqiptarë");
     expect(shelf).toContain("Book 08");
     expect(shelf).toContain("Book 03");
     expect(shelf).not.toContain("Book 09");
     expect(shelf).toContain('href="/librari?maxPrice=0"');
+    expect(shelf).toContain(">Shiko të gjithë klasikët<");
+    expect(html).toMatch(/<section class="[^"]*border-\[#e3d9c3\] bg-\[#f6f1e6\][^"]*"><div[^>]*><h2[^>]*>Klasikët shqiptarë<\/h2>/);
+    // Q3 a: the title and the books only.
+    expect(html).not.toContain("Libra falas");
+    expect(shelf).not.toContain("pronë e të gjithëve");
+  });
+
+  it("K6: a classic linked to a live classic author shows Name · years (word joiners), others the name only", async () => {
+    bookRows = BOOKS.map((r) =>
+      r.id === "book-08" ? { ...r, original_author: "Naim Frashëri", pd_work_id: "work-08" } : r.id === "book-03" ? { ...r, original_author: "Migjeni", pd_work_id: "work-03" } : r,
+    );
+    classicRows = [
+      { id: "ca-1", slug: "naim-frasheri", name: "Naim Frashëri", birth_year: 1846, death_year: 1900, birth_place: null, death_place: null, bio: "Poet.", pd_work_ids: ["work-08"] },
+    ];
+    const shelf = section(await render(), "Klasikët shqiptarë");
+    expect(shelf).toContain("Naim Frashëri · 1846\u2060\u2013\u20601900");
+    expect(shelf).toContain("Migjeni");
+    expect(shelf).not.toMatch(/Migjeni ·/);
   });
 
   // Patch B: a plain "Libraria" h1 heads the grid, after the strip; the
@@ -324,7 +356,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     expect(html.indexOf("<h1")).toBeLessThan(html.indexOf('aria-label="Të gjithë librat"'));
     expect(grid(html)).toContain("Book 01");
     // The free shelf now follows the grid.
-    expect(html.indexOf('aria-label="Të gjithë librat"')).toBeLessThan(html.indexOf(">Libra falas</h2>"));
+    expect(html.indexOf('aria-label="Të gjithë librat"')).toBeLessThan(html.indexOf(">Klasikët shqiptarë</h2>"));
     expect(html).toContain("Jeni autor?");
   });
 
@@ -395,7 +427,7 @@ describe("BookstorePage: redesign step 3 layout", () => {
     const html = await render({ genre: "Letërsi artistike" });
     expect(html).not.toContain("featured-book-title");
     expect(html).not.toContain(">I ri në Librum</h2>");
-    expect(html).not.toContain(">Libra falas</h2>");
+    expect(html).not.toContain(">Klasikët shqiptarë</h2>");
     expect(html).not.toContain("Jeni autor?");
     expect(countLine(html)).toBe("10 libra");
     expect(html).toMatch(/href="\/librari"[^>]*>Hiq të gjitha</);
@@ -734,8 +766,8 @@ describe("BookstorePage: redesign step 3 layout", () => {
     for (const old of [">Kërkoni<", ">Zbatoni<", ">Hiqni filtrat<", ">Renditni<", ">Zhanret<", ">Libra falas</a>"]) {
       expect(html).not.toContain(old);
     }
-    const shelf = section(await render(), "Libra falas");
-    expect(shelf).toMatch(/>Shiko të gjitha</);
+    const shelf = section(await render(), "Klasikët shqiptarë");
+    expect(shelf).toMatch(/>Shiko të gjithë klasikët</);
   });
 
   it("Patch C: the grid shows 5 per row at xl and 4 at md, 2 on phones", async () => {

@@ -24,6 +24,8 @@ export const COUNTED_PATHS = [
   "/autore",
   "/blog",
   "/fitimet",
+  // K6: the classic author pages (public store pages, like /seri).
+  "/klasiket",
   "/kontakt",
   "/kushtet",
   "/libra",

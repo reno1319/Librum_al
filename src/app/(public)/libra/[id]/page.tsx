@@ -73,6 +73,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
+import { classicAuthorPath, formatClassicYears, loadClassicAuthorsByWork } from "@/lib/classic-authors";
 import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER, DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
 import { bookWhatsappShareHref } from "@/lib/contact";
 import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
@@ -501,6 +502,8 @@ export default async function BookDetailPage({
     { data: followRow },
     { count: penBookCount },
     { data: downloadCountData },
+    ,
+    classicsByWork,
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -627,7 +630,11 @@ export default async function BookDetailPage({
     book.status === "published" && !isAuthor
       ? createAdminClient().from("book_views").insert({ book_id: id })
       : Promise.resolve(null),
+    // K6 (Q1 b): a public-domain edition whose work is linked to a live
+    // classic author: the byline links to their page, with the years.
+    loadClassicAuthorsByWork(supabase, [book.pd_work_id]),
   ]);
+  const classicAuthor = book.pd_work_id ? (classicsByWork.get(book.pd_work_id) ?? null) : null;
 
   const allReviews = reviews ?? [];
   const reviewCount = allReviews.length;
@@ -1177,7 +1184,14 @@ export default async function BookDetailPage({
           {(originalAuthor || bookByline) && (
             <p className="mt-2 text-[0.9375rem] text-foreground">
               nga{" "}
-              {originalAuthor ? (
+              {originalAuthor && classicAuthor ? (
+                <>
+                  <Link href={classicAuthorPath(classicAuthor.slug)} className={INLINE_LINK_CLASSES}>
+                    {originalAuthor}
+                  </Link>{" "}
+                  <span className="text-muted">({formatClassicYears(classicAuthor)})</span>
+                </>
+              ) : originalAuthor ? (
                 <Link href={buildBookstoreHref({}, { q: originalAuthor })} className={INLINE_LINK_CLASSES}>
                   {originalAuthor}
                 </Link>
@@ -1376,7 +1390,11 @@ export default async function BookDetailPage({
               )}
               {book.original_publication_date && (
                 <DetailRow label="Botuar për herë të parë">
-                  {formatDateOnly(book.original_publication_date)}
+                  {/* K6: a public-domain edition shows the year only
+                      (the stored day and month are not real). */}
+                  {book.pd_work_id
+                    ? book.original_publication_date.slice(0, 4)
+                    : formatDateOnly(book.original_publication_date)}
                 </DetailRow>
               )}
               {releaseLabel && (

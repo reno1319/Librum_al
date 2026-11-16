@@ -125,8 +125,14 @@ function toCover(supabase: SupabaseClient, b: CoverRow): Cover {
 // is not part of that catalog until its author sets one. Consequence
 // worth stating plainly rather than discovering later: while every
 // published book is unpriced, this section renders nothing at all.
-async function fetchPublishedCovers(supabase: SupabaseClient): Promise<Cover[]> {
-  const { data } = await supabase
+// K6 (Q2 a): the "Botuar me Librum" row leaves out public-domain
+// editions (the free classics); the hero fan's fallback still uses
+// every book, as before.
+async function fetchPublishedCovers(
+  supabase: SupabaseClient,
+  { excludePdEditions = false }: { excludePdEditions?: boolean } = {},
+): Promise<Cover[]> {
+  let query = supabase
     // PEN-NAMES-2: public_books (no account columns).
     .from("public_books")
     // REDESIGN STEP 2 / PEN-NAMES-1: each book's pen name, embedded from
@@ -136,7 +142,9 @@ async function fetchPublishedCovers(supabase: SupabaseClient): Promise<Cover[]> 
     .select(COVER_SELECT)
     .eq("status", "published")
     .not("price_all", "is", null)
-    .not("cover_path", "is", null)
+    .not("cover_path", "is", null);
+  if (excludePdEditions) query = query.is("pd_work_id", null);
+  const { data } = await query
     .order("created_at", { ascending: false })
     .limit(MAX_HOMEPAGE_COVERS)
     .returns<CoverRow[]>();
@@ -192,8 +200,9 @@ export default async function Home({
   const { account } = await searchParams;
   const supabase = await createClient();
 
-  const [newestCovers, slots, userResult] = await Promise.all([
+  const [newestCovers, rowCovers, slots, userResult] = await Promise.all([
     fetchPublishedCovers(supabase),
+    fetchPublishedCovers(supabase, { excludePdEditions: true }),
     getPublicHomeSlots(),
     supabase.auth.getUser(),
   ]);
@@ -246,7 +255,7 @@ export default async function Home({
       <WhyLibrumSection />
       <PublishInFourStepsSection />
       <EarningsSection />
-      {newestCovers.length > 0 && <PublishedWithLibrumSection books={newestCovers} showPrice={showPrice} />}
+      {rowCovers.length > 0 && <PublishedWithLibrumSection books={rowCovers} showPrice={showPrice} />}
       {cta.final && <ClosingCtaBand cta={cta.final} />}
     </main>
   );
