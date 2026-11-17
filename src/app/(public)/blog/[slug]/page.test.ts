@@ -61,6 +61,20 @@ function collectLinkHrefs(node: unknown): string[] {
   return hrefs;
 }
 
+// Every string anywhere in the tree (arrays and mixed children
+// included), function components invoked like walk() does.
+function allText(node: unknown): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(allText).join("");
+  if (typeof node !== "object" || !("props" in (node as object))) return "";
+  const element = node as ReactElement<Record<string, unknown>>;
+  if (typeof element.type === "function") {
+    return allText((element.type as (props: unknown) => unknown)(element.props));
+  }
+  return allText(element.props.children);
+}
+
 const mockNotFound = vi.fn(() => {
   throw new Error("NOT_FOUND");
 });
@@ -94,7 +108,7 @@ const basePost = {
   excerpt: "An excerpt about publishing your first ebook on Librum.",
   content_markdown: "# Heading\n\nSome reasonably long article content used for reading time.",
   cover_image_path: null as string | null,
-  category: "publishing" as const,
+  category: "tregu" as const,
   seo_title: null as string | null,
   seo_description: null as string | null,
   published_at: "2026-01-01T00:00:00Z" as string | null,
@@ -180,7 +194,7 @@ describe("BlogArticlePage", () => {
     expect(mockNotFound).toHaveBeenCalled();
   });
 
-  it("a published slug renders successfully with correct JSON-LD: Article shape, Librum Editorial, correct URL", async () => {
+  it("a published (non-Editorial) slug renders successfully with correct JSON-LD: Article shape, no author, Librum publisher, correct URL", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
     mockReturns.mockResolvedValueOnce({ data: [] });
 
@@ -195,12 +209,21 @@ describe("BlogArticlePage", () => {
     expect(jsonLd.description).toBe(basePost.excerpt);
     expect(jsonLd.datePublished).toBe(basePost.published_at);
     expect(jsonLd.dateModified).toBe(basePost.updated_at);
-    expect(jsonLd.author).toEqual({ "@type": "Organization", name: "Librum Editorial" });
+    expect(jsonLd.author).toBeUndefined();
     expect(jsonLd.publisher).toEqual({ "@type": "Organization", name: "Librum" });
     expect(jsonLd.mainEntityOfPage).toEqual({
       "@type": "WebPage",
       "@id": "http://localhost:3000/blog/how-to-publish",
     });
+  });
+
+  it("audit F3: an Editorial post's JSON-LD names Librum Editorial as author", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "editorial" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const jsonLd = JSON.parse(findScriptHtml(page)!.replace(/\\u003c/g, "<"));
+    expect(jsonLd.author).toEqual({ "@type": "Organization", name: "Librum Editorial" });
+    expect(jsonLd.publisher).toEqual({ "@type": "Organization", name: "Librum" });
   });
 
   it("safely escapes a literal '<' in article text so the JSON-LD script tag can never be prematurely closed", async () => {
@@ -243,7 +266,7 @@ describe("BlogArticlePage", () => {
           slug: "related-one",
           title: "Related One",
           excerpt: "E",
-          category: "publishing",
+          category: "tregu",
           cover_image_path: null,
           published_at: "2026-01-03T00:00:00Z",
           status: "published",
@@ -269,6 +292,46 @@ describe("BlogArticlePage", () => {
     }
     const contentSelects = mockSelect.mock.calls.filter((call) => (call[0] as string).includes("content_markdown"));
     expect(contentSelects).toHaveLength(1);
+  });
+
+  it("a normal post: category name links to its category page, no byline, publish button for Zeja/Tregu", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "zeja" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const text = allText(page);
+    const hrefs = collectLinkHrefs(page);
+    expect(hrefs).toContain("/blog/kategoria/zeja-e-shkrimit");
+    expect(text).toContain("Zeja e Shkrimit");
+    expect(text).not.toContain("Nga Librum");
+    expect(text).toContain("1 janar 2026 · ");
+    expect(hrefs).toContain("/signup?role=author");
+    expect(hrefs).not.toContain("/librari");
+  });
+
+  it("a reader-category post (Kulturë) ends with the Shfletoni librarinë button", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "kultura" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const hrefs = collectLinkHrefs(page);
+    expect(allText(page)).toContain("Shfletoni librarinë");
+    expect(hrefs).toContain("/librari");
+    expect(hrefs).not.toContain("/signup?role=author");
+  });
+
+  it("an Editorial post: yellow Nga Librum tag (no category link), byline Nga Librum, gold line, browse button", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "editorial" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const text = allText(page);
+    const hrefs = collectLinkHrefs(page);
+    expect(text).toContain("Nga Librum · 1 janar 2026 · ");
+    expect(hrefs).not.toContain("/blog/kategoria/editorial");
+    expect(hrefs).toContain("/librari");
+    let article: ReactElement<Record<string, unknown>> | null = null;
+    walk(page, (el) => {
+      if (el.type === "article") article = el;
+    });
+    expect((article as ReactElement<{ className?: string }> | null)?.props.className).toContain("border-accent");
   });
 
   it("only ever uses the public/request-scoped Supabase client -- no admin/service-role client is imported", () => {

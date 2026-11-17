@@ -37,11 +37,12 @@ export type BookStatus = "draft" | "published" | "preorder";
 // boundary).
 export type BlogPostStatus = "draft" | "published";
 
-// Exactly the four fixed V1 categories (migration 047's own CHECK
-// constraint) -- src/lib/blog-categories.ts is the single place these
-// are paired with a display label; this type alone is what the DB and
-// every RPC parameter are typed against.
-export type BlogCategory = "publishing" | "writing" | "authors-books" | "librum-guides";
+// Exactly the six fixed categories (the blog_posts CHECK constraint,
+// migration 20261117180000_blog_categories.sql) --
+// src/lib/blog-categories.ts is the single place these are paired with
+// a display label; this type alone is what the DB and every RPC
+// parameter are typed against.
+export type BlogCategory = "editorial" | "zeja" | "tregu" | "kultura" | "reflektime" | "vleresime";
 
 export type BlogPost = {
   id: string;

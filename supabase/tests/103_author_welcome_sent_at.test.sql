@@ -10,7 +10,7 @@
 -- Reproduce against a disposable PostgreSQL 17 instance:
 --   psql -d librum_test -f supabase/tests/00_stub_supabase_platform.sql
 --   psql -d librum_test -f supabase/schema.sql
---   psql -d librum_test -v ON_ERROR_STOP=1 -f supabase/tests/102_author_welcome_sent_at.test.sql
+--   psql -d librum_test -v ON_ERROR_STOP=1 -f supabase/tests/103_author_welcome_sent_at.test.sql
 begin;
 
 set local client_min_messages = warning;
@@ -48,6 +48,6 @@ select pg_temp.assert(
   'service_role can claim author_welcome_sent_at');
 
 select pg_temp.assert((select n from pg_temp.assertions_run) = 5, 'all assertions ran');
-select 'PASS: 102_author_welcome_sent_at (' || n || ' assertions)' from pg_temp.assertions_run;
+select 'PASS: 103_author_welcome_sent_at (' || n || ' assertions)' from pg_temp.assertions_run;
 
 rollback;

@@ -46,11 +46,39 @@ function collectText(node: unknown): string {
   return text;
 }
 
+// One chain object per query, recording its own .eq() filters, so a
+// test can answer the landing query and each band query separately
+// (bandRows below). mockReturns answers the landing query (the one
+// with no category filter); the band queries answer from bandRows.
+let bandRows: Record<string, unknown[]> = {};
 const mockReturns = vi.fn();
-const mockLimit = vi.fn((_n: number) => ({ returns: mockReturns }));
-const mockOrder = vi.fn((_column: string, _opts: { ascending: boolean }) => ({ limit: mockLimit }));
-const mockEq = vi.fn((_column: string, _value: string) => ({ order: mockOrder }));
-const mockSelect = vi.fn((_columns: string) => ({ eq: mockEq }));
+const mockLimit = vi.fn((_n: number) => undefined as unknown);
+const mockOrder = vi.fn((_column: string, _opts: { ascending: boolean }) => undefined as unknown);
+const mockEq = vi.fn((_column: string, _value: string) => undefined as unknown);
+function makeChain() {
+  const filters: Record<string, string> = {};
+  const chain = {
+    eq: (column: string, value: string) => {
+      mockEq(column, value);
+      filters[column] = value;
+      return chain;
+    },
+    order: (column: string, opts: { ascending: boolean }) => {
+      mockOrder(column, opts);
+      return chain;
+    },
+    limit: (n: number) => {
+      mockLimit(n);
+      return chain;
+    },
+    returns: () =>
+      filters.category === undefined
+        ? mockReturns()
+        : Promise.resolve({ data: bandRows[filters.category] ?? [] }),
+  };
+  return chain;
+}
+const mockSelect = vi.fn((_columns: string) => makeChain());
 const mockFrom = vi.fn((_table: string) => ({ select: mockSelect }));
 const mockGetPublicUrl = vi.fn((path: string) => ({ data: { publicUrl: `https://cdn.test/${path}` } }));
 const mockStorageFrom = vi.fn((_bucket: string) => ({ getPublicUrl: mockGetPublicUrl }));
@@ -76,7 +104,7 @@ function candidate(overrides: Partial<{
     slug: overrides.id,
     title: `Post ${overrides.id}`,
     excerpt: "Excerpt",
-    category: "writing",
+    category: "zeja",
     cover_image_path: null,
     published_at: "2026-01-01T00:00:00Z",
     status: "published",
@@ -92,6 +120,7 @@ beforeEach(() => {
   mockOrder.mockClear();
   mockLimit.mockClear();
   mockReturns.mockReset().mockResolvedValue({ data: [] });
+  bandRows = {};
   mockGetPublicUrl.mockClear();
 });
 
@@ -154,8 +183,8 @@ describe("BlogIndexPage", () => {
   it("renders a featured section, a Latest section, and category sections with Albanian public labels, plus a final CTA, when posts exist", async () => {
     mockReturns.mockResolvedValueOnce({
       data: [
-        candidate({ id: "featured-post", featured: true, category: "publishing", published_at: "2026-01-10T00:00:00Z" }),
-        candidate({ id: "latest-post", category: "writing", published_at: "2026-01-09T00:00:00Z" }),
+        candidate({ id: "featured-post", featured: true, category: "tregu", published_at: "2026-01-10T00:00:00Z" }),
+        candidate({ id: "latest-post", category: "zeja", published_at: "2026-01-09T00:00:00Z" }),
       ],
     });
 
@@ -165,8 +194,102 @@ describe("BlogIndexPage", () => {
 
     expect(hrefs).toContain("/blog/featured-post");
     expect(hrefs).toContain("/blog/latest-post");
-    expect(text).toContain("Botimi");
+    expect(text).toContain("Tregu i Librit & Botimet");
     expect(hrefs).toContain("/signup?role=author");
+    expect(hrefs).not.toContain("/librari");
+  });
+
+  it("shows the new intro and the category buttons: Të gjitha plus six short names, each linking to its category page", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
+    const page = await BlogIndexPage();
+    const text = collectText(page);
+    const hrefs = collectLinkHrefs(page);
+    expect(text).toContain("Shkrim, botim, kulturë dhe lexim");
+    expect(text).not.toContain("vetëbotimit shqip");
+    for (const label of ["Të gjitha", "Editorial", "Zeja e Shkrimit", "Botimet", "Kulturë", "Reflektime", "Vlerësime"]) {
+      expect(text).toContain(label);
+    }
+    for (const slug of [
+      "editorial",
+      "zeja-e-shkrimit",
+      "tregu-i-librit-dhe-botimet",
+      "kulture-dhe-njohuri",
+      "reflektime-dhe-frymezim",
+      "vleresimet-dhe-rekomandimet",
+    ]) {
+      expect(hrefs).toContain(`/blog/kategoria/${slug}`);
+    }
+  });
+
+  it("shows all six category bands from day one, Editorial first, with the coming-soon line in each empty one", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "only-zeja", category: "zeja" })] });
+    bandRows = { zeja: [candidate({ id: "only-zeja", category: "zeja" })] };
+    const page = await BlogIndexPage();
+    const headings: string[] = [];
+    walk(page, (el) => {
+      if (el.type === "h2" && typeof el.props.id === "string") headings.push(el.props.children as string);
+    });
+    expect(headings).toEqual([
+      "Editorial",
+      "Zeja e Shkrimit",
+      "Tregu i Librit & Botimet",
+      "Kulturë & Njohuri",
+      "Reflektime & Frymëzim",
+      "Vlerësimet & Rekomandimet",
+    ]);
+    let emptyLines = 0;
+    walk(page, (el) => {
+      if (el.type === "p" && el.props.children === "Artikujt e parë po vijnë së shpejti.") emptyLines += 1;
+    });
+    expect(emptyLines).toBe(5);
+  });
+
+  it("each band has its own query: published, that category, newest first, 3 rows", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
+    await BlogIndexPage();
+    for (const value of ["editorial", "zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
+      expect(mockEq).toHaveBeenCalledWith("category", value);
+    }
+    expect(mockLimit).toHaveBeenCalledWith(3);
+    expect(mockLimit.mock.calls.filter((c) => c[0] === 3)).toHaveLength(6);
+  });
+
+  it("audit F1: a quiet category whose posts are older than the 50 newest still shows them, not the coming-soon line", async () => {
+    mockReturns.mockResolvedValueOnce({
+      data: Array.from({ length: 50 }, (_, i) =>
+        candidate({ id: `new-${i}`, category: "zeja", published_at: "2026-11-01T00:00:00Z" }),
+      ),
+    });
+    bandRows = {
+      zeja: [candidate({ id: "new-0", category: "zeja" })],
+      reflektime: [candidate({ id: "old-reflektime", category: "reflektime", published_at: "2025-01-01T00:00:00Z" })],
+    };
+    const page = await BlogIndexPage();
+    expect(collectLinkHrefs(page)).toContain("/blog/old-reflektime");
+    let emptyLines = 0;
+    walk(page, (el) => {
+      if (el.type === "p" && el.props.children === "Artikujt e parë po vijnë së shpejti.") emptyLines += 1;
+    });
+    expect(emptyLines).toBe(4);
+  });
+
+  it("a band row of another category or a draft is never shown in that band", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
+    bandRows = {
+      kultura: [
+        candidate({ id: "wrong-cat", category: "zeja" }),
+        candidate({ id: "draft-kultura", category: "kultura", status: "draft" }),
+      ],
+    };
+    const hrefs = collectLinkHrefs(await BlogIndexPage());
+    expect(hrefs).not.toContain("/blog/wrong-cat");
+    expect(hrefs).not.toContain("/blog/draft-kultura");
+  });
+
+  it("an Editorial post's card carries the yellow Nga Librum tag instead of a category name", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "ed", category: "editorial" })] });
+    const text = collectText(await BlogIndexPage());
+    expect(text).toContain("Nga Librum");
   });
 
   it("only ever uses the public/request-scoped Supabase client -- no admin/service-role client is imported", () => {
