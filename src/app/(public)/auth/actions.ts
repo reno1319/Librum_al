@@ -212,7 +212,10 @@ async function startGoogle(formData: FormData, fromSignup: boolean) {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: callback },
+    // K7 follow-up (Renato 11-16): always show Google's "Choose an
+    // account", so a browser already signed into one Gmail can still
+    // pick another (shared computers, a second test account).
+    options: { redirectTo: callback, queryParams: { prompt: "select_account" } },
   });
   if (error || !data?.url) {
     redirect(failedPath);
