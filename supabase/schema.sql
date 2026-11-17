@@ -19489,3 +19489,14 @@ revoke all on function public.staff_set_pd_work_classic_author(uuid, uuid)
   from public, anon, authenticated, service_role;
 grant execute on function public.staff_set_pd_work_classic_author(uuid, uuid)
   to authenticated;
+
+-- ============================================================
+-- AUTHOR-EMAILS welcome once (migration 20261117190000_author_welcome_sent_at)
+-- ============================================================
+
+alter table public.profiles
+  add column author_welcome_sent_at timestamptz;
+
+update public.profiles
+  set author_welcome_sent_at = now()
+  where role = 'author';

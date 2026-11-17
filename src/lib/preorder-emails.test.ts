@@ -58,6 +58,12 @@ vi.mock("@/lib/email", () => ({
   sendPreorderDateMovedEmail: async (to: string, args: unknown) => void authorMails.push({ kind: "moved", to, args }),
   sendPreorderCancelledAuthorEmail: async (to: string, args: unknown) => void authorMails.push({ kind: "cancelled", to, args }),
 }));
+// AUTHOR-EMAILS: the release-day author email greets by name; the name
+// rule itself is tested in author-recipient.test.ts.
+vi.mock("@/lib/author-recipient", () => ({
+  authorRecipient: async (_admin: unknown, id: string) =>
+    id.startsWith("gone") ? null : { email: `${id}@example.test`, name: `Name ${id}` },
+}));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fakeAdmin() }));
 
 type Filter = (r: Record<string, unknown>) => boolean;
@@ -252,7 +258,7 @@ describe("sendPreorderJobEmails", () => {
       summary({ releasedBookIds: ["b-rel"], slipped: [{ bookId: "b-slip", releaseDate: "2026-12-31" }], cancelledBookIds: ["b-cxl"] }),
     );
     expect(authorMails).toEqual([
-      { kind: "released", to: "author-1@example.test", args: { title: "Released", bookId: "b-rel" } },
+      { kind: "released", to: "author-1@example.test", args: { title: "Released", bookId: "b-rel", name: "Name author-1" } },
       { kind: "moved", to: "author-3@example.test", args: { title: "Slipped", releaseDate: "2026-12-31" } },
       { kind: "cancelled", to: "author-2@example.test", args: { title: "Cancelled" } },
     ]);

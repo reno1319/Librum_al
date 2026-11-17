@@ -1,3 +1,4 @@
+import { scheduleAuthorWelcome } from "@/lib/author-welcome";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { setRecoverySession, clearRecoverySession } from "@/lib/recovery-session";
@@ -142,6 +143,9 @@ export async function GET(request: Request) {
         setRecoverySession(response.cookies);
       } else {
         clearRecoverySession(response.cookies);
+        // AUTHOR-EMAILS: an author's first confirmed sign-in gets the
+        // welcome email once (the claim inside makes later ones no-ops).
+        if (data.user) scheduleAuthorWelcome(data.user.id);
       }
       return response;
     }
@@ -155,13 +159,16 @@ export async function GET(request: Request) {
     const verifiedType = parseTokenHashType(type);
     if (verifiedType) {
       const supabase = await createClient();
-      const { error } = await supabase.auth.verifyOtp({ type: verifiedType, token_hash: tokenHash });
+      const { data, error } = await supabase.auth.verifyOtp({ type: verifiedType, token_hash: tokenHash });
       if (!error) {
         const response = NextResponse.redirect(`${origin}${next}`);
         if (verifiedType === "recovery") {
           setRecoverySession(response.cookies);
         } else {
           clearRecoverySession(response.cookies);
+          // AUTHOR-EMAILS: the sign-up confirmation link (Production's
+          // template uses this token_hash path).
+          if (data?.user) scheduleAuthorWelcome(data.user.id);
         }
         return response;
       }
@@ -211,6 +218,9 @@ async function googleCallback(request: Request, origin: string, code: string | n
     // A Google sign-in is never a recovery: like any ordinary exchange,
     // it clears a stale recovery marker (LAUNCH-1 P1-11).
     clearRecoverySession(response.cookies);
+    // AUTHOR-EMAILS: after finishGoogleSignIn() so a new Google author
+    // is already an author when the claim runs.
+    scheduleAuthorWelcome(user.id);
   }
   response.cookies.set(GOOGLE_AUTHOR_INTENT_COOKIE, "", { path: "/auth/callback", maxAge: 0 });
   return response;

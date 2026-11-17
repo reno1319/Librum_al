@@ -1,5 +1,6 @@
 "use server";
 
+import { scheduleAuthorWelcome } from "@/lib/author-welcome";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
@@ -162,6 +163,9 @@ export async function signup(formData: FormData) {
   const cookieStore = await cookies();
   clearRecoverySession(cookieStore);
 
+  // AUTHOR-EMAILS: only reached when sign-up needs no email link; the
+  // usual path sends the welcome from /auth/callback.
+  if (switchedToAuthor && newUser) scheduleAuthorWelcome(newUser.id);
   revalidatePath("/", "layout");
   if (role === "author" && !switchedToAuthor) {
     redirect(`/account?error=${encodeURIComponent(AUTHOR_PENDING_MESSAGE)}`);
