@@ -6,10 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
-import { BLOG_CATEGORY_LABELS_SQ } from "@/lib/blog-categories";
+import { blogCategoryHref, getBlogCategory } from "@/lib/blog-categories";
 import { BLOG_RELATED_POSTS_LIMIT, selectRelatedPosts, type BlogLandingCandidate } from "@/lib/blog-landing-logic";
 import { BlogMarkdown } from "@/components/blog-markdown";
-import { BlogArticleCard, type BlogArticleCardPost } from "@/components/blog-article-card";
+import { BlogArticleCard, NgaLibrumTag, type BlogArticleCardPost } from "@/components/blog-article-card";
+import { BlogCta } from "@/components/blog-category-nav";
 import type { BlogCategory } from "@/lib/types";
 
 type PublicBlogPostDetail = {
@@ -122,7 +123,10 @@ function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; ur
     description: post.seo_description ?? post.excerpt,
     datePublished: post.published_at ?? post.updated_at,
     dateModified: post.updated_at,
-    author: { "@type": "Organization", name: "Librum Editorial" },
+    // Blog categories audit F3 (Renato 2026-11-17, a): only an
+    // Editorial post names an author; every other post has none (blog3:
+    // no byline), only Librum as publisher.
+    ...(post.category === "editorial" ? { author: { "@type": "Organization", name: "Librum Editorial" } } : {}),
     publisher: { "@type": "Organization", name: "Librum" },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     ...(coverUrl ? { image: [coverUrl] } : {}),
@@ -169,6 +173,13 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   const related = selectRelatedPosts(relatedCandidatesData ?? [], post.category, post.id);
 
   const readingMinutes = calculateReadingTime(post.content_markdown);
+  // Blog categories (2026-11-17): Editorial posts carry the yellow
+  // "Nga Librum" tag, a thin gold line and the byline "Nga Librum"
+  // (blog1/blog3); every other post links its category name to the
+  // category page and has no byline. The bottom button follows the
+  // category (blog6).
+  const categoryInfo = getBlogCategory(post.category);
+  const isEditorial = post.category === "editorial";
   const origin = resolveSiteOrigin();
   const url = `${origin}/blog/${post.slug}`;
 
@@ -193,24 +204,30 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         &larr; Blog
       </Link>
 
-      <article className="mt-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">
-          {BLOG_CATEGORY_LABELS_SQ[post.category]}
-        </p>
+      <article className={isEditorial ? "mt-4 border-t-[3px] border-accent pt-5" : "mt-4"}>
+        {isEditorial ? (
+          <p>
+            <NgaLibrumTag />
+          </p>
+        ) : categoryInfo ? (
+          <p className="text-xs font-medium uppercase tracking-wide">
+            <Link
+              href={blogCategoryHref(categoryInfo)}
+              className="underline underline-offset-[3px] hover:decoration-2"
+              style={{ color: categoryInfo.ink }}
+            >
+              {categoryInfo.label}
+            </Link>
+          </p>
+        ) : null}
         <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
           {post.title}
         </h1>
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>
 
         <p className="mt-4 text-sm text-muted">
-          Nga Librum Editorial
-          {post.published_at && (
-            <>
-              {" · "}
-              {formatTimestampAsDate(post.published_at)}
-            </>
-          )}
-          {" · "}
+          {isEditorial && "Nga Librum · "}
+          {post.published_at && `${formatTimestampAsDate(post.published_at)} · `}
           {readingMinutes} min lexim
         </p>
 
@@ -235,15 +252,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         </section>
       )}
 
-      <div className="mt-14 border-t border-border pt-8 text-center">
-        <p className="text-muted">Gati ta botoni librin tuaj?</p>
-        <Link
-          href="/signup?role=author"
-          className="mt-3 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-        >
-          Publikoni librin tuaj
-        </Link>
-      </div>
+      <BlogCta kind={categoryInfo?.cta ?? "publish"} />
     </main>
   );
 }

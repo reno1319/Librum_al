@@ -17,7 +17,7 @@ function validInput(overrides: Partial<BlogPostFieldInput> = {}): BlogPostFieldI
     slug: "how-to-publish-an-ebook",
     excerpt: "A short excerpt.",
     contentMarkdown: "Some article body content.",
-    category: "publishing",
+    category: "tregu",
     featured: false,
     seoTitle: "",
     seoDescription: "",
@@ -95,8 +95,17 @@ describe("validateBlogPostFields", () => {
     expect(result).toEqual({ ok: false, error: "Please choose a valid category." });
   });
 
-  it("accepts every one of the four approved categories", () => {
-    for (const category of ["publishing", "writing", "authors-books", "librum-guides"]) {
+  it("rejects the blank first choice and the four old categories", () => {
+    for (const category of ["", "publishing", "writing", "authors-books", "librum-guides"]) {
+      expect(validateBlogPostFields(validInput({ category }))).toEqual({
+        ok: false,
+        error: "Please choose a valid category.",
+      });
+    }
+  });
+
+  it("accepts every one of the six approved categories", () => {
+    for (const category of ["editorial", "zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
       expect(validateBlogPostFields(validInput({ category })).ok).toBe(true);
     }
   });
