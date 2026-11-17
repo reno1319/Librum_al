@@ -191,7 +191,7 @@ select 'e0750006-0000-4000-8000-000000000001', p.id, p.book_id, 100
   from public.purchases p where p.stripe_checkout_session_id = 'cs_p075_1';
 
 insert into public.blog_posts (title, slug, excerpt, content_markdown, category, status, created_by) values
-  ('P075 post', 'p075-post', 'x', 'x', 'publishing', 'published', 'e0750000-0000-4000-8000-0000000000ef');
+  ('P075 post', 'p075-post', 'x', 'x', 'tregu', 'published', 'e0750000-0000-4000-8000-0000000000ef');
 
 -- ============================================================
 -- Part 1: privileges.

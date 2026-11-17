@@ -84,7 +84,7 @@ function validFormData(overrides: Record<string, string> = {}) {
   fd.set("slug", "how-to-publish-an-ebook");
   fd.set("excerpt", "A short excerpt.");
   fd.set("contentMarkdown", "Some article body content.");
-  fd.set("category", "publishing");
+  fd.set("category", "tregu");
   fd.set("seoTitle", "");
   fd.set("seoDescription", "");
   for (const [k, v] of Object.entries(overrides)) fd.set(k, v);
@@ -135,7 +135,7 @@ describe("createBlogPostAction", () => {
 
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "create_blog_post",
-      expect.objectContaining({ p_cover_image_path: null, p_category: "publishing" }),
+      expect.objectContaining({ p_cover_image_path: null, p_category: "tregu" }),
     );
     // No direct table write anywhere in this action.
     expect(currentMockSupabase._spies.from).not.toHaveBeenCalled();

@@ -126,3 +126,27 @@ export function isBlogLandingEmpty(params: {
     params.categorySections.every((section) => section.posts.length === 0)
   );
 }
+
+// Blog categories (2026-11-17): the /blog/kategoria/[slug] page lists
+// 12 posts per page with page numbers (?faqe=2, ?faqe=3 ...).
+export const BLOG_CATEGORY_PAGE_SIZE = 12;
+
+// The page number from ?faqe=. Missing means page 1; anything that is
+// not a plain whole number from 1 up (0, "-1", "2.5", "abc", "01",
+// a repeated param) is null, and the page answers 404.
+export function parseBlogPageParam(raw: string | string[] | undefined): number | null {
+  if (raw === undefined) return 1;
+  if (typeof raw !== "string" || !/^[1-9][0-9]{0,4}$/.test(raw)) return null;
+  return Number(raw);
+}
+
+// Inclusive row range for Supabase's .range(from, to).
+export function blogCategoryPageRange(page: number, pageSize: number = BLOG_CATEGORY_PAGE_SIZE) {
+  const from = (page - 1) * pageSize;
+  return { from, to: from + pageSize - 1 };
+}
+
+// At least 1, so an empty category still has its one (empty) page.
+export function blogCategoryPageCount(total: number, pageSize: number = BLOG_CATEGORY_PAGE_SIZE): number {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
