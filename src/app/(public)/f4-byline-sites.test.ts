@@ -121,7 +121,9 @@ describe("BD3 patch 4: the original author", () => {
   it("book page: the original author is the byline (a Libraria search link), the translator after it; About/More by stay on the pen name", () => {
     const source = readSrc("app/(public)/libra/[id]/page.tsx");
     expect(source).toContain("const originalAuthor = resolveOriginalAuthor(book);");
-    expect(source).toMatch(/\{originalAuthor \? \(\s*<Link href=\{buildBookstoreHref\(\{\}, \{ q: originalAuthor \}\)\} className=\{INLINE_LINK_CLASSES\}>\s*\{originalAuthor\}/);
+    // K6 (Q2 a): unless its work is linked to a live classic author.
+    expect(source).toMatch(/\) : originalAuthor \? \(\s*<Link href=\{buildBookstoreHref\(\{\}, \{ q: originalAuthor \}\)\} className=\{INLINE_LINK_CLASSES\}>\s*\{originalAuthor\}/);
+    expect(source).toMatch(/\{originalAuthor && classicAuthor \? \(\s*<>\s*<Link href=\{classicAuthorPath\(classicAuthor\.slug\)\}/);
     expect(source).toContain("{TRANSLATOR_ROLE}");
     expect(source).toContain('(contributors ?? []).filter((c) => c.role === "Translator")');
     expect(source).toContain("otherContributors.length > 0");

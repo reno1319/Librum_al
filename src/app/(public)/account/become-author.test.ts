@@ -186,6 +186,10 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+// AUTHOR-EMAILS (mail3 a): the welcome itself is tested in author-welcome.test.ts.
+const mockScheduleAuthorWelcome = vi.fn();
+vi.mock("@/lib/author-welcome", () => ({ scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id) }));
+
 const { becomeAuthor } = await import("./become-author");
 
 function tickedForm(): FormData {
@@ -515,13 +519,15 @@ describe("author role write boundary (static)", () => {
     expect(read("src/lib/author-role-write-client.ts")).toMatch(/^import "server-only";/);
   });
 
-  it("becomeAuthor and signup (SECURITY-9A) are the writer's only importers", () => {
+  // K7: signup's switch moved to src/lib/author-signup-switch.ts, which
+  // signup and the Google sign-in finish both use.
+  it("becomeAuthor and the sign-up switch (SECURITY-9A) are the writer's only importers", () => {
     const out = execFileSync("grep", ["-rl", "author-role-write-client", "src"], { cwd: root, encoding: "utf8" });
     const importers = out
       .split("\n")
       .filter(Boolean)
       .filter((f) => !f.endsWith(".test.ts") && f !== "src/lib/author-role-write-client.ts");
-    expect(importers.sort()).toEqual(["src/app/(public)/account/become-author.ts", "src/app/(public)/auth/actions.ts"]);
+    expect(importers.sort()).toEqual(["src/app/(public)/account/become-author.ts", "src/lib/author-signup-switch.ts"]);
   });
 });
 
@@ -555,5 +561,22 @@ describe("becomeAuthor: SECURITY-9A Terms tick", () => {
       "terms_version",
     ]);
     expect(order).toEqual(["age", "role"]);
+  });
+});
+
+describe("becomeAuthor: AUTHOR-EMAILS welcome (mail3 a)", () => {
+  beforeEach(() => mockScheduleAuthorWelcome.mockClear());
+
+  it("a reader who becomes an author gets the welcome scheduled, after the role write", async () => {
+    const target = await run();
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith(USER_ID);
+    expect(writes).toHaveLength(1);
+  });
+
+  it("an existing author is not scheduled", async () => {
+    profileResult = readerProfile({ role: "author" });
+    await run();
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
   });
 });

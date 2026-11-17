@@ -23,6 +23,7 @@ import { BookCard } from "@/components/book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
+import { formatClassicYears, loadClassicAuthorsByWork, type PublicClassicAuthor } from "@/lib/classic-authors";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
@@ -358,7 +359,8 @@ async function fetchPublishedBundles(
 // REDESIGN STEP 3: the "Free to start reading" shelf (unfiltered view
 // only). Newest free books, the same published-only scoping as the
 // grid; `price_all = 0` already excludes an unpriced row. Fail-soft: an
-// error just hides the shelf.
+// error just hides the shelf. K6: free books are public-domain editions
+// only (BD15), so this is the "Klasikët shqiptarë" shelf.
 async function fetchFreeBooks(supabase: SupabaseClient): Promise<BookWithAuthor[]> {
   const { data, error } = await supabase
     .from("public_books")
@@ -440,6 +442,11 @@ export default async function BookstorePage({
     isFiltered ? Promise.resolve(null) : getLibrumChoiceBook(),
     fetchCatalogueFacets(supabase),
   ]);
+  // K6: each classic's years on its card (none while unlinked).
+  const classicsByWork = await loadClassicAuthorsByWork(
+    supabase,
+    freeBooks.map((book) => book.pd_work_id),
+  );
 
   // REDESIGN STEP 3 / F5 (C2): the feature only on the unfiltered view
   // and never over a failed load; inside it, the priced pick as
@@ -502,10 +509,10 @@ export default async function BookstorePage({
         </div>
 
         {freeBooks.length > 0 && (
-          <CoverShelf
-            heading="Libra falas"
+          <ClassicsShelf
             seeAllHref={buildBookstoreHref({}, { maxPrice: "0" })}
             books={freeBooks}
+            classicsByWork={classicsByWork}
             supabase={supabase}
           />
         )}
@@ -906,36 +913,42 @@ const FEATURE_CTA_CLASSES =
 
 // REDESIGN STEP 3 (B2): a headed shelf of cover cards with "See all".
 // One row that scrolls sideways on phones; a grid from the small
-// breakpoint up.
-function CoverShelf({
-  heading,
+// breakpoint up. K6 (approved pictures v4, Q3 a): "Klasikët shqiptarë"
+// on a warm panel, the title and the books only; a linked classic's
+// card reads "Name · 1846–1900".
+function ClassicsShelf({
   seeAllHref,
   books,
+  classicsByWork,
   supabase,
 }: {
-  heading: string;
   seeAllHref: string;
   books: BookWithAuthor[];
+  classicsByWork: Map<string, PublicClassicAuthor>;
   supabase: SupabaseClient;
 }) {
   return (
-    <section className="mt-12">
+    <section className="mt-12 rounded-[6px] border border-[#e3d9c3] bg-[#f6f1e6] px-4 py-6 sm:px-8 sm:py-8">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className={SECTION_HEADING}>{heading}</h2>
+        <h2 className={SECTION_HEADING}>Klasikët shqiptarë</h2>
         <Link href={seeAllHref} className={TEXT_LINK_CLASSES}>
-          Shiko të gjitha
+          Shiko të gjithë klasikët
         </Link>
       </div>
-      <ul className="-mx-4 mt-5 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
-        {books.map((book) => (
-          <li key={book.id} className="w-36 shrink-0 sm:w-auto">
-            <BookCard
-              book={book}
-              coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolveBookByline(book)}
-            />
-          </li>
-        ))}
+      <ul className="-mx-4 mt-6 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
+        {books.map((book) => {
+          const name = resolveBookByline(book);
+          const classic = book.pd_work_id ? classicsByWork.get(book.pd_work_id) : undefined;
+          return (
+            <li key={book.id} className="w-36 shrink-0 sm:w-auto">
+              <BookCard
+                book={book}
+                coverUrl={coverUrlFor(supabase, book.cover_path)}
+                authorName={name && classic ? `${name} · ${formatClassicYears(classic)}` : name}
+              />
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

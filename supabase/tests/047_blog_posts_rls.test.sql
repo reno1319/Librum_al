@@ -74,8 +74,8 @@ insert into public.staff_members (user_id, role) values
 -- this suite exercises it anyway.
 
 insert into public.blog_posts (id, title, slug, excerpt, content_markdown, category, created_by) values
-  ('f0000000-0000-0000-0000-000000000001', 'Published Post', 'published-post', 'An excerpt.', 'Body.', 'writing', 'e0000000-0000-0000-0000-000000000001'),
-  ('f0000000-0000-0000-0000-000000000002', 'Draft Post', 'draft-post', 'An excerpt.', 'Body.', 'publishing', 'e0000000-0000-0000-0000-000000000001');
+  ('f0000000-0000-0000-0000-000000000001', 'Published Post', 'published-post', 'An excerpt.', 'Body.', 'zeja', 'e0000000-0000-0000-0000-000000000001'),
+  ('f0000000-0000-0000-0000-000000000002', 'Draft Post', 'draft-post', 'An excerpt.', 'Body.', 'tregu', 'e0000000-0000-0000-0000-000000000001');
 update public.blog_posts set status = 'published', published_at = now() where id = 'f0000000-0000-0000-0000-000000000001';
 
 -- ============================================================
@@ -211,7 +211,7 @@ begin
   set local role anon;
   begin
     insert into public.blog_posts (title, slug, excerpt, content_markdown, category, created_by)
-    values ('x', 'x', 'x', 'x', 'writing', 'e0000000-0000-0000-0000-000000000001');
+    values ('x', 'x', 'x', 'x', 'zeja', 'e0000000-0000-0000-0000-000000000001');
     perform pg_temp.assert(false, 'part1: anon direct INSERT into blog_posts must be rejected');
   exception when insufficient_privilege then
     null; -- expected: no table-level INSERT grant
@@ -258,7 +258,7 @@ begin
   );
   begin
     insert into public.blog_posts (title, slug, excerpt, content_markdown, category, created_by)
-    values ('x', 'x', 'x', 'x', 'writing', 'e0000000-0000-0000-0000-000000000006');
+    values ('x', 'x', 'x', 'x', 'zeja', 'e0000000-0000-0000-0000-000000000006');
     perform pg_temp.assert(false, 'part2: non-staff direct INSERT must be rejected');
   exception when insufficient_privilege then
     null;
@@ -271,7 +271,7 @@ begin
   perform set_config('request.jwt.claim.sub', 'e0000000-0000-0000-0000-000000000006', true);
   set local role authenticated;
   begin
-    perform public.create_blog_post('x', 'x-slug', 'x', 'x', null, 'writing', false, null, null);
+    perform public.create_blog_post('x', 'x-slug', 'x', 'x', null, 'zeja', false, null, null);
     perform pg_temp.assert(false, 'part2: non-staff create_blog_post() must be rejected');
   exception when others then
     perform pg_temp.assert(sqlerrm = 'not authorized', format('part2: unexpected message: %s', sqlerrm));
@@ -356,7 +356,7 @@ begin
     'part3: blog.view (without blog.manage) must see both the draft and the published post'
   );
   begin
-    perform public.create_blog_post('x', 'x-slug-2', 'x', 'x', null, 'writing', false, null, null);
+    perform public.create_blog_post('x', 'x-slug-2', 'x', 'x', null, 'zeja', false, null, null);
     perform pg_temp.assert(false, 'part3: blog.view without blog.manage must not be able to create_blog_post()');
   exception when others then
     perform pg_temp.assert(sqlerrm = 'not authorized', format('part3: unexpected message: %s', sqlerrm));
@@ -401,7 +401,7 @@ begin
   -- attempt to influence (created_by is not even a parameter).
   select public.create_blog_post(
     'Editor Post', 'editor-post', 'An excerpt.', 'Body content.', null,
-    'authors-books', false, null, null
+    'kultura', false, null, null
   ) into v_new_id;
 
   perform pg_temp.assert(v_new_id is not null, 'part4: create_blog_post() must return a new id');
@@ -430,7 +430,7 @@ begin
   end;
   begin
     insert into public.blog_posts (title, slug, excerpt, content_markdown, category, created_by)
-    values ('spoof', 'spoof-slug', 'x', 'x', 'writing', 'e0000000-0000-0000-0000-000000000001');
+    values ('spoof', 'spoof-slug', 'x', 'x', 'zeja', 'e0000000-0000-0000-0000-000000000001');
     perform pg_temp.assert(false, 'part4: a raw authenticated INSERT must be rejected even with blog.manage');
   exception when insufficient_privilege then
     null;
@@ -442,7 +442,7 @@ begin
   set local role authenticated;
   perform public.update_blog_post(
     v_new_id, 'Editor Post', 'editor-post-renamed', 'An excerpt.', 'Body content.', null,
-    'authors-books', false, null, null
+    'kultura', false, null, null
   );
   reset role;
   perform pg_temp.assert(
@@ -480,7 +480,7 @@ begin
   begin
     perform public.update_blog_post(
       v_new_id, 'Editor Post', 'editor-post-renamed-again', 'An excerpt.', 'Body content.', null,
-      'authors-books', false, null, null
+      'kultura', false, null, null
     );
     perform pg_temp.assert(false, 'part4: changing slug on a published post must be rejected');
   exception when others then
@@ -493,7 +493,7 @@ begin
   -- must still succeed -- only an actual slug DIFFERENCE is rejected.
   perform public.update_blog_post(
     v_new_id, 'Editor Post Updated Title', 'editor-post-renamed', 'An excerpt.', 'Body content.', null,
-    'authors-books', false, null, null
+    'kultura', false, null, null
   );
   reset role;
   perform pg_temp.assert(
@@ -655,7 +655,7 @@ begin
     'part6: moderator (no blog.view) must see only the published post'
   );
   begin
-    perform public.create_blog_post('x', 'x-mod', 'x', 'x', null, 'writing', false, null, null);
+    perform public.create_blog_post('x', 'x-mod', 'x', 'x', null, 'zeja', false, null, null);
     perform pg_temp.assert(false, 'part6: moderator must not be able to create_blog_post()');
   exception when others then
     perform pg_temp.assert(sqlerrm = 'not authorized', format('part6: unexpected message: %s', sqlerrm));

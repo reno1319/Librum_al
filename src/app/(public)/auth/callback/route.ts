@@ -1,8 +1,19 @@
+import { scheduleAuthorWelcome } from "@/lib/author-welcome";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { setRecoverySession, clearRecoverySession } from "@/lib/recovery-session";
 import { resolveSafeInternalPath } from "@/lib/safe-redirect";
-import { CONFIRMATION_LINK_INVALID_MESSAGE, RECOVERY_LINK_INVALID_MESSAGE } from "@/lib/auth-page-messages";
+import {
+  CONFIRMATION_LINK_INVALID_MESSAGE,
+  GOOGLE_SIGN_IN_FAILED_MESSAGE,
+  RECOVERY_LINK_INVALID_MESSAGE,
+} from "@/lib/auth-page-messages";
+import {
+  GOOGLE_AUTHOR_INTENT_COOKIE,
+  GOOGLE_AUTHOR_PENDING_MESSAGE,
+  GOOGLE_CALLBACK_PARAM,
+  finishGoogleSignIn,
+} from "@/lib/google-sign-in";
 
 // LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
 // `redirectType` field to exchangeCodeForSession()'s resolved data when
@@ -99,6 +110,13 @@ export async function GET(request: Request) {
   // concatenation's accidental (and fragile) safety.
   const next = resolveSafeInternalPath(searchParams.get("next")) ?? "/";
 
+  // K7: an exchange started by "Vazhdo me Google" (signInWithGoogle()
+  // puts google=1 in redirectTo). Its own failure message, and the
+  // author hint cookie is always removed.
+  if (searchParams.get(GOOGLE_CALLBACK_PARAM) === "1") {
+    return googleCallback(request, origin, code, next);
+  }
+
   if (code) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
@@ -125,6 +143,9 @@ export async function GET(request: Request) {
         setRecoverySession(response.cookies);
       } else {
         clearRecoverySession(response.cookies);
+        // AUTHOR-EMAILS: an author's first confirmed sign-in gets the
+        // welcome email once (the claim inside makes later ones no-ops).
+        if (data.user) scheduleAuthorWelcome(data.user.id);
       }
       return response;
     }
@@ -138,13 +159,16 @@ export async function GET(request: Request) {
     const verifiedType = parseTokenHashType(type);
     if (verifiedType) {
       const supabase = await createClient();
-      const { error } = await supabase.auth.verifyOtp({ type: verifiedType, token_hash: tokenHash });
+      const { data, error } = await supabase.auth.verifyOtp({ type: verifiedType, token_hash: tokenHash });
       if (!error) {
         const response = NextResponse.redirect(`${origin}${next}`);
         if (verifiedType === "recovery") {
           setRecoverySession(response.cookies);
         } else {
           clearRecoverySession(response.cookies);
+          // AUTHOR-EMAILS: the sign-up confirmation link (Production's
+          // template uses this token_hash path).
+          if (data?.user) scheduleAuthorWelcome(data.user.id);
         }
         return response;
       }
@@ -153,4 +177,51 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.redirect(buildFailureRedirect(origin, type, next));
+}
+
+// K7: true when the request carries the author hint cookie set by
+// signInWithGoogle() (the sign-up page, "Autor" + 18+ ticked).
+function hasGoogleAuthorIntent(request: Request): boolean {
+  const header = request.headers.get("cookie") ?? "";
+  return header.split(";").some((part) => {
+    const [name, value] = part.trim().split("=");
+    return name === GOOGLE_AUTHOR_INTENT_COOKIE && value === "1";
+  });
+}
+
+async function googleCallback(request: Request, origin: string, code: string | null, next: string) {
+  const wantsAuthor = hasGoogleAuthorIntent(request);
+  let response: NextResponse;
+  const supabase = code ? await createClient() : null;
+  const exchange = supabase && code ? await supabase.auth.exchangeCodeForSession(code) : null;
+  const user = exchange && !exchange.error ? exchange.data.user : null;
+  if (!user) {
+    response = NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(GOOGLE_SIGN_IN_FAILED_MESSAGE)}`,
+    );
+  } else if (isRecoveryExchange(exchange?.data)) {
+    // K7 audit B1: a password-reset code with google=1 added must keep
+    // the recovery containment (LAUNCH-1 P1-11): mark the session and go
+    // to /reset-password, exactly as the ordinary path would. Nothing is
+    // finished for it.
+    response = NextResponse.redirect(`${origin}/reset-password`);
+    setRecoverySession(response.cookies);
+  } else {
+    const finish = await finishGoogleSignIn(user, wantsAuthor);
+    const target =
+      finish === "author"
+        ? "/dashboard"
+        : finish === "author_failed"
+          ? `/account?error=${encodeURIComponent(GOOGLE_AUTHOR_PENDING_MESSAGE)}`
+          : next;
+    response = NextResponse.redirect(`${origin}${target}`);
+    // A Google sign-in is never a recovery: like any ordinary exchange,
+    // it clears a stale recovery marker (LAUNCH-1 P1-11).
+    clearRecoverySession(response.cookies);
+    // AUTHOR-EMAILS: after finishGoogleSignIn() so a new Google author
+    // is already an author when the claim runs.
+    scheduleAuthorWelcome(user.id);
+  }
+  response.cookies.set(GOOGLE_AUTHOR_INTENT_COOKIE, "", { path: "/auth/callback", maxAge: 0 });
+  return response;
 }

@@ -55,6 +55,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Fotoja e ngarkuar nuk u lexua dot. Provoni përsëri.",
   "Fotoja nuk u ruajt dot. Provoni përsëri.",
   "Hiqeni këtë llogari nga stafi i Librum para se ta fshini.",
+  "Hyrja me Google nuk u krye. Provoni përsëri.",
   "Imazhi i ballinës duhet të jetë nën 5 MB",
   "Imazhi i ballinës nuk u ngarkua dot. Provoni përsëri",
   "Invalid decision.",
@@ -320,6 +321,18 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "The pre-order run starts at 08:00 Tirana time, so a file sent before then still counts as on time. Try again after 08:00.",
   "The pre-order run failed. Try again; running it twice changes nothing more.",
   "Only the owner can run the pre-order job.",
+  // K6 classic authors (admin).
+  "A place may have at most 120 characters.",
+  "Another classic author already uses this web address.",
+  "Couldn't save. Please try again.",
+  "Enter a name (at most 200 characters).",
+  "Enter the birth and death year (four digits).",
+  "Only authors who died more than 70 years ago can be added.",
+  "Some fields are not valid. Check them and save again.",
+  "The death year can't be before the birth year.",
+  "The web address may use only a-z, 0-9 and single hyphens.",
+  "This author or work no longer exists.",
+  "Write a bio (at most 3000 characters).",
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
@@ -387,6 +400,9 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Final file approved. The book stays a pre-order and comes out by itself on its day.",
   "Final file approved. Its day had passed, so the book is live now.",
   "Changes approved. Readers see the new version of the pre-order.",
+  // K6 classic authors (admin).
+  "Classic author link saved.",
+  "Classic author saved.",
 ]);
 
 type QueryValue = string | string[] | undefined;

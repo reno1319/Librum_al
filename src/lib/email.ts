@@ -4,6 +4,7 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { LIVE_SENT_BACK_FIX_LINE, QUESTIONS_LINE, SENT_BACK_FIX_LINE } from "@/lib/book-review-copy";
 import { formatTransactionMinorUnits, type TransactionCurrency } from "@/lib/transaction-money";
 import { formatDateOnly } from "@/lib/book-detail-dates";
+import { SUPPORT_EMAIL } from "@/lib/contact";
 
 const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 
@@ -19,7 +20,12 @@ const FROM = process.env.EMAIL_FROM ?? "Librum <onboarding@resend.dev>";
 // Resend's message either, since some of its messages repeat the address;
 // its error name and status code are enough to tell what went wrong.
 // Exported for the staff alerts (src/lib/staff-alerts.ts).
-export async function sendEmail(to: string, subject: string, html: string) {
+export async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  options: { replyTo?: string } = {},
+) {
   if (!process.env.RESEND_API_KEY) {
     console.warn(`RESEND_API_KEY not set — skipping email "${subject}"`);
     return;
@@ -27,7 +33,13 @@ export async function sendEmail(to: string, subject: string, html: string) {
 
   try {
     const resend = new Resend(process.env.RESEND_API_KEY);
-    const { error } = await resend.emails.send({ from: FROM, to, subject, html });
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to,
+      subject,
+      html,
+      ...(options.replyTo ? { replyTo: options.replyTo } : {}),
+    });
     if (error) {
       console.error("Failed to send email: Resend refused it", {
         subject,
@@ -450,16 +462,23 @@ export async function sendBookTakedownEmail(
 // (the admin Approve / Send back action) reads the author's address
 // through the admin auth API after the RPC has committed, never blocks
 // on this, and logs a failure. The Dashboard is what always works.
-export async function sendBookApprovedEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+// AUTHOR-EMAILS (Renato 11-17, mail12 a): his "ti" text with five
+// sharing tips; replies go to support (mail8 a).
+export async function sendBookApprovedEmail(
+  to: string,
+  { title, bookId, name }: { title: string; bookId: string; name: string | null },
+) {
   const origin = resolveSiteOrigin();
+  const bookUrl = `${origin}/libra/${encodeURIComponent(bookId)}`;
   await sendEmail(
     to,
-    `Libri juaj "${title}" u publikua në Librum`,
-    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> u publikua në Librum</h1>
-        <p>E kontrolluam dhe tani është në Librari.</p>
-        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+    `Urime! Libri yt "${title}" u publikua në Librum 📚`,
+    `${AUTHOR_EMAIL_OPEN}
+        <p>${greetingLine(name)}</p>
+        <p>Urime! Kemi kënaqësinë të të njoftojmë se libri yt digjital (e-book), "${escapeEmailHtml(title)}", është publikuar zyrtarisht dhe tashmë gjendet online në platformën Librum!</p>
+        ${bookLinkAndTipsHtml(bookUrl, origin)}
       </div>`,
+    { replyTo: SUPPORT_EMAIL },
   );
 }
 
@@ -581,16 +600,23 @@ export function preorderCancelledReaderEmail({ title }: { title: string }) {
 // BD16 P5: the author's emails from the daily job (plan §3.5). The
 // author's own cancel and a staff takedown already tell the author, so
 // these cover only what the job did by itself.
-export async function sendPreorderReleasedAuthorEmail(to: string, { title, bookId }: { title: string; bookId: string }) {
+// AUTHOR-EMAILS (mail13 a): release day of a pre-order gets the same
+// text as a normal publication; only the opening says it came out today.
+export async function sendPreorderReleasedAuthorEmail(
+  to: string,
+  { title, bookId, name }: { title: string; bookId: string; name: string | null },
+) {
   const origin = resolveSiteOrigin();
+  const bookUrl = `${origin}/libra/${encodeURIComponent(bookId)}`;
   await sendEmail(
     to,
-    `Libri juaj "${title}" doli sot në Librum`,
-    `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-        <h1 style="font-size: 20px;">Libri juaj <strong>${escapeEmailHtml(title)}</strong> doli sot</h1>
-        <p>Erdhi data e daljes, ndaj parapublikimi u bë libër në Librari. Lexuesit që prisnin po marrin njoftimin e tyre.</p>
-        <p><a href="${origin}/libra/${encodeURIComponent(bookId)}">Shikoni librin tuaj</a></p>
+    `Urime! Libri yt "${title}" doli sot në Librum 📚`,
+    `${AUTHOR_EMAIL_OPEN}
+        <p>${greetingLine(name)}</p>
+        <p>Urime! Sot është dita: libri yt digjital (e-book), "${escapeEmailHtml(title)}", doli zyrtarisht dhe tashmë gjendet online në platformën Librum! Lexuesit që e prisnin po marrin njoftimin e tyre tani.</p>
+        ${bookLinkAndTipsHtml(bookUrl, origin)}
       </div>`,
+    { replyTo: SUPPORT_EMAIL },
   );
 }
 
@@ -687,4 +713,72 @@ export async function sendAccountSuspensionLiftedEmail(to: string) {
         <p><a href="${origin}/login">Hyr</a></p>
       </div>`,
   );
+}
+
+// AUTHOR-EMAILS (Renato 11-17): shared parts of the author welcome and
+// the "book published" emails. Renato's own text in "ti" (mail5 b).
+const AUTHOR_EMAIL_OPEN = '<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">';
+const AUTHOR_EMAIL_LINK_STYLE = "color: #1a5fb4;";
+
+function emailLink(href: string, text: string): string {
+  return `<a href="${escapeEmailHtml(href)}" style="${AUTHOR_EMAIL_LINK_STYLE}">${text}</a>`;
+}
+
+// mail10 a: no usable name -> "Përshëndetje," on its own.
+function greetingLine(name: string | null): string {
+  return name ? `Përshëndetje ${escapeEmailHtml(name)},` : "Përshëndetje,";
+}
+
+function signOffHtml(origin: string): string {
+  return `<p>Me respekt,<br>Ekipi i Librum<br>${emailLink(origin, "librum.al")}</p>`;
+}
+
+function bookLinkAndTipsHtml(bookUrl: string, origin: string): string {
+  return `<p>Mund ta shohësh dhe ta ndash direkt përmes këtij linku:<br>${emailLink(bookUrl, escapeEmailHtml(bookUrl))}</p>
+        <p><strong>Çfarë mund të bësh tani që libri yt është online?</strong></p>
+        <ol>
+          <li><strong>Ndaje me miqtë dhe ndjekësit e tu:</strong> Publiko linkun në rrjetet e tua sociale (Facebook, Instagram, TikTok, LinkedIn) dhe dërgojua miqve apo familjarëve në WhatsApp e Viber. Lexuesit e parë janë mbështetësit e tu më të mirë.</li>
+          <li><strong>Publiko një fragment të shkurtër:</strong> Posto një citat tërheqës ose një pjesë të shkurtër nga libri (p.sh. faqen e parë ose një dialog interesant) së bashku me ballinën dhe linkun e blerjes/leximit në Librum.</li>
+          <li><strong>Kërko vlerësime dhe komente:</strong> Fto lexuesit e parë që të lënë mendimin dhe vlerësimin e tyre për librin në platformë. Vlerësimet pozitive i ndihmojnë lexuesit e rinj të vendosin më lehtë.</li>
+          <li><strong>Shtoje linkun në biografinë tënde (Bio):</strong> Vendose linkun e librit te profili yt në Instagram apo rrjete të tjera, në mënyrë që kushdo që viziton profilin tënd ta gjejë menjëherë.</li>
+          <li><strong>Njofto komunitetet dhe grupet letrare:</strong> Nëse je pjesë e grupeve për lexues dhe libra në rrjetet sociale, prezanto shkurt veprën tënde dhe ndaj linkun me ta.</li>
+        </ol>
+        <p>Faleminderit që zgjodhe Librum për t'ia sjellë veprën tënde lexuesve shqiptarë kudo në botë. Të urojmë shumë suksese dhe sa më shumë lexues!</p>
+        ${signOffHtml(origin)}`;
+}
+
+// A name can only reach a subject line as one plain line.
+function subjectName(name: string): string {
+  return name.replace(/[\r\n\t]+/g, " ").trim();
+}
+
+// AUTHOR-EMAILS (mail2 b, mail3 a): the one-time author welcome, sent by
+// src/lib/author-welcome.ts. Text: Renato 11-17 with mail6/7/9/11 applied.
+export function authorWelcomeEmail({ name }: { name: string | null }): { subject: string; html: string } {
+  const origin = resolveSiteOrigin();
+  const safeName = name ? subjectName(name) : "";
+  const subject = safeName
+    ? `Mirë se erdhe në Librum, ${safeName}! Udhëtimi yt letrar digjital nis këtu 📚`
+    : "Mirë se erdhe në Librum! Udhëtimi yt letrar digjital nis këtu 📚";
+  const html = `${AUTHOR_EMAIL_OPEN}
+        <p>${greetingLine(safeName || null)}</p>
+        <p>Mirë se erdhe zyrtarisht në Librum! Jemi jashtëzakonisht të lumtur dhe krenarë që u bëre pjesë e komunitetit tonë të autorëve shqiptarë.</p>
+        <p>Librum lindi si një hapësirë e dedikuar për t'i dhënë zë, liri dhe mundësi çdo krijuesi që dëshiron t'i sjellë librin e tij digjital (e-book) lexuesve në Shqipëri, Kosovë dhe diasporë, pa burokraci të panevojshme dhe me kontroll të plotë mbi veprën tënde.</p>
+        <p><strong>Çfarë mund të bësh tani?</strong></p>
+        <p>Për ta nisur këtë rrugëtim sa më mbarë, ja tre hapa të thjeshtë që mund të ndërmarrësh që sot:</p>
+        <ol>
+          <li>${emailLink(`${origin}/dashboard/pen-names`, "Plotëso Profilin Tënd")}: Shto një bio frymëzuese dhe foton tënde, që lexuesit të të njohin më mirë.</li>
+          <li>${emailLink(`${origin}/blog`, "Eksploro Blogun e Librum")}: Vizito hapësirën tonë të dedikuar për artizanatin e shkrimit, ku do të gjesh këshilla praktike, artikuj mbi tregun e librit dhe frymëzim për çdo fazë të të shkruarit.</li>
+          <li>${emailLink(`${origin}/dashboard/books/new`, "Gati për Botim?")} Nëse e ke librin gati në Word (.docx) ose ePub, mund të nisësh shumë shpejt procesin e ngarkimit të tij në platformë duke ndjekur hapat tanë udhëzues.</li>
+        </ol>
+        <p>Nëse ke ndonjë pyetje, paqartësi apo sugjerim, dera jonë është gjithmonë e hapur. Mund të na shkruash në çdo kohë direkt në këtë adresë e-maili ose të vizitosh ${emailLink(`${origin}/ndihme`, "faqen tonë të ndihmës")}.</p>
+        <p>Të urojmë mbarësi dhe frymëzim pafund në krijimtarinë tënde!</p>
+        ${signOffHtml(origin)}
+      </div>`;
+  return { subject, html };
+}
+
+export async function sendAuthorWelcomeEmail(to: string, { name }: { name: string | null }) {
+  const { subject, html } = authorWelcomeEmail({ name });
+  await sendEmail(to, subject, html, { replyTo: SUPPORT_EMAIL });
 }

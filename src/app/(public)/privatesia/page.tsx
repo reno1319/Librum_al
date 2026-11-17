@@ -245,6 +245,11 @@ export default function PrivacyPage() {
                   dërguara te support@librum.al.
                 </li>
                 <li>
+                  <strong>Google (hyrja me Google)</strong> — nëse zgjidhni
+                  &quot;Vazhdo me Google&quot;, Google na jep emrin, adresën e
+                  emailit dhe foton e profilit tuaj.
+                </li>
+                <li>
                   <strong>Google (Gmail)</strong> — kutia postare ku lexojmë
                   emailet tuaja dhe u përgjigjemi.
                 </li>

@@ -67,6 +67,7 @@ describe("VISITOR STATS: which pages count", () => {
       "/libra/abc/report",
       "/autore/abc",
       "/seri/abc",
+      "/klasiket/naim-frasheri",
       "/paketa/abc",
       "/blog",
       "/blog/a-post",

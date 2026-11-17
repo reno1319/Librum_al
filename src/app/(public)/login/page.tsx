@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { SUSPENDED_MESSAGE } from "@/lib/suspension-gate";
 import { buttonClasses } from "@/components/ui/button";
 import { formControlClasses } from "@/lib/form-styles";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -75,7 +76,9 @@ export default async function LoginPage({
         </button>
       </form>
 
-      <p className="mt-4 text-sm text-muted">
+      <GoogleSignIn from="login" next={next} />
+
+      <p className="mt-6 text-sm text-muted">
         <Link href="/forgot-password" className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2">
           Keni harruar fjalëkalimin?
         </Link>

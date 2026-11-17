@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BLOG_CATEGORY_PAGE_SIZE,
+  blogCategoryPageCount,
+  blogCategoryPageRange,
   isBlogLandingEmpty,
+  parseBlogPageParam,
   selectCategoryPosts,
   selectFeaturedPost,
   selectLatestPosts,
@@ -13,7 +17,7 @@ function post(overrides: Partial<BlogLandingCandidate> & { id: string }): BlogLa
     slug: overrides.id,
     title: `Post ${overrides.id}`,
     excerpt: "Excerpt",
-    category: "writing",
+    category: "zeja",
     cover_image_path: null,
     published_at: "2026-01-01T00:00:00Z",
     status: "published",
@@ -90,36 +94,36 @@ describe("selectLatestPosts", () => {
 describe("selectCategoryPosts", () => {
   it("returns only published posts from the given category, newest first", () => {
     const candidates = [
-      post({ id: "writing-old", category: "writing", published_at: "2026-01-01T00:00:00Z" }),
-      post({ id: "writing-new", category: "writing", published_at: "2026-06-01T00:00:00Z" }),
-      post({ id: "publishing-1", category: "publishing" }),
-      post({ id: "draft-writing", category: "writing", status: "draft" }),
+      post({ id: "writing-old", category: "zeja", published_at: "2026-01-01T00:00:00Z" }),
+      post({ id: "writing-new", category: "zeja", published_at: "2026-06-01T00:00:00Z" }),
+      post({ id: "publishing-1", category: "tregu" }),
+      post({ id: "draft-writing", category: "zeja", status: "draft" }),
     ];
-    const result = selectCategoryPosts(candidates, "writing");
+    const result = selectCategoryPosts(candidates, "zeja");
     expect(result.map((p) => p.id)).toEqual(["writing-new", "writing-old"]);
   });
 
   it("returns an empty array for a category with no published posts", () => {
-    expect(selectCategoryPosts([post({ id: "a", category: "writing" })], "publishing")).toEqual([]);
+    expect(selectCategoryPosts([post({ id: "a", category: "zeja" })], "tregu")).toEqual([]);
   });
 
   it("respects the limit", () => {
-    const candidates = Array.from({ length: 5 }, (_, i) => post({ id: `p${i}`, category: "publishing" }));
-    expect(selectCategoryPosts(candidates, "publishing", 2)).toHaveLength(2);
+    const candidates = Array.from({ length: 5 }, (_, i) => post({ id: `p${i}`, category: "tregu" }));
+    expect(selectCategoryPosts(candidates, "tregu", 2)).toHaveLength(2);
   });
 });
 
 describe("selectRelatedPosts", () => {
   it("returns latest 3 published posts in the same category, excluding the current post", () => {
     const candidates = [
-      post({ id: "current", category: "writing" }),
-      post({ id: "a", category: "writing", published_at: "2026-05-01T00:00:00Z" }),
-      post({ id: "b", category: "writing", published_at: "2026-04-01T00:00:00Z" }),
-      post({ id: "c", category: "writing", published_at: "2026-03-01T00:00:00Z" }),
-      post({ id: "d", category: "writing", published_at: "2026-02-01T00:00:00Z" }),
-      post({ id: "other-category", category: "publishing", published_at: "2026-06-01T00:00:00Z" }),
+      post({ id: "current", category: "zeja" }),
+      post({ id: "a", category: "zeja", published_at: "2026-05-01T00:00:00Z" }),
+      post({ id: "b", category: "zeja", published_at: "2026-04-01T00:00:00Z" }),
+      post({ id: "c", category: "zeja", published_at: "2026-03-01T00:00:00Z" }),
+      post({ id: "d", category: "zeja", published_at: "2026-02-01T00:00:00Z" }),
+      post({ id: "other-category", category: "tregu", published_at: "2026-06-01T00:00:00Z" }),
     ];
-    const result = selectRelatedPosts(candidates, "writing", "current");
+    const result = selectRelatedPosts(candidates, "zeja", "current");
     expect(result).toHaveLength(3);
     expect(result.map((p) => p.id)).toEqual(["a", "b", "c"]);
     expect(result.some((p) => p.id === "current")).toBe(false);
@@ -128,24 +132,24 @@ describe("selectRelatedPosts", () => {
 
   it("excludes draft posts from the same category", () => {
     const candidates = [
-      post({ id: "current", category: "writing" }),
-      post({ id: "draft", category: "writing", status: "draft" }),
+      post({ id: "current", category: "zeja" }),
+      post({ id: "draft", category: "zeja", status: "draft" }),
     ];
-    expect(selectRelatedPosts(candidates, "writing", "current")).toEqual([]);
+    expect(selectRelatedPosts(candidates, "zeja", "current")).toEqual([]);
   });
 
   it("returns fewer than 3 without error when fewer exist", () => {
     const candidates = [
-      post({ id: "current", category: "writing" }),
-      post({ id: "only-other", category: "writing" }),
+      post({ id: "current", category: "zeja" }),
+      post({ id: "only-other", category: "zeja" }),
     ];
-    const result = selectRelatedPosts(candidates, "writing", "current");
+    const result = selectRelatedPosts(candidates, "zeja", "current");
     expect(result).toHaveLength(1);
   });
 
   it("returns an empty array when no related posts exist", () => {
-    const candidates = [post({ id: "current", category: "writing" })];
-    expect(selectRelatedPosts(candidates, "writing", "current")).toEqual([]);
+    const candidates = [post({ id: "current", category: "zeja" })];
+    expect(selectRelatedPosts(candidates, "zeja", "current")).toEqual([]);
   });
 });
 
@@ -188,5 +192,28 @@ describe("isBlogLandingEmpty", () => {
         categorySections: [{ posts: [post({ id: "a" })] }, { posts: [] }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("category page paging", () => {
+  it("parseBlogPageParam: missing is 1, plain whole numbers pass, anything else is null", () => {
+    expect(parseBlogPageParam(undefined)).toBe(1);
+    expect(parseBlogPageParam("1")).toBe(1);
+    expect(parseBlogPageParam("12")).toBe(12);
+    for (const bad of ["0", "-1", "2.5", "abc", "01", "", "1e3", "999999", ["2"]]) {
+      expect(parseBlogPageParam(bad)).toBeNull();
+    }
+  });
+
+  it("blogCategoryPageRange: 12 per page, inclusive", () => {
+    expect(BLOG_CATEGORY_PAGE_SIZE).toBe(12);
+    expect(blogCategoryPageRange(1)).toEqual({ from: 0, to: 11 });
+    expect(blogCategoryPageRange(3)).toEqual({ from: 24, to: 35 });
+  });
+
+  it("blogCategoryPageCount: at least 1", () => {
+    expect(blogCategoryPageCount(0)).toBe(1);
+    expect(blogCategoryPageCount(12)).toBe(1);
+    expect(blogCategoryPageCount(13)).toBe(2);
   });
 });

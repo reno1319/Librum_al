@@ -19297,3 +19297,439 @@ $$;
 
 revoke all on function public.staff_set_reader_feedback_done(uuid, boolean) from public, anon, authenticated, service_role;
 grant execute on function public.staff_set_reader_feedback_done(uuid, boolean) to authenticated;
+
+-- ============================================================
+-- K6 free Albanian classics (migration
+-- 20261116180000_classic_authors.sql): classic_authors,
+-- pd_works.classic_author_id, the public_classic_authors view,
+-- staff_save_classic_author() and staff_set_pd_work_classic_author().
+-- Same statements as the migration; see its header for the rules.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. The table.
+-- ------------------------------------------------------------
+create table public.classic_authors (
+  id uuid primary key default gen_random_uuid(),
+  slug text not null
+    constraint classic_authors_slug_key unique
+    constraint classic_authors_slug_check
+    check (char_length(slug) between 1 and 80
+           and slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
+  name text not null
+    constraint classic_authors_name_check
+    check (char_length(name) between 1 and 200
+           and name = btrim(name)
+           and name !~ '[[:cntrl:]]'),
+  birth_year integer not null
+    constraint classic_authors_birth_year_check
+    check (birth_year between 1000 and 2100),
+  death_year integer not null
+    constraint classic_authors_death_year_check
+    check (death_year between 1000 and 2100),
+  birth_place text
+    constraint classic_authors_birth_place_check
+    check (birth_place is null
+           or (char_length(birth_place) between 1 and 120
+               and birth_place = btrim(birth_place)
+               and birth_place !~ '[[:cntrl:]]')),
+  death_place text
+    constraint classic_authors_death_place_check
+    check (death_place is null
+           or (char_length(death_place) between 1 and 120
+               and death_place = btrim(death_place)
+               and death_place !~ '[[:cntrl:]]')),
+  -- Paragraphs are separated by a line feed; no other control character.
+  bio text not null
+    constraint classic_authors_bio_check
+    check (char_length(bio) between 1 and 3000
+           and bio = btrim(bio)
+           and pg_catalog.replace(bio, chr(10), ' ') !~ '[[:cntrl:]]'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint classic_authors_years_check check (death_year >= birth_year)
+);
+
+alter table public.classic_authors enable row level security;
+
+revoke all on public.classic_authors from public, anon, authenticated, service_role;
+grant select on public.classic_authors to service_role;
+
+-- ------------------------------------------------------------
+-- 2. The link from a public-domain work.
+-- ------------------------------------------------------------
+alter table public.pd_works
+  add column classic_author_id uuid
+    constraint pd_works_classic_author_id_fkey
+    references public.classic_authors(id) on delete set null;
+
+create index pd_works_classic_author_id_idx on public.pd_works (classic_author_id);
+
+-- ------------------------------------------------------------
+-- 3. What readers see.
+-- ------------------------------------------------------------
+create view public.public_classic_authors
+  with (security_barrier)
+as
+  select ca.id, ca.slug, ca.name, ca.birth_year, ca.death_year,
+         ca.birth_place, ca.death_place, ca.bio, live.pd_work_ids
+  from public.classic_authors ca
+  join lateral (
+    select array_agg(w.id order by w.id) as pd_work_ids
+      from public.pd_works w
+      join public.books b on b.id = w.picked_book_id
+     where w.classic_author_id = ca.id
+       and public.book_is_publicly_listed(b)
+  ) live on live.pd_work_ids is not null;
+
+revoke all on public.public_classic_authors from public, anon, authenticated, service_role;
+grant select on public.public_classic_authors to anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 4. Add or edit a classic author.
+-- ------------------------------------------------------------
+create function public.staff_save_classic_author(
+  p_id uuid,
+  p_slug text,
+  p_name text,
+  p_birth_year integer,
+  p_death_year integer,
+  p_birth_place text,
+  p_death_place text,
+  p_bio text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+  if p_slug is null or p_name is null or p_birth_year is null
+     or p_death_year is null or p_bio is null then
+    raise exception 'invalid classic author' using errcode = 'LB515';
+  end if;
+  if p_death_year > extract(year from pg_catalog.now())::integer - 71 then
+    raise exception 'classic author died too recently' using errcode = 'LB516';
+  end if;
+
+  begin
+    if p_id is null then
+      insert into public.classic_authors
+        (slug, name, birth_year, death_year, birth_place, death_place, bio)
+      values
+        (p_slug, p_name, p_birth_year, p_death_year, p_birth_place, p_death_place, p_bio)
+      returning id into v_id;
+    else
+      update public.classic_authors
+         set slug = p_slug, name = p_name, birth_year = p_birth_year,
+             death_year = p_death_year, birth_place = p_birth_place,
+             death_place = p_death_place, bio = p_bio,
+             updated_at = pg_catalog.now()
+       where id = p_id
+      returning id into v_id;
+      if v_id is null then
+        raise exception 'no classic author found for this id' using errcode = 'LB517';
+      end if;
+    end if;
+  exception when check_violation then
+    raise exception 'invalid classic author' using errcode = 'LB515';
+  end;
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.staff_save_classic_author(uuid, text, text, integer, integer, text, text, text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.staff_save_classic_author(uuid, text, text, integer, integer, text, text, text)
+  to authenticated;
+
+-- ------------------------------------------------------------
+-- 5. Link a public-domain work to a classic author (null unlinks).
+-- ------------------------------------------------------------
+create function public.staff_set_pd_work_classic_author(p_work_id uuid, p_author_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.staff_has_permission('books.review') then
+    raise exception 'not authorized';
+  end if;
+  if p_work_id is null then
+    raise exception 'no public-domain work found for this id' using errcode = 'LB517';
+  end if;
+  if p_author_id is not null
+     and not exists (select 1 from public.classic_authors ca where ca.id = p_author_id) then
+    raise exception 'no classic author found for this id' using errcode = 'LB517';
+  end if;
+
+  update public.pd_works w
+     set classic_author_id = p_author_id
+   where w.id = p_work_id;
+  if not found then
+    raise exception 'no public-domain work found for this id' using errcode = 'LB517';
+  end if;
+end;
+$$;
+
+revoke all on function public.staff_set_pd_work_classic_author(uuid, uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.staff_set_pd_work_classic_author(uuid, uuid)
+  to authenticated;
+
+-- Blog categories (Renato 2026-11-17, design approved 17:25 UTC).
+-- Replaces the four V1 blog categories (migration 047) with six:
+--
+--   editorial   Editorial                   (new; "Nga Librum" tag)
+--   zeja        Zeja e Shkrimit             (was writing)
+--   tregu       Tregu i Librit & Botimet    (was publishing + librum-guides)
+--   kultura     Kulturë & Njohuri           (new)
+--   reflektime  Reflektime & Frymëzim       (new)
+--   vleresime   Vlerësimet & Rekomandimet   (new)
+--
+-- Stored values stay plain ASCII; the Albanian names live in
+-- src/lib/blog-categories.ts.
+--
+-- WHAT CHANGES
+--   1. blog_posts.category CHECK: the old list is dropped, existing rows
+--      are moved, then the new list is added (validated against every
+--      row).
+--   2. Rows move: "Pse ekziston Librum?" -> editorial (Renato
+--      2026-11-17, section 2a0); writing -> zeja; publishing and
+--      librum-guides -> tregu (blog5). authors-books rows would be
+--      placed post by post in section 2b: on 2026-11-17 neither staging
+--      (0 posts) nor Production (4 posts: 2 publishing, 2 librum-guides)
+--      has any, so 2b is empty and 2c guards it.
+--   3. create_blog_post() and update_blog_post(): same bodies as 047,
+--      only the allowed-category list changes. CREATE OR REPLACE keeps
+--      their owner and grants (047 + 20261024200000_grants_tightening).
+--
+-- Nothing else changes: no column, index, policy, grant or other
+-- function. updated_at is deliberately left alone on moved rows (a
+-- category move is not an edit by staff).
+--
+-- SAFETY: one transaction. Section 2c stops the whole migration, with
+-- nothing changed, if any row would still hold a value outside the new
+-- six -- e.g. an authors-books post not yet listed in 2b.
+--
+-- ROLLOUT ORDER: apply on staging BEFORE the application in the same
+-- patch is deployed there (the old app cannot save a post once this
+-- runs; the new app cannot show a post until it has run). Production
+-- gets it only at a release.
+--
+-- ROLLBACK: supabase/tests/102_blog_categories.rollback.sql (lossy:
+-- see its header).
+
+begin;
+
+-- 1. Drop the old list.
+alter table public.blog_posts drop constraint blog_posts_category_check;
+
+-- 2a0. One post by hand (Renato 2026-11-17): Production's draft
+-- "Pse ekziston Librum?" is Librum's own voice -> Editorial. Matched by
+-- its id AND slug AND old category, so it touches that one row or none
+-- (staging has no posts).
+update public.blog_posts set category = 'editorial'
+where id = '9a3e08e1-4f7a-4340-946c-6963f687c9b9'
+  and slug = 'pse-ekziston-librum'
+  and category = 'publishing';
+
+-- 2a. Fixed moves.
+update public.blog_posts set category = 'zeja'  where category = 'writing';
+update public.blog_posts set category = 'tregu' where category in ('publishing', 'librum-guides');
+
+-- 2b. authors-books, post by post: none exist on staging or Production
+-- (counted 2026-11-17 from /admin/blog). Should one appear before this
+-- runs, 2c stops the migration and a line must be added here.
+
+-- 2c. Stop if anything is left on an old value.
+do $$
+declare
+  v_left integer;
+begin
+  select pg_catalog.count(*) into v_left
+  from public.blog_posts
+  where category not in ('editorial', 'zeja', 'tregu', 'kultura', 'reflektime', 'vleresime');
+  if v_left > 0 then
+    raise exception 'blog categories: % post(s) still on an old category; list them in section 2b', v_left;
+  end if;
+end;
+$$;
+
+-- 3. The new list.
+alter table public.blog_posts
+  add constraint blog_posts_category_check
+  check (category in ('editorial', 'zeja', 'tregu', 'kultura', 'reflektime', 'vleresime'));
+
+-- 4. The two save functions, new list only.
+create or replace function public.create_blog_post(
+  p_title text,
+  p_slug text,
+  p_excerpt text,
+  p_content_markdown text,
+  p_cover_image_path text,
+  p_category text,
+  p_featured boolean,
+  p_seo_title text,
+  p_seo_description text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_new_id uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('blog.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  if p_category not in ('editorial', 'zeja', 'tregu', 'kultura', 'reflektime', 'vleresime') then
+    raise exception 'invalid category';
+  end if;
+
+  if p_title is null or pg_catalog.char_length(p_title) = 0 or pg_catalog.char_length(p_title) > 200 then
+    raise exception 'title must be between 1 and 200 characters';
+  end if;
+  if p_slug is null or pg_catalog.char_length(p_slug) = 0 or pg_catalog.char_length(p_slug) > 200 then
+    raise exception 'slug must be between 1 and 200 characters';
+  end if;
+  if p_excerpt is null or pg_catalog.char_length(p_excerpt) = 0 or pg_catalog.char_length(p_excerpt) > 500 then
+    raise exception 'excerpt must be between 1 and 500 characters';
+  end if;
+  if p_content_markdown is null or pg_catalog.char_length(p_content_markdown) = 0
+     or pg_catalog.char_length(p_content_markdown) > 50000 then
+    raise exception 'content_markdown must be between 1 and 50000 characters';
+  end if;
+  if p_seo_title is not null and pg_catalog.char_length(p_seo_title) > 70 then
+    raise exception 'seo_title must be 70 characters or fewer';
+  end if;
+  if p_seo_description is not null and pg_catalog.char_length(p_seo_description) > 160 then
+    raise exception 'seo_description must be 160 characters or fewer';
+  end if;
+
+  insert into public.blog_posts
+    (title, slug, excerpt, content_markdown, cover_image_path, category, featured,
+     seo_title, seo_description, status, created_by)
+  values
+    (p_title, p_slug, p_excerpt, p_content_markdown, p_cover_image_path, p_category, coalesce(p_featured, false),
+     nullif(trim(coalesce(p_seo_title, '')), ''), nullif(trim(coalesce(p_seo_description, '')), ''),
+     'draft', v_actor_id)
+  returning id into v_new_id;
+
+  return v_new_id;
+end;
+$$;
+
+create or replace function public.update_blog_post(
+  p_id uuid,
+  p_title text,
+  p_slug text,
+  p_excerpt text,
+  p_content_markdown text,
+  p_cover_image_path text,
+  p_category text,
+  p_featured boolean,
+  p_seo_title text,
+  p_seo_description text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_current_slug text;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('blog.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  select status, slug into v_status, v_current_slug
+  from public.blog_posts
+  where id = p_id;
+
+  if v_status is null then
+    raise exception 'no such blog post';
+  end if;
+
+  if v_status = 'published' and p_slug is distinct from v_current_slug then
+    raise exception 'slug is immutable once a post is published';
+  end if;
+
+  if p_category not in ('editorial', 'zeja', 'tregu', 'kultura', 'reflektime', 'vleresime') then
+    raise exception 'invalid category';
+  end if;
+
+  if p_title is null or pg_catalog.char_length(p_title) = 0 or pg_catalog.char_length(p_title) > 200 then
+    raise exception 'title must be between 1 and 200 characters';
+  end if;
+  if p_slug is null or pg_catalog.char_length(p_slug) = 0 or pg_catalog.char_length(p_slug) > 200 then
+    raise exception 'slug must be between 1 and 200 characters';
+  end if;
+  if p_excerpt is null or pg_catalog.char_length(p_excerpt) = 0 or pg_catalog.char_length(p_excerpt) > 500 then
+    raise exception 'excerpt must be between 1 and 500 characters';
+  end if;
+  if p_content_markdown is null or pg_catalog.char_length(p_content_markdown) = 0
+     or pg_catalog.char_length(p_content_markdown) > 50000 then
+    raise exception 'content_markdown must be between 1 and 50000 characters';
+  end if;
+  if p_seo_title is not null and pg_catalog.char_length(p_seo_title) > 70 then
+    raise exception 'seo_title must be 70 characters or fewer';
+  end if;
+  if p_seo_description is not null and pg_catalog.char_length(p_seo_description) > 160 then
+    raise exception 'seo_description must be 160 characters or fewer';
+  end if;
+
+  update public.blog_posts
+  set title = p_title,
+      slug = p_slug,
+      excerpt = p_excerpt,
+      content_markdown = p_content_markdown,
+      cover_image_path = p_cover_image_path,
+      category = p_category,
+      featured = coalesce(p_featured, false),
+      seo_title = nullif(trim(coalesce(p_seo_title, '')), ''),
+      seo_description = nullif(trim(coalesce(p_seo_description, '')), ''),
+      updated_at = pg_catalog.now()
+  where id = p_id;
+end;
+$$;
+
+commit;
+
+-- ============================================================
+-- AUTHOR-EMAILS welcome once (migration 20261117190000_author_welcome_sent_at)
+-- ============================================================
+
+alter table public.profiles
+  add column author_welcome_sent_at timestamptz;
+
+update public.profiles
+  set author_welcome_sent_at = now()
+  where role = 'author';

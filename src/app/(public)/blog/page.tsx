@@ -2,8 +2,15 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
-import { BLOG_CATEGORIES, BLOG_CATEGORY_LABELS_SQ } from "@/lib/blog-categories";
+import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import {
+  BLOG_CATEGORIES,
+  BLOG_CATEGORY_EMPTY_LINE,
+  blogCategoryHref,
+  getBlogCategory,
+} from "@/lib/blog-categories";
+import {
+  BLOG_CATEGORY_SECTION_LIMIT,
   BLOG_LANDING_CANDIDATE_LIMIT,
   isBlogLandingEmpty,
   selectCategoryPosts,
@@ -11,7 +18,12 @@ import {
   selectLatestPosts,
   type BlogLandingCandidate,
 } from "@/lib/blog-landing-logic";
-import { BlogArticleCard, type BlogArticleCardPost } from "@/components/blog-article-card";
+import {
+  BlogArticleCard,
+  BlogCategoryLabel,
+  type BlogArticleCardPost,
+} from "@/components/blog-article-card";
+import { BlogCategoryButtons, BlogCta } from "@/components/blog-category-nav";
 import { EmptyState } from "@/components/ui/empty-state";
 
 // LIBRUM 2.0 BLOG-1D: static metadata -- no per-request DB call is
@@ -26,7 +38,7 @@ export function generateMetadata(): Metadata {
   const origin = resolveSiteOrigin();
   const title = "Blog";
   const description =
-    "Këshilla, udhëzues dhe histori nga bota e vetëbotimit shqip: si ta shkruani, ta botoni dhe ta promovoni librin tuaj me Librum.";
+    "Shkrim, botim, kulturë dhe lexim: këshilla, ese dhe rekomandime për këdo që e do librin shqip.";
 
   return {
     title,
@@ -80,9 +92,28 @@ export default async function BlogIndexPage() {
 
   const featured = selectFeaturedPost(candidates);
   const latest = selectLatestPosts(candidates, featured?.id ?? null);
-  const categorySections = BLOG_CATEGORIES.map((c) => ({
-    category: c.value,
-    posts: selectCategoryPosts(candidates, c.value),
+  // Blog categories (2026-11-17, blog8): all six bands always show,
+  // Editorial first; an empty one keeps its band with one line. Each
+  // band has its own small query (audit r1 F1): filled from the 50
+  // newest posts above, a quiet category with only older posts would
+  // wrongly say "coming soon". Six bounded queries (3 rows each,
+  // summary columns only) run in parallel; selectCategoryPosts()
+  // re-checks status and category on whatever comes back.
+  const bandResults = await Promise.all(
+    BLOG_CATEGORIES.map((c) =>
+      supabase
+        .from("blog_posts")
+        .select("id, slug, title, excerpt, category, cover_image_path, published_at, status, featured")
+        .eq("status", "published")
+        .eq("category", c.value)
+        .order("published_at", { ascending: false })
+        .limit(BLOG_CATEGORY_SECTION_LIMIT)
+        .returns<BlogLandingRow[]>(),
+    ),
+  );
+  const categorySections = BLOG_CATEGORIES.map((c, i) => ({
+    category: c,
+    posts: selectCategoryPosts(bandResults[i].data ?? [], c.value),
   }));
 
   const empty = isBlogLandingEmpty({ featured, latest, categorySections });
@@ -91,82 +122,144 @@ export default async function BlogIndexPage() {
     return path ? supabase.storage.from("blog").getPublicUrl(path).data.publicUrl : null;
   }
 
+  const featuredInfo = featured ? getBlogCategory(featured.category) : undefined;
+  const featuredCover = featured ? coverUrlFor(featured.cover_image_path) : null;
+
   return (
-    <main className="page-container flex-1 pt-5 pb-12 sm:pt-10">
-      <div className="max-w-2xl">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted">Blog</p>
-        <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
-          Blogu i Librum
-        </h1>
-        <p className="mt-3 text-muted">
-          Këshilla, udhëzues dhe histori nga bota e vetëbotimit shqip: si ta shkruani, ta redaktoni,
-          ta botoni dhe ta promovoni librin tuaj.
-        </p>
+    <main className="flex-1 pt-5 sm:pt-10">
+      <div className="page-container">
+        <div className="max-w-2xl">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">Blog</p>
+          <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">
+            Blogu i Librum
+          </h1>
+          <p className="mt-3 text-muted">
+            Shkrim, botim, kulturë dhe lexim: këshilla, ese dhe rekomandime për këdo që e do librin
+            shqip.
+          </p>
+        </div>
+
+        <div className="mt-7">
+          <BlogCategoryButtons active={null} />
+        </div>
       </div>
 
       {empty ? (
-        <EmptyState
-          className="mt-10"
-          title="Artikujt e parë po vijnë së shpejti."
-          description="Ekipi ynë editorial po përgatit udhëzuesit e parë për autorët dhe lexuesit. Kthehuni së shpejti."
-        />
+        <div className="page-container pb-12">
+          <EmptyState
+            className="mt-10"
+            title="Artikujt e parë po vijnë së shpejti."
+            description="Ekipi ynë editorial po përgatit udhëzuesit e parë për autorët dhe lexuesit. Kthehuni së shpejti."
+          />
+        </div>
       ) : (
-        <div className="mt-10 flex flex-col gap-14">
-          {featured && (
-            <section>
-              <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
-                Artikulli kryesor
-              </h2>
-              <div className="mt-4 max-w-2xl">
-                <BlogArticleCard post={toCardPost(featured, coverUrlFor(featured.cover_image_path))} />
-              </div>
-            </section>
-          )}
-
-          {latest.length > 0 && (
-            <section>
-              <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Më të fundit</h2>
-              <div className="mt-4 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                {latest.map((post) => (
-                  <BlogArticleCard key={post.id} post={toCardPost(post, coverUrlFor(post.cover_image_path))} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {categorySections.map(
-            (section) =>
-              section.posts.length > 0 && (
-                <section key={section.category}>
-                  <div className="flex items-baseline justify-between">
-                    <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
-                      {BLOG_CATEGORY_LABELS_SQ[section.category]}
-                    </h2>
+        <>
+          <div className="page-container mt-9 flex flex-col gap-14 pb-14">
+            {featured && (
+              <section>
+                <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
+                  Artikulli kryesor
+                </h2>
+                <Link
+                  href={`/blog/${featured.slug}`}
+                  className="focus-ring group mt-4 grid grid-cols-1 items-center gap-4 rounded-card border-t-[3px] bg-violet-tint p-4 md:grid-cols-[7fr_5fr] md:gap-10 md:p-6"
+                  style={{ borderTopColor: featuredInfo?.ink ?? "var(--color-accent)" }}
+                >
+                  {featuredCover ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={featuredCover}
+                      alt=""
+                      decoding="async"
+                      className="aspect-[3/2] w-full rounded-card object-cover"
+                    />
+                  ) : (
+                    <div className="aspect-[3/2] w-full rounded-card bg-border" />
+                  )}
+                  <div>
+                    <BlogCategoryLabel category={featured.category} />
+                    <p className="mt-3 font-serif text-2xl leading-tight text-foreground group-hover:underline md:text-3xl">
+                      {featured.title}
+                    </p>
+                    <p className="mt-3 text-muted">{featured.excerpt}</p>
+                    {featured.published_at && (
+                      <p className="mt-2 text-xs text-muted">
+                        {formatTimestampAsDate(featured.published_at)}
+                      </p>
+                    )}
                   </div>
-                  <div className="mt-4 grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                    {section.posts.map((post) => (
+                </Link>
+              </section>
+            )}
+
+            {latest.length > 0 && (
+              <section>
+                <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Më të fundit</h2>
+                <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-8 lg:grid-cols-3">
+                  {latest.map((post) => (
+                    <BlogArticleCard
+                      key={post.id}
+                      compactOnMobile
+                      post={toCardPost(post, coverUrlFor(post.cover_image_path))}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+
+          {categorySections.map(({ category, posts }) => (
+            <section
+              key={category.value}
+              aria-labelledby={`blog-band-${category.value}`}
+              className="py-7 sm:pt-10 sm:pb-12"
+              style={{ backgroundColor: category.tint }}
+            >
+              <div className="page-container">
+                <div
+                  className="flex items-baseline justify-between gap-4 border-b pb-2.5"
+                  style={{ borderColor: `${category.ink}33` }}
+                >
+                  <div>
+                    <h2
+                      id={`blog-band-${category.value}`}
+                      className="font-serif text-2xl font-normal"
+                      style={{ color: category.ink }}
+                    >
+                      {category.label}
+                    </h2>
+                    <p className="mt-0.5 text-sm text-muted">{category.description}</p>
+                  </div>
+                  <Link
+                    href={blogCategoryHref(category)}
+                    className="focus-ring shrink-0 whitespace-nowrap rounded-sm text-sm underline underline-offset-[3px]"
+                    style={{ color: category.ink }}
+                  >
+                    Të gjitha <span aria-hidden="true">&rarr;</span>
+                    <span className="sr-only"> në {category.label}</span>
+                  </Link>
+                </div>
+                {posts.length > 0 ? (
+                  <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-8 lg:grid-cols-3">
+                    {posts.map((post) => (
                       <BlogArticleCard
                         key={post.id}
+                        compactOnMobile
                         post={toCardPost(post, coverUrlFor(post.cover_image_path))}
                       />
                     ))}
                   </div>
-                </section>
-              ),
-          )}
-        </div>
-      )}
+                ) : (
+                  <p className="mt-4 text-muted">{BLOG_CATEGORY_EMPTY_LINE}</p>
+                )}
+              </div>
+            </section>
+          ))}
 
-      {!empty && (
-        <div className="mt-14 border-t border-border pt-8 text-center">
-          <p className="text-muted">Gati ta botoni librin tuaj?</p>
-          <Link
-            href="/signup?role=author"
-            className="mt-3 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-          >
-            Publikoni librin tuaj
-          </Link>
-        </div>
+          <div className="page-container pb-12">
+            <BlogCta kind="publish" />
+          </div>
+        </>
       )}
     </main>
   );

@@ -124,9 +124,17 @@ export function BlogEditorForm({
         <select
           name="category"
           required
-          defaultValue={initialValues?.category ?? BLOG_CATEGORIES[0].value}
+          defaultValue={initialValues?.category ?? ""}
           className="rounded-control border border-control bg-surface px-3 py-2"
         >
+          {/* Blog categories audit F2 (Renato 2026-11-17, a): a new
+              article starts on this blank choice, so it can never go
+              out as Editorial ("Nga Librum") by accident. `required`
+              blocks the save in the browser; the server rejects ""
+              too (validateBlogPostFields -> isBlogCategory). */}
+          <option value="" disabled>
+            Zgjidhni kategorinë
+          </option>
           {BLOG_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}

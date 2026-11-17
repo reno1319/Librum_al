@@ -1,6 +1,7 @@
 import "server-only";
 import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { authorRecipient } from "@/lib/author-recipient";
 import {
   EMAIL_BATCH_SIZE,
   emailSendingConfigured,
@@ -366,7 +367,17 @@ export async function sendPreorderJobEmails(
     };
 
     for (const bookId of summary.releasedBookIds) {
-      await tellAuthor(bookId, (to, book) => sendPreorderReleasedAuthorEmail(to, { title: book.title, bookId }));
+      // AUTHOR-EMAILS (mail13 a): this one greets the author by name.
+      const book = books.get(bookId);
+      if (!book) continue;
+      try {
+        const recipient = await authorRecipient(admin, book.author_id);
+        if (recipient) {
+          await sendPreorderReleasedAuthorEmail(recipient.email, { title: book.title, bookId, name: recipient.name });
+        }
+      } catch (sendError) {
+        console.error("preorder emails: an author email failed", { bookId, error: sendError });
+      }
     }
     for (const { bookId, releaseDate } of summary.slipped) {
       await tellAuthor(bookId, (to, book) => sendPreorderDateMovedEmail(to, { title: book.title, releaseDate }));
