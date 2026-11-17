@@ -51,6 +51,7 @@ describe("signInWithGoogle", () => {
   it("login: Google with redirectTo = our callback, google=1 and a safe next; no author hint", async () => {
     expect(await run({ google_from: "login", next: "/library" })).toBe(GOOGLE_URL);
     expect(mockOAuth.mock.calls[0][0].provider).toBe("google");
+    expect(mockOAuth.mock.calls[0][0].options.queryParams).toEqual({ prompt: "select_account" });
     const to = redirectTo();
     expect(`${to.origin}${to.pathname}`).toBe("https://librum.example/auth/callback");
     const { GOOGLE_CALLBACK_PARAM } = await import("@/lib/google-sign-in");
@@ -65,8 +66,9 @@ describe("signInWithGoogle", () => {
     expect(redirectTo().searchParams.get("next")).toBeNull();
   });
 
-  it("signup as reader: no author hint, no next", async () => {
+  it("signup as reader: no author hint, no next, account chooser shown", async () => {
     expect(await run({ google_from: "signup", role: "reader", next: "/x" })).toBe(GOOGLE_URL);
+    expect(mockOAuth.mock.calls[0][0].options.queryParams).toEqual({ prompt: "select_account" });
     expect(redirectTo().searchParams.get("next")).toBeNull();
     expect(cookieStore.set).not.toHaveBeenCalled();
   });
