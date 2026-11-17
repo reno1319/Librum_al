@@ -12,6 +12,9 @@ vi.mock("@/lib/google-sign-in", async (orig) => ({
   finishGoogleSignIn: (u: unknown, a: boolean) => mockFinish(u, a),
 }));
 
+const mockScheduleAuthorWelcome = vi.fn();
+vi.mock("@/lib/author-welcome", () => ({ scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id) }));
+
 const { GET } = await import("./route");
 const BASE = "https://librum.example/auth/callback";
 const USER = { id: "u1", identities: [{ provider: "google" }] };
@@ -28,6 +31,7 @@ beforeEach(() => {
   mockExchange.mockReset().mockResolvedValue({ data: { user: USER, session: {} }, error: null });
   mockFinish.mockReset().mockResolvedValue("reader");
   mockCreateClient.mockClear();
+  mockScheduleAuthorWelcome.mockClear();
 });
 
 describe("GET /auth/callback?google=1", () => {
@@ -92,5 +96,25 @@ describe("GET /auth/callback?google=1", () => {
   it("without google=1 the old path is used: finish never runs", async () => {
     await get("code=c&next=/");
     expect(mockFinish).not.toHaveBeenCalled();
+  });
+});
+
+// AUTHOR-EMAILS: a finished Google sign-in asks for the author welcome
+// AFTER finishGoogleSignIn() (so a new author already is one); a
+// recovery or a failed exchange never does.
+describe("GET /auth/callback?google=1: author welcome", () => {
+  it("is scheduled after the sign-in is finished", async () => {
+    mockFinish.mockResolvedValue("author");
+    await get("google=1&code=c&next=/", "librum_google_author=1");
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith("u1");
+    expect(mockFinish.mock.invocationCallOrder[0]).toBeLessThan(mockScheduleAuthorWelcome.mock.invocationCallOrder[0]);
+  });
+
+  it("is not scheduled for a recovery or a failed exchange", async () => {
+    mockExchange.mockResolvedValue({ data: { user: USER, session: {}, redirectType: "recovery" }, error: null });
+    await get("google=1&code=c&next=/");
+    mockExchange.mockResolvedValue({ data: { user: null, session: null }, error: { message: "x" } });
+    await get("google=1&code=c&next=/");
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
   });
 });

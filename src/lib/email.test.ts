@@ -6,7 +6,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // sendBundlePurchaseEmails/sendSnapshotBundlePurchaseEmails never
 // reference author display_name at all and are out of scope.
 
-type SendArgs = { from: string; to: string; subject: string; html: string };
+type SendArgs = { from: string; to: string; subject: string; html: string; replyTo?: string };
 const sendMock = vi.fn((_args: SendArgs) => {
   void _args;
   return Promise.resolve({ data: { id: "email-1" }, error: null });
@@ -31,6 +31,8 @@ const {
   sendNewBookEmails,
   sendBookTakedownEmail,
   sendBookApprovedEmail,
+  sendAuthorWelcomeEmail,
+  authorWelcomeEmail,
   sendBookChangesApprovedEmail,
   sendBookSentBackEmail,
   sendAccountSuspendedEmail,
@@ -286,12 +288,17 @@ describe("BD16 P5 pre-order emails", () => {
   });
 
   it("author emails: released, date moved (new date shown), cancelled", async () => {
-    await sendPreorderReleasedAuthorEmail("a@example.com", { title: "T<", bookId: "book-1" });
+    await sendPreorderReleasedAuthorEmail("a@example.com", { title: "T<", bookId: "book-1", name: "Ana" });
     await sendPreorderDateMovedEmail("a@example.com", { title: "T", releaseDate: "2026-12-06" });
     await sendPreorderCancelledAuthorEmail("a@example.com", { title: "T" });
     const [released, moved, cancelled] = sendMock.mock.calls.map((c) => c[0]);
-    expect(released.subject).toBe('Libri juaj "T<" doli sot në Librum');
+    expect(released.subject).toBe('Urime! Libri yt "T<" doli sot në Librum 📚');
     expect(released.html).toContain("T&lt;");
+    expect(released.html).toContain("Përshëndetje Ana,");
+    expect(released.html).toContain("Sot është dita");
+    expect(released.html).toContain("Lexuesit që e prisnin po marrin njoftimin e tyre tani.");
+    expect(released.html).toContain("Njofto komunitetet dhe grupet letrare:");
+    expect(released.replyTo).toBe("support@librum.al");
     expect(moved.subject).toBe('Data e daljes së "T" u shty me 30 ditë');
     expect(moved.html).toContain("2026");
     expect(cancelled.subject).toBe('Parapublikimi i "T" u anulua');
@@ -417,14 +424,28 @@ describe("sendBookApprovedEmail / sendBookSentBackEmail", () => {
   beforeEach(() => sendMock.mockClear());
 
   it("tells the author the book is live, escaping the title", async () => {
-    await sendBookApprovedEmail("ana@example.com", { title: "<b>Kënga</b>", bookId: "22222222-2222-4222-8222-222222222222" });
+    await sendBookApprovedEmail("ana@example.com", {
+      title: "<b>Kënga</b>",
+      bookId: "22222222-2222-4222-8222-222222222222",
+      name: "Ana <Hoxha>",
+    });
     const args = sendMock.mock.calls[0][0];
     expect(args.to).toBe("ana@example.com");
-    expect(args.subject).toBe('Libri juaj "<b>Kënga</b>" u publikua në Librum');
-    expect(args.html).toContain("E kontrolluam dhe tani është në Librari.");
+    expect(args.subject).toBe('Urime! Libri yt "<b>Kënga</b>" u publikua në Librum 📚');
+    expect(args.replyTo).toBe("support@librum.al");
+    expect(args.html).toContain("Përshëndetje Ana &lt;Hoxha&gt;,");
+    expect(args.html).toContain("është publikuar zyrtarisht dhe tashmë gjendet online në platformën Librum!");
+    expect(args.html).toContain("Ndaje me miqtë dhe ndjekësit e tu:");
+    expect(args.html).toContain("Faleminderit që zgjodhe Librum");
+    expect(args.html).not.toContain("E kontrolluam dhe tani është në Librari.");
     expect(args.html).toContain("&lt;b&gt;Kënga&lt;/b&gt;");
     expect(args.html).not.toContain("<b>Kënga</b>");
     expect(args.html).toContain("/libra/22222222-2222-4222-8222-222222222222");
+  });
+
+  it("greets with no name when there is none", async () => {
+    await sendBookApprovedEmail("ana@example.com", { title: "T", bookId: "b1", name: null });
+    expect(sendMock.mock.calls[0][0].html).toContain("<p>Përshëndetje,</p>");
   });
 
   it("sends back with the reason label and the escaped message, linking to the dashboard", async () => {
@@ -595,5 +616,42 @@ describe("sendPurchaseEmails", () => {
     expect(author.subject).toBe("Bëtë një shitje në Librum");
     expect(author.html).toContain("<strong>A &lt;b&gt;&amp;&lt;/b&gt; B</strong> sapo u shit për 199 lekë.");
     expect(author.html).not.toContain("<b>&</b>");
+  });
+});
+
+// AUTHOR-EMAILS (Renato 11-17): the one-time author welcome.
+describe("author welcome email", () => {
+  beforeEach(() => sendMock.mockClear());
+
+  it("greets by name, uses Renato's text with mail6/7/9/11 applied, replies to support", async () => {
+    await sendAuthorWelcomeEmail("ana@example.com", { name: "Ana Hoxha" });
+    const args = sendMock.mock.calls[0][0];
+    expect(args.to).toBe("ana@example.com");
+    expect(args.replyTo).toBe("support@librum.al");
+    expect(args.subject).toBe("Mirë se erdhe në Librum, Ana Hoxha! Udhëtimi yt letrar digjital nis këtu 📚");
+    expect(args.html).toContain("<p>Përshëndetje Ana Hoxha,</p>");
+    expect(args.html).toContain("Mirë se erdhe zyrtarisht në Librum!");
+    expect(args.html).not.toContain("Mirëseverdhe");
+    expect(args.html).toContain("Nëse e ke librin gati në Word (.docx) ose ePub");
+    expect(args.html).toContain("krijimtarinë tënde!");
+    expect(args.html).not.toContain("krijimtarinë tuaj");
+    for (const path of ["/dashboard/pen-names", "/blog", "/dashboard/books/new", "/ndihme"]) {
+      expect(args.html).toMatch(new RegExp(`href="[^"]*${path.replace(/\//g, "\\/")}"`));
+    }
+    expect(args.html).toContain(">librum.al</a>");
+  });
+
+  it("with no name: a plain greeting and a subject without one", () => {
+    const { subject, html } = authorWelcomeEmail({ name: null });
+    expect(subject).toBe("Mirë se erdhe në Librum! Udhëtimi yt letrar digjital nis këtu 📚");
+    expect(html).toContain("<p>Përshëndetje,</p>");
+  });
+
+  it("escapes the name in the text and keeps the subject on one line", () => {
+    const { subject, html } = authorWelcomeEmail({ name: "<i>A</i>\r\nBcc: x" });
+    expect(subject).toBe("Mirë se erdhe në Librum, <i>A</i> Bcc: x! Udhëtimi yt letrar digjital nis këtu 📚");
+    expect(subject).not.toMatch(/[\r\n]/);
+    expect(html).toContain("&lt;i&gt;A&lt;/i&gt; Bcc: x");
+    expect(html).not.toContain("<i>A</i>");
   });
 });

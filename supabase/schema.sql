@@ -19722,3 +19722,14 @@ end;
 $$;
 
 commit;
+
+-- ============================================================
+-- AUTHOR-EMAILS welcome once (migration 20261117190000_author_welcome_sent_at)
+-- ============================================================
+
+alter table public.profiles
+  add column author_welcome_sent_at timestamptz;
+
+update public.profiles
+  set author_welcome_sent_at = now()
+  where role = 'author';

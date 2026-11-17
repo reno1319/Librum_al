@@ -1,5 +1,6 @@
 "use server";
 
+import { sendBookApprovedEmailToAuthor } from "@/lib/author-recipient";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
@@ -7,7 +8,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import {
-  sendBookApprovedEmail,
   sendBookChangesApprovedEmail,
   sendBookSentBackEmail,
   sendBookTakedownEmail,
@@ -375,7 +375,10 @@ export async function approveBookReviewAsStaff(formData: FormData) {
       }
       else if (outcome === "final_file" && releaseDate) await sendPreorderFileApprovedEmail(email, { ...mail, releaseDate });
       else if (outcome === "live_changes" || outcome === "preorder_changes") await sendBookChangesApprovedEmail(email, mail);
-      else if (outcome === "published" || outcome === "released") await sendBookApprovedEmail(email, mail);
+      // AUTHOR-EMAILS: the new text greets the author by name; the name
+      // is looked up and used inside the email helper, never here
+      // (PEN-NAMES-2: staff code doesn't read profiles).
+      else if (outcome === "published" || outcome === "released") await sendBookApprovedEmailToAuthor(admin, book.author_id, mail);
     }
   } catch (followUpError) {
     console.error("approveBookReviewAsStaff: the author email failed after a successful approval", {

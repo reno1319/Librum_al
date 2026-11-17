@@ -186,6 +186,10 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+// AUTHOR-EMAILS (mail3 a): the welcome itself is tested in author-welcome.test.ts.
+const mockScheduleAuthorWelcome = vi.fn();
+vi.mock("@/lib/author-welcome", () => ({ scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id) }));
+
 const { becomeAuthor } = await import("./become-author");
 
 function tickedForm(): FormData {
@@ -557,5 +561,22 @@ describe("becomeAuthor: SECURITY-9A Terms tick", () => {
       "terms_version",
     ]);
     expect(order).toEqual(["age", "role"]);
+  });
+});
+
+describe("becomeAuthor: AUTHOR-EMAILS welcome (mail3 a)", () => {
+  beforeEach(() => mockScheduleAuthorWelcome.mockClear());
+
+  it("a reader who becomes an author gets the welcome scheduled, after the role write", async () => {
+    const target = await run();
+    expect(target.startsWith("/dashboard?success=")).toBe(true);
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith(USER_ID);
+    expect(writes).toHaveLength(1);
+  });
+
+  it("an existing author is not scheduled", async () => {
+    profileResult = readerProfile({ role: "author" });
+    await run();
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
   });
 });

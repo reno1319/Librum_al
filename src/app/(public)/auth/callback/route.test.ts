@@ -18,6 +18,12 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: mockCreateClient,
 }));
 
+// AUTHOR-EMAILS: the welcome itself is tested in author-welcome.test.ts.
+const mockScheduleAuthorWelcome = vi.fn();
+vi.mock("@/lib/author-welcome", () => ({
+  scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id),
+}));
+
 const { GET, isRecoveryExchange, isRecoveryAttempt } = await import("./route");
 
 describe("isRecoveryExchange", () => {
@@ -559,5 +565,48 @@ describe("route.ts: no secret/token logging (AUTH-1E)", () => {
       "utf8",
     );
     expect(source).not.toMatch(/console\.\w+\(/);
+  });
+});
+
+// AUTHOR-EMAILS (Renato 11-17): every successful non-recovery sign-in
+// through this route asks for the author welcome (which goes once, to
+// authors only); a recovery or a failure never does.
+describe("GET /auth/callback: author welcome", () => {
+  beforeEach(() => {
+    mockExchangeCodeForSession.mockReset();
+    mockVerifyOtp.mockReset();
+    mockScheduleAuthorWelcome.mockClear();
+  });
+
+  it("an ordinary code exchange schedules the welcome for that user", async () => {
+    mockExchangeCodeForSession.mockResolvedValue({ data: { session: {}, user: { id: "u-1" }, redirectType: null }, error: null });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?code=abc&next=/"));
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith("u-1");
+  });
+
+  it("a recovery code exchange does not", async () => {
+    mockExchangeCodeForSession.mockResolvedValue({ data: { session: {}, user: { id: "u-1" }, redirectType: "recovery" }, error: null });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?code=abc&next=/reset-password"));
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
+  });
+
+  it("a failed code exchange does not", async () => {
+    mockExchangeCodeForSession.mockResolvedValue({ data: { session: null, user: null }, error: { message: "bad" } });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?code=abc&next=/"));
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
+  });
+
+  it("the sign-up confirmation link (token_hash, type=signup) schedules it", async () => {
+    mockVerifyOtp.mockResolvedValue({ data: { session: {}, user: { id: "u-2" } }, error: null });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?token_hash=th&type=signup&next=/"));
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith("u-2");
+  });
+
+  it("a recovery link or a failed verification does not", async () => {
+    mockVerifyOtp.mockResolvedValue({ data: { session: {}, user: { id: "u-2" } }, error: null });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?token_hash=th&type=recovery&next=/reset-password"));
+    mockVerifyOtp.mockResolvedValue({ data: { session: null, user: null }, error: { message: "expired" } });
+    await GET(new Request("https://librumal.vercel.app/auth/callback?token_hash=th&type=signup&next=/"));
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
   });
 });

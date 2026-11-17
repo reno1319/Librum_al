@@ -1,5 +1,6 @@
 "use server";
 
+import { scheduleAuthorWelcome } from "@/lib/author-welcome";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
@@ -196,6 +197,10 @@ export async function becomeAuthor(formData: FormData) {
     const extension: PenNamePhotoExtension = legacyPhoto.endsWith(".png") ? "png" : "jpg";
     await copyLegacyPhotoToDefaultPenName(user.id, legacyPhoto, extension);
   }
+
+  // AUTHOR-EMAILS (mail3 a): a reader who becomes an author gets the
+  // author welcome once.
+  scheduleAuthorWelcome(user.id);
 
   revalidatePath("/", "layout");
   redirect(

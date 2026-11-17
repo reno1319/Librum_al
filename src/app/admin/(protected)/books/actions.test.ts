@@ -361,6 +361,16 @@ describe("approveBookReviewAsStaff", () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it("AUTHOR-EMAILS: the published email greets the author by the account name", async () => {
+    adminRows.profiles = { data: { display_name: "Ana Hoxha" }, error: null };
+    await redirectOf(() => approveBookReviewAsStaff(approveForm()));
+    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", {
+      title: "Kënga e fundit",
+      bookId: BOOK_ID,
+      name: "Ana Hoxha",
+    });
+  });
+
   it("calls the RPC with the rendered files, the price it checked and the full checklist; then emails and cleans up", async () => {
     const target = await redirectOf(() => approveBookReviewAsStaff(approveForm()));
     expect(mockRpc).toHaveBeenCalledWith("admin_approve_book_review", {
@@ -371,7 +381,7 @@ describe("approveBookReviewAsStaff", () => {
       p_checklist: { cover_is_fine: true, file_opens: true, not_someone_elses_work: true, rights_declared: true },
     });
     expect(mockNewBookEmails).toHaveBeenCalledWith(expect.anything(), { bookId: BOOK_ID, authorId: AUTHOR_ID });
-    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID, name: null });
     // ALBANIAN-12: the author's own email goes before the follower batches.
     expect(mockApprovedEmail.mock.invocationCallOrder[0]).toBeLessThan(mockNewBookEmails.mock.invocationCallOrder[0]);
     expect(mockRetention).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
@@ -781,7 +791,7 @@ describe("BD16 P3: pre-order reviews", () => {
     adminRowQueue.books = [{ data: { status: "published", release_date: "2026-11-01" }, error: null }];
     const target = await redirectOf(() => approveBookReviewAsStaff(form({ reviewId: REVIEW_ID, bookId: BOOK_ID, filePath: FILE, coverPath: COVER, ...ALL_CHECKS })));
     expect(target).toContain(encodeURIComponent("Final file approved. Its day had passed, so the book is live now."));
-    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID });
+    expect(mockApprovedEmail).toHaveBeenCalledWith("ana@example.com", { title: "Kënga e fundit", bookId: BOOK_ID, name: null });
     await settleAfterTasks();
     expect(mockNewBookEmails).toHaveBeenCalledTimes(1);
     expect(mockPreorderFileEmail).not.toHaveBeenCalled();

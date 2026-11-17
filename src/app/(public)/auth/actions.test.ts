@@ -85,6 +85,10 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+// AUTHOR-EMAILS: the welcome itself is tested in author-welcome.test.ts.
+const mockScheduleAuthorWelcome = vi.fn();
+vi.mock("@/lib/author-welcome", () => ({ scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id) }));
+
 // A signUp() answer for an account really created (it has an identity).
 const CREATED_ID = "55555555-5555-4555-8555-555555555555";
 function createdUser(session: unknown) {
@@ -95,6 +99,7 @@ const { updatePassword, logout, login, signup, requestPasswordReset } = await im
 
 function resetMocks() {
   mockRedirect.mockClear();
+  mockScheduleAuthorWelcome.mockClear();
   mockUpdateUserById.mockClear();
   roleWrites = [];
   order = [];
@@ -1004,5 +1009,44 @@ describe("signup: SECURITY-9A server-side switch to author", () => {
     await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
     expect(lastRedirect()).toMatch(/^\/account\?error=/);
     expect(roleWrites).toHaveLength(0);
+  });
+});
+
+// AUTHOR-EMAILS: sign-up only asks for the author welcome when it ends
+// with a session AND the account really became an author; the usual
+// email-link path sends it from /auth/callback instead.
+describe("signup: author welcome", () => {
+  beforeEach(resetMocks);
+
+  function authorForm(role = "author") {
+    return formData({
+      email: "w@example.com",
+      password: "hunter2",
+      displayName: "W",
+      role,
+      accept_terms: "on",
+      confirm_author_age: "on",
+    });
+  }
+
+  it("immediate session + switched author: scheduled for the new account", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue(createdUser({}));
+    await expectRedirectTo(signup(authorForm()), "/dashboard");
+    expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith(CREATED_ID);
+  });
+
+  it("no session (email link needed), a reader, or a failed switch: not scheduled", async () => {
+    mockSupabaseAuth.signUp.mockResolvedValue(createdUser(null));
+    await expectRedirectTo(signup(authorForm()), "/signup/check-email");
+    mockSupabaseAuth.signUp.mockResolvedValue(createdUser({}));
+    await expectRedirectTo(signup(authorForm("reader")), "/");
+    roleWriteResult = { data: null, error: { code: "XX000" } };
+    try {
+      mockSupabaseAuth.signUp.mockResolvedValue(createdUser({}));
+      await signup(authorForm()).catch(() => undefined);
+    } finally {
+      roleWriteResult = null;
+    }
+    expect(mockScheduleAuthorWelcome).not.toHaveBeenCalled();
   });
 });
