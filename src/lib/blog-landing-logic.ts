@@ -1,4 +1,5 @@
-import type { BlogCategory } from "./types";
+import type { BlogCategory, BlogSection } from "./types";
+import { isPostInSection } from "./blog-categories";
 
 // LIBRUM 2.0 BLOG-1D: the featured/latest/category SELECTION rules,
 // extracted as pure functions so they're directly unit-testable
@@ -38,6 +39,7 @@ export type BlogLandingCandidate = {
   title: string;
   excerpt: string;
   category: BlogCategory;
+  is_editorial: boolean;
   cover_image_path: string | null;
   published_at: string | null;
   status: "draft" | "published";
@@ -79,15 +81,16 @@ export function selectLatestPosts(
     .slice(0, limit);
 }
 
-// One category's own section -- published only, that category only,
+// One section -- published only, that section only (Editorial = the
+// is_editorial tick; any other = the post's own category, bs1 a),
 // newest first, bounded.
 export function selectCategoryPosts(
   candidates: BlogLandingCandidate[],
-  category: BlogCategory,
+  section: BlogSection,
   limit: number = BLOG_CATEGORY_SECTION_LIMIT,
 ): BlogLandingCandidate[] {
   return candidates
-    .filter((p) => p.status === "published" && p.category === category)
+    .filter((p) => p.status === "published" && isPostInSection(p, section))
     .sort(byLatestPublishedFirst)
     .slice(0, limit);
 }

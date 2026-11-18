@@ -35,6 +35,7 @@ type AdminBlogPostRow = {
   slug: string;
   status: BlogPostStatus;
   category: string;
+  is_editorial: boolean;
   published_at: string | null;
   updated_at: string;
 };
@@ -65,7 +66,7 @@ export default async function AdminBlogListPage({
   // cover_image_path/featured aren't needed here at all.
   const { data: posts } = await supabase
     .from("blog_posts")
-    .select("id, title, slug, status, category, published_at, updated_at")
+    .select("id, title, slug, status, category, is_editorial, published_at, updated_at")
     .order("updated_at", { ascending: false })
     .returns<AdminBlogPostRow[]>();
 
@@ -144,6 +145,7 @@ export default async function AdminBlogListPage({
                 <p className="truncate font-medium">{post.title}</p>
                 <p className="text-xs text-muted">
                   {BLOG_CATEGORY_LABELS[post.category as keyof typeof BLOG_CATEGORY_LABELS] ?? post.category}
+                  {post.is_editorial && " · Editorial"}
                   {" · "}
                   Updated{" "}
                   {new Date(post.updated_at).toLocaleDateString(undefined, {

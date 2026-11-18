@@ -150,13 +150,15 @@ describe("TRUST PACK 5-6: Contact, footer and Privacy", () => {
   });
 });
 
-describe("TRUST PACK 6: share on WhatsApp", () => {
+describe("TRUST PACK 6 -> SOCIAL (soc2): share row", () => {
   const book = read("src/app/(public)/libra/[id]/page.tsx");
+  const row = read("src/components/share-buttons.tsx");
 
-  it("is a plain link built by bookWhatsappShareHref, with no WhatsApp script", () => {
-    expect(book).toContain("bookWhatsappShareHref(book, bookByline)");
-    expect(book).toMatch(/href=\{whatsappShareHref\}\s+target="_blank"\s+rel="noopener noreferrer"/);
-    expect(book).toContain("Ndajeni në WhatsApp");
+  it("is built from bookShareTarget, with plain links and no script from any network", () => {
+    expect(book).toContain("const shareTarget = bookShareTarget(book, bookByline);");
+    expect(book).toContain("<ShareButtons url={shareTarget.url} text={shareTarget.text}");
+    expect(row).toMatch(/href=\{network\.href\}\s+target="_blank"\s+rel="noopener noreferrer"/);
+    expect(row).not.toMatch(/<script|next\/script|connect\.facebook|platform\.(twitter|linkedin)/);
     // P2: the page's only scripts are its own schema.org data blocks
     // (B2: Book + BreadcrumbList).
     expect(book).not.toMatch(/<script(?! type="application\/ld\+json")|next\/script/);

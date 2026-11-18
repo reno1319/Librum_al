@@ -68,6 +68,8 @@ describe("BlogEditorForm category select", () => {
         slug: "t",
         excerpt: "e",
         category: "kultura",
+        isEditorial: false,
+        keywords: [],
         featured: false,
         seoTitle: "",
         seoDescription: "",
@@ -77,5 +79,39 @@ describe("BlogEditorForm category select", () => {
     );
     expect(select).toMatch(/<option value="kultura" selected="">/);
     expect(select).not.toMatch(/<option value="" disabled="" selected="">/);
+  });
+
+  it("bs1: only the five real categories are offered; Editorial is not an option", () => {
+    const select = selectHtml(renderForm());
+    for (const v of ["zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
+      expect(select).toContain(`<option value="${v}">`);
+    }
+    expect(select).not.toContain('value="editorial"');
+  });
+
+  it("bs1/bs4: the Editorial tick and the Keywords box, filled from an existing article", () => {
+    const html = renderForm({
+      title: "t",
+      slug: "t",
+      excerpt: "e",
+      category: "tregu",
+      isEditorial: true,
+      keywords: ["vetë-botim", "e-libër"],
+      featured: false,
+      seoTitle: "",
+      seoDescription: "",
+      contentMarkdown: "b",
+      coverImageUrl: null,
+    });
+    expect(html).toMatch(/<input type="checkbox"[^>]*name="isEditorial" checked=""\/>/);
+    expect(html).toMatch(/<input type="text"[^>]*name="keywords" value="vetë-botim, e-libër"\/>/);
+    expect(html).toContain("2/10");
+  });
+
+  it("a new article: tick off, keywords empty", () => {
+    const html = renderForm();
+    expect(html).toMatch(/<input type="checkbox"[^>]*name="isEditorial"\/>/);
+    expect(html).toMatch(/<input type="text"[^>]*name="keywords" value=""\/>/);
+    expect(html).toContain("0/10");
   });
 });

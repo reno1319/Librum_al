@@ -41,18 +41,24 @@ export function whatsappShareHref(message: string): string {
 }
 
 // A book with no byline to show is shared by its title alone.
-export function bookShareMessage(title: string, byline: string | null, url: string): string {
-  return byline ? `${title} nga ${byline} në Librum: ${url}` : `${title} në Librum: ${url}`;
+export function bookShareText(title: string, byline: string | null): string {
+  return byline ? `${title} nga ${byline} në Librum` : `${title} në Librum`;
 }
 
-// Published books only (a draft or unpublished page isn't worth
-// sharing). If the site's address can't be worked out, the button is
-// left out rather than sharing a broken link or breaking the page.
-export function bookWhatsappShareHref(
+export function bookShareMessage(title: string, byline: string | null, url: string): string {
+  return `${bookShareText(title, byline)}: ${url}`;
+}
+
+// What the share buttons share: the page's full address and a short
+// line about it. Published books only (a draft or unpublished page
+// isn't worth sharing). If the site's address can't be worked out, the
+// buttons are left out rather than sharing a broken link or breaking
+// the page.
+export function bookShareTarget(
   book: { id: string; title: string; status: string },
   byline: string | null,
   origin: () => string = resolveSiteOrigin,
-): string | null {
+): { url: string; text: string } | null {
   if (book.status !== "published") return null;
   let base: string;
   try {
@@ -60,5 +66,33 @@ export function bookWhatsappShareHref(
   } catch {
     return null;
   }
-  return whatsappShareHref(bookShareMessage(book.title, byline, `${base}/libra/${book.id}`));
+  return { url: `${base}/libra/${book.id}`, text: bookShareText(book.title, byline) };
+}
+
+export function bookWhatsappShareHref(
+  book: { id: string; title: string; status: string },
+  byline: string | null,
+  origin: () => string = resolveSiteOrigin,
+): string | null {
+  const target = bookShareTarget(book, byline, origin);
+  return target ? whatsappShareHref(`${target.text}: ${target.url}`) : null;
+}
+
+// SOCIAL (Renato soc2, 2026-11-18): the share buttons on book pages and
+// blog posts. Plain links that open each site's own share page with the
+// address filled in -- nothing from Facebook, X, LinkedIn or WhatsApp
+// loads on Librum.
+export function shareHrefs(target: { url: string; text: string }): {
+  whatsapp: string;
+  facebook: string;
+  x: string;
+  linkedin: string;
+} {
+  const url = encodeURIComponent(target.url);
+  return {
+    whatsapp: whatsappShareHref(`${target.text}: ${target.url}`),
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
+    x: `https://x.com/intent/post?text=${encodeURIComponent(target.text)}&url=${url}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
+  };
 }

@@ -1,4 +1,4 @@
-import type { BlogCategory } from "./types";
+import type { BlogCategory, BlogSection } from "./types";
 
 // Blog categories (Renato 2026-11-17): the single source of truth for
 // the six fixed categories. The admin <select>, the public /blog
@@ -20,8 +20,14 @@ import type { BlogCategory } from "./types";
 // cta        the bottom button on its posts and category page (blog6):
 //            "publish" for the two author categories, "browse" for the
 //            reader ones.
+//
+// Editorial (bs1, Renato 2026-11-17): the first entry is a SECTION, not
+// a category. Posts are filed under one of the other five and Editorial
+// is a tick on top (blog_posts.is_editorial). BLOG_CATEGORIES is the six
+// sections (buttons, /blog bands, category pages); BLOG_POST_CATEGORIES
+// is the five a post can be filed under (admin select, validation).
 export type BlogCategoryInfo = {
-  value: BlogCategory;
+  value: BlogSection;
   label: string;
   shortLabel: string;
   urlSlug: string;
@@ -94,12 +100,26 @@ export const BLOG_CATEGORIES: readonly BlogCategoryInfo[] = [
   },
 ];
 
-export const BLOG_CATEGORY_LABELS: Record<BlogCategory, string> = Object.fromEntries(
-  BLOG_CATEGORIES.map((c) => [c.value, c.label]),
-) as Record<BlogCategory, string>;
+export const BLOG_POST_CATEGORIES: readonly (BlogCategoryInfo & { value: BlogCategory })[] =
+  BLOG_CATEGORIES.filter((c): c is BlogCategoryInfo & { value: BlogCategory } => c.value !== "editorial");
 
+export const BLOG_CATEGORY_LABELS: Record<BlogSection, string> = Object.fromEntries(
+  BLOG_CATEGORIES.map((c) => [c.value, c.label]),
+) as Record<BlogSection, string>;
+
+// True only for the five post categories: "editorial" is a tick, never
+// a stored category.
 export function isBlogCategory(value: string): value is BlogCategory {
-  return BLOG_CATEGORIES.some((c) => c.value === value);
+  return BLOG_POST_CATEGORIES.some((c) => c.value === value);
+}
+
+// Does a post belong in this section? Editorial = the tick; every other
+// section = the post's own category (bs1 a: an Editorial post is in both).
+export function isPostInSection(
+  post: { category: string; is_editorial: boolean },
+  section: BlogSection,
+): boolean {
+  return section === "editorial" ? post.is_editorial === true : post.category === section;
 }
 
 // Undefined for a value outside the six (e.g. a row not yet moved by

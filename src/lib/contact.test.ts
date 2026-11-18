@@ -3,8 +3,10 @@ import {
   REPLY_PROMISE,
   SUPPORT_EMAIL,
   WHATSAPP_NUMBER,
+  bookShareTarget,
   bookWhatsappShareHref,
   isWhatsappContactLive,
+  shareHrefs,
   whatsappChatHref,
   whatsappDigits,
   whatsappShareHref,
@@ -63,6 +65,39 @@ describe("TRUST PACK: WhatsApp share link", () => {
         throw new Error("NEXT_PUBLIC_SITE_URL is not configured");
       }),
     ).toBeNull();
+  });
+});
+
+describe("SOCIAL (soc2): share links", () => {
+  const book = { id: "b1", title: "Kronikë & Gur?", status: "published" };
+
+  it("bookShareTarget gives the page address and the short line, or null like the WhatsApp link", () => {
+    expect(bookShareTarget(book, "Ana", () => "https://librum.al")).toEqual({
+      url: "https://librum.al/libra/b1",
+      text: "Kronikë & Gur? nga Ana në Librum",
+    });
+    expect(bookShareTarget({ ...book, status: "draft" }, "Ana", () => "https://librum.al")).toBeNull();
+    expect(
+      bookShareTarget(book, "Ana", () => {
+        throw new Error("NEXT_PUBLIC_SITE_URL is not configured");
+      }),
+    ).toBeNull();
+  });
+
+  it("builds plain share-page links for WhatsApp, Facebook, X and LinkedIn, all encoded", () => {
+    const hrefs = shareHrefs({ url: "https://librum.al/libra/b1?x=1&y=2", text: "Kronikë & Gur?" });
+    const url = encodeURIComponent("https://librum.al/libra/b1?x=1&y=2");
+    expect(hrefs).toEqual({
+      whatsapp: `https://wa.me/?text=${encodeURIComponent("Kronikë & Gur?: https://librum.al/libra/b1?x=1&y=2")}`,
+      facebook: `https://www.facebook.com/sharer/sharer.php?u=${url}`,
+      x: `https://x.com/intent/post?text=${encodeURIComponent("Kronikë & Gur?")}&url=${url}`,
+      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
+    });
+  });
+
+  it("the WhatsApp message is unchanged from TRUST PACK", () => {
+    const target = bookShareTarget(book, "Ana", () => "https://librum.al")!;
+    expect(shareHrefs(target).whatsapp).toBe(bookWhatsappShareHref(book, "Ana", () => "https://librum.al"));
   });
 });
 

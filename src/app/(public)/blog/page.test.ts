@@ -54,11 +54,11 @@ let bandRows: Record<string, unknown[]> = {};
 const mockReturns = vi.fn();
 const mockLimit = vi.fn((_n: number) => undefined as unknown);
 const mockOrder = vi.fn((_column: string, _opts: { ascending: boolean }) => undefined as unknown);
-const mockEq = vi.fn((_column: string, _value: string) => undefined as unknown);
+const mockEq = vi.fn((_column: string, _value: string | boolean) => undefined as unknown);
 function makeChain() {
-  const filters: Record<string, string> = {};
+  const filters: Record<string, string | boolean> = {};
   const chain = {
-    eq: (column: string, value: string) => {
+    eq: (column: string, value: string | boolean) => {
       mockEq(column, value);
       filters[column] = value;
       return chain;
@@ -71,10 +71,14 @@ function makeChain() {
       mockLimit(n);
       return chain;
     },
+    // bs1: the Editorial band filters on is_editorial, the others on
+    // category.
     returns: () =>
-      filters.category === undefined
+      filters.category === undefined && filters.is_editorial === undefined
         ? mockReturns()
-        : Promise.resolve({ data: bandRows[filters.category] ?? [] }),
+        : Promise.resolve({
+            data: bandRows[filters.is_editorial === true ? "editorial" : String(filters.category)] ?? [],
+          }),
   };
   return chain;
 }
@@ -95,6 +99,7 @@ function candidate(overrides: Partial<{
   title: string;
   excerpt: string;
   category: string;
+  is_editorial: boolean;
   cover_image_path: string | null;
   published_at: string;
   status: string;
@@ -105,6 +110,7 @@ function candidate(overrides: Partial<{
     title: `Post ${overrides.id}`,
     excerpt: "Excerpt",
     category: "zeja",
+    is_editorial: false,
     cover_image_path: null,
     published_at: "2026-01-01T00:00:00Z",
     status: "published",
@@ -244,12 +250,14 @@ describe("BlogIndexPage", () => {
     expect(emptyLines).toBe(5);
   });
 
-  it("each band has its own query: published, that category, newest first, 3 rows", async () => {
+  it("each band has its own query: published, that category (Editorial: the tick), newest first, 3 rows", async () => {
     mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
     await BlogIndexPage();
-    for (const value of ["editorial", "zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
+    for (const value of ["zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
       expect(mockEq).toHaveBeenCalledWith("category", value);
     }
+    expect(mockEq).not.toHaveBeenCalledWith("category", "editorial");
+    expect(mockEq).toHaveBeenCalledWith("is_editorial", true);
     expect(mockLimit).toHaveBeenCalledWith(3);
     expect(mockLimit.mock.calls.filter((c) => c[0] === 3)).toHaveLength(6);
   });
@@ -286,10 +294,31 @@ describe("BlogIndexPage", () => {
     expect(hrefs).not.toContain("/blog/draft-kultura");
   });
 
-  it("an Editorial post's card carries the yellow Nga Librum tag instead of a category name", async () => {
-    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "ed", category: "editorial" })] });
+  it("an Editorial post's card carries the yellow Nga Librum tag AND its category name (bs1)", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "ed", category: "tregu", is_editorial: true })] });
     const text = collectText(await BlogIndexPage());
     expect(text).toContain("Nga Librum");
+    expect(text).toContain("Tregu i Librit & Botimet");
+  });
+
+  it("bs1 a: an Editorial post shows in the Editorial band and in its own category's band", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
+    const ed = candidate({ id: "ed-tregu", category: "tregu", is_editorial: true });
+    bandRows = { editorial: [ed], tregu: [ed] };
+    const hrefs = collectLinkHrefs(await BlogIndexPage());
+    expect(hrefs.filter((h) => h === "/blog/ed-tregu")).toHaveLength(2);
+  });
+
+  it("an unticked post sent back for the Editorial band is never shown there", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "one" })] });
+    bandRows = { editorial: [candidate({ id: "not-ticked", category: "tregu", is_editorial: false })] };
+    expect(collectLinkHrefs(await BlogIndexPage())).not.toContain("/blog/not-ticked");
+  });
+
+  it("bs6: the blog search box (GET /blog/kerko, field q) sits above the category buttons", () => {
+    const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
+    expect(source.indexOf("<BlogSearchBox />")).toBeGreaterThan(-1);
+    expect(source.indexOf("<BlogSearchBox />")).toBeLessThan(source.indexOf("<BlogCategoryButtons"));
   });
 
   it("only ever uses the public/request-scoped Supabase client -- no admin/service-role client is imported", () => {

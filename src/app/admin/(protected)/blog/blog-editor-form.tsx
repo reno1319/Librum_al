@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { BLOG_CATEGORIES } from "@/lib/blog-categories";
+import { BLOG_POST_CATEGORIES } from "@/lib/blog-categories";
 import type { BlogCategory } from "@/lib/types";
 import { resolveAutoSlug } from "@/lib/blog-slug";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
@@ -12,6 +12,9 @@ import { Button } from "@/components/ui/button";
 import {
   CONTENT_MARKDOWN_MAX_LENGTH,
   EXCERPT_MAX_LENGTH,
+  KEYWORD_MAX_LENGTH,
+  KEYWORDS_MAX_COUNT,
+  parseKeywords,
   SEO_DESCRIPTION_MAX_LENGTH,
   SEO_TITLE_MAX_LENGTH,
   SLUG_MAX_LENGTH,
@@ -24,6 +27,8 @@ export type BlogEditorInitialValues = {
   excerpt: string;
   category: BlogCategory;
   featured: boolean;
+  isEditorial: boolean;
+  keywords: string[];
   seoTitle: string;
   seoDescription: string;
   contentMarkdown: string;
@@ -64,6 +69,8 @@ export function BlogEditorForm({
   const [slugTouched, setSlugTouched] = useState(!!initialValues?.slug);
   const [excerpt, setExcerpt] = useState(initialValues?.excerpt ?? "");
   const [contentMarkdown, setContentMarkdown] = useState(initialValues?.contentMarkdown ?? "");
+  const [keywords, setKeywords] = useState((initialValues?.keywords ?? []).join(", "));
+  const keywordCount = parseKeywords(keywords).length;
   const [seoTitle, setSeoTitle] = useState(initialValues?.seoTitle ?? "");
   const [seoDescription, setSeoDescription] = useState(initialValues?.seoDescription ?? "");
   const [showPreview, setShowPreview] = useState(false);
@@ -127,20 +134,54 @@ export function BlogEditorForm({
           defaultValue={initialValues?.category ?? ""}
           className="rounded-control border border-control bg-surface px-3 py-2"
         >
-          {/* Blog categories audit F2 (Renato 2026-11-17, a): a new
-              article starts on this blank choice, so it can never go
-              out as Editorial ("Nga Librum") by accident. `required`
-              blocks the save in the browser; the server rejects ""
-              too (validateBlogPostFields -> isBlogCategory). */}
+          {/* A new article starts on this blank choice (audit F2);
+              `required` blocks the save in the browser and the server
+              rejects "" too (validateBlogPostFields -> isBlogCategory).
+              bs1: only the five real categories; Editorial is the
+              tick below, on top of one of them. */}
           <option value="" disabled>
             Zgjidhni kategorinë
           </option>
-          {BLOG_CATEGORIES.map((c) => (
+          {BLOG_POST_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          name="isEditorial"
+          defaultChecked={initialValues?.isEditorial ?? false}
+          className="mt-1"
+        />
+        <span>
+          Editorial
+          <span className="block text-muted">
+            Adds the yellow &ldquo;Nga Librum&rdquo; tag and byline. The article shows in the
+            Editorial section and in its category above.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm">
+        Keywords
+        <input
+          type="text"
+          name="keywords"
+          value={keywords}
+          onChange={(e) => setKeywords(e.target.value)}
+          placeholder="vetë-botim, e-libër, çmimi"
+          className="rounded-control border border-control bg-surface px-3 py-2"
+        />
+        <span className="text-sm text-muted">
+          Separate with commas. Hidden from readers; only the blog search uses them. At least 1
+          to publish, up to {KEYWORDS_MAX_COUNT}, each up to {KEYWORD_MAX_LENGTH} characters.
+          {" · "}
+          {keywordCount}/{KEYWORDS_MAX_COUNT}
+        </span>
       </label>
 
       <label className="flex flex-col gap-1 text-sm">

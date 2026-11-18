@@ -24,6 +24,8 @@ type EditableBlogPost = {
   category: BlogCategory;
   status: BlogPostStatus;
   featured: boolean;
+  is_editorial: boolean;
+  keywords: string[];
   seo_title: string | null;
   seo_description: string | null;
 };
@@ -54,7 +56,7 @@ export default async function EditBlogPostPage({
   const { data: post } = await supabase
     .from("blog_posts")
     .select(
-      "id, title, slug, excerpt, content_markdown, cover_image_path, category, status, featured, seo_title, seo_description",
+      "id, title, slug, excerpt, content_markdown, cover_image_path, category, is_editorial, keywords, status, featured, seo_title, seo_description",
     )
     .eq("id", id)
     .maybeSingle<EditableBlogPost>();
@@ -108,6 +110,8 @@ export default async function EditBlogPostPage({
           excerpt: post.excerpt,
           category: post.category,
           featured: post.featured,
+          isEditorial: post.is_editorial,
+          keywords: post.keywords ?? [],
           seoTitle: post.seo_title ?? "",
           seoDescription: post.seo_description ?? "",
           contentMarkdown: post.content_markdown,
