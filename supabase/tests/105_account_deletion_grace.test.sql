@@ -13,8 +13,9 @@
 --   LB523); drafts exactly the live books, bundles and pre-orders (a
 --   pause), clears the Librum's choice pick, records them, saves the
 --   feedback without the account, signs out every session, 30 days;
--- * a pending account is hidden: public_pen_names, public_series,
---   public_reviews; nothing of it can be published again (LB518);
+-- * a pending account is hidden: public_pen_names, public_series;
+--   its reviews stay in public_reviews (20261118190000); nothing of it
+--   can be published again (LB518);
 -- * my_account_status() and my_account_deletion_date() for the caller;
 -- * restore_my_account brings back exactly what went offline;
 -- * account_deletion_claim: only a due row, service role only; Restore
@@ -358,8 +359,11 @@ select pg_temp.assert(pg_temp.run_as('authenticated', 'e1050000-0000-4000-8000-0
 select pg_temp.assert((select count(*) = 1 from public.account_deletion_feedback),
   'part5: no feedback row when nothing was given');
 select pg_temp.assert(pg_temp.value_as('anon', null,
-  $q$select count(*)::text from public.public_reviews where body like 'P105 R%'$q$) = '0',
-  'part5: R''s review is hidden while pending');
+  $q$select count(*)::text from public.public_reviews where body like 'P105 R%'$q$) = '1',
+  'part5: R''s review stays public while pending');
+select pg_temp.assert(pg_temp.value_as('anon', null,
+  $q$select reviewer_name from public.public_reviews where body like 'P105 R%'$q$) = 'Lexuesi R',
+  'part5: with the review name while pending');
 
 select pg_temp.assert(pg_temp.run_as('authenticated', 'e1050000-0000-4000-8000-0000000000aa',
   $q$select public.account_deletion_claim('e1050000-0000-4000-8000-0000000000aa')$q$) like '42501:%',

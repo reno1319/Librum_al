@@ -190,8 +190,8 @@ export default async function AccountPage({
         </p>
         <p className="mt-2 text-sm text-foreground/90">
           {isAuthor
-            ? "Gjatë këtyre 30 ditëve librat tuaj, emrat e autorit dhe vlerësimet tuaja nuk shihen në Librum. Pas 30 ditësh fshihen përgjithmonë librat dhe skedarët e tyre."
-            : "Gjatë këtyre 30 ditëve vlerësimet tuaja nuk shihen në Librum. Pas 30 ditësh humbni aksesin te biblioteka juaj, përfshirë librat e blerë."}
+            ? "Gjatë këtyre 30 ditëve librat tuaj dhe emrat e autorit nuk shihen në Librum. Pas 30 ditësh fshihen përgjithmonë librat dhe skedarët e tyre."
+            : "Pas 30 ditësh humbni aksesin te biblioteka juaj, përfshirë librat e blerë."}
         </p>
         <p className="mt-2 text-sm text-foreground/90">
           Vlerësimet që keni shkruar mbeten në Librum me emrin tuaj të vlerësimeve
