@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
+import { IconInstagram } from "@/components/icons";
 
-// Instagram/Facebook icon links were removed from render below (not
-// deleted from src/components/icons.tsx, which stays reusable) because
-// no real Librum social URLs exist anywhere in the repo yet — a
-// href="#" placeholder reads as a dead/broken link rather than
-// unimplemented. Re-add once real URLs are available.
+// SOCIAL (Renato soc3, 2026-11-18): Librum's real Instagram page, as an
+// icon under the reply promise, on every page. A plain link; nothing
+// from Instagram loads on Librum.
+export const INSTAGRAM_HREF = "https://www.instagram.com/librum.al";
 //
 // LIBRUM 2.0 UI-2: IA regrouped from the old single "Platform" bucket
 // into DISCOVER/PUBLISH/SUPPORT/LEGAL -- the same six links as before,
@@ -71,6 +71,16 @@ export function SiteFooter() {
           </p>
           {/* TRUST PACK (item 5, 5. a): the reply promise under the email. */}
           <p className="mt-1 text-[0.9375rem] text-primary-foreground/80">{REPLY_PROMISE}</p>
+          <a
+            href={INSTAGRAM_HREF}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Librum në Instagram"
+            title="Librum në Instagram"
+            className="focus-ring mt-1.5 -ml-2.5 inline-flex size-11 items-center justify-center rounded-full text-primary-foreground hover:bg-primary-foreground/10"
+          >
+            <IconInstagram className="size-[1.375rem]" />
+          </a>
         </div>
 
         <div className="grid grid-cols-2 gap-x-10 gap-y-6 sm:grid-cols-4">

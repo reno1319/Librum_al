@@ -660,8 +660,15 @@ describe("BookDetailPage: P1 design B", () => {
     expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-accent [^"]*text-accent-foreground[^"]*">Blej librin<\/button>/);
     expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexo një pjesë<\/button>/);
     expect(box).toContain(">Ruaje për më vonë</button>");
-    expect(box).toContain('aria-label="Ndajeni në WhatsApp"');
-    expect(box).toMatch(/<a href="\/libra\/11111111-1111-4111-8111-111111111111"[^>]*><span aria-live="polite">Kopjo lidhjen<\/span><\/a>/);
+    // SOCIAL (soc2): logos only -- WhatsApp, Facebook, X, LinkedIn, then
+    // Copy link (a plain link to this page without JavaScript). The phone
+    // menu button is never in the server HTML.
+    const labels = [...box.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
+    expect(labels.filter((l) => /^Ndajeni në |^Kopjo lidhjen$/.test(l))).toEqual([
+      "Ndajeni në WhatsApp", "Ndajeni në Facebook", "Ndajeni në X", "Ndajeni në LinkedIn", "Kopjo lidhjen",
+    ]);
+    expect(box).toMatch(/<a href="[^"]*\/libra\/11111111-1111-4111-8111-111111111111" aria-label="Kopjo lidhjen"/);
+    expect(box).not.toContain("Më shumë mënyra për ta ndarë");
     expect(html).toMatch(/<button type="button" class="[^"]*rounded-full[^"]*">Shiko brenda<\/button>/);
   });
 
