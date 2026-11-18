@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 import {
   BOOK_FIXTURE_AUTHOR_ID as USER_ID,
   BOOK_FIXTURE_BOOK_ID as BOOK_ID,
@@ -10,8 +9,8 @@ import {
 } from "@/lib/book-storage-path-test-fixtures";
 import { bookReviewsDoubleState, resetBookReviewsDouble } from "@/lib/book-reviews-test-double";
 
-// ACCOUNT-DELETION-BOOK-STORAGE-AUTH-1 (Patch 10): the REAL deleteAccount
-// Server Action hands a stored books.cover_path / books.file_path to
+// ACCOUNT-DELETION-BOOK-STORAGE-AUTH-1 (Patch 10): the REAL account
+// deletion hands a stored books.cover_path / books.file_path to
 // service-role Storage removal ONLY when it is exactly the deleting
 // user's own canonical key for THAT row's book id. Everything else is
 // skipped (never removed, never logged) while the account deletion and
@@ -22,12 +21,16 @@ import { bookReviewsDoubleState, resetBookReviewsDouble } from "@/lib/book-revie
 // other author's objects; every test ends by checking that none of the
 // other author's objects was removed and that no removal was attempted
 // through anything but the expected bucket and exact array.
+//
+// DEL (Renato 11-18): the deletion moved from the deleteAccount Server
+// Action (which now only asks for it, 30 days ahead) to
+// deleteAccountNow() in src/lib/account-deletion.ts, run by the daily job
+// as the service role. Same cases, called directly: every read goes
+// through the one service client (filtered by the account), and the
+// result is a code instead of a redirect. The action's own gates
+// (recovery session, sign-in, FSHI) are tested in
+// src/app/(public)/account/actions.test.ts.
 
-class RedirectSignal extends Error {
-  constructor(public target: string) {
-    super(`REDIRECT:${target}`);
-  }
-}
 // ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
 // double (default: nothing pending, approval valid); see
 // src/lib/book-reviews-test-double.ts.
@@ -35,31 +38,20 @@ vi.mock("@/lib/book-reviews", async (importOriginal) => {
   const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
   return bookReviewsDouble(await importOriginal<object>());
 });
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw new RedirectSignal(url);
-  },
-}));
-const revalidatePath = vi.fn();
-vi.mock("next/cache", () => ({ revalidatePath: (...a: unknown[]) => revalidatePath(...a) }));
-
-const cookieStore = { get: vi.fn((_name: string) => undefined as { value: string } | undefined) };
-vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(cookieStore) }));
 
 type Book = { id: unknown; cover_path: unknown; file_path: unknown };
 type StorageCall = { via: "session" | "service"; bucket: string; paths: unknown };
 
-let authUser: { id: string } | null;
 let staffResult: { data: unknown; error: unknown };
 let profileResult: { data: unknown; error: unknown };
 let booksResult: { data: unknown; error: unknown };
 let purchaseCount: number;
+let purchaseError: unknown;
 let purchaseBookIds: unknown[] | null;
 let deleteUserError: unknown;
 let storageCalls: StorageCall[];
 let events: string[];
 let adminClientsCreated: number;
-let signOut: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 let failingRemoveBuckets: Set<string>;
 let objects: Record<string, Set<string>>;
 
@@ -109,7 +101,7 @@ function sessionFrom(table: string) {
         in: async (_column: string, ids: unknown[]) => {
           events.push("read:purchases");
           purchaseBookIds = ids;
-          return { count: purchaseCount, error: null };
+          return { count: purchaseError ? null : purchaseCount, error: purchaseError };
         },
       }),
     };
@@ -131,36 +123,21 @@ function storage(via: "session" | "service") {
   };
 }
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
+function serviceClient() {
+  adminClientsCreated += 1;
+  return {
     auth: {
-      getUser: async () => ({ data: { user: authUser } }),
-      signOut: (...a: unknown[]) => {
-        events.push("signOut");
-        return signOut(...a);
+      admin: {
+        deleteUser: async (id: string) => {
+          events.push(`deleteUser:${id}`);
+          return { error: deleteUserError };
+        },
       },
     },
     from: sessionFrom,
-    storage: storage("session"),
-  }),
-}));
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => {
-    adminClientsCreated += 1;
-    events.push("admin:create");
-    return {
-      auth: {
-        admin: {
-          deleteUser: async (id: string) => {
-            events.push(`deleteUser:${id}`);
-            return { error: deleteUserError };
-          },
-        },
-      },
-      storage: storage("service"),
-    };
-  },
-}));
+    storage: storage("service"),
+  };
+}
 
 // BD15 P5b-3b: a live book's waiting changes, read through the service
 // role before deleteUser (the module's own read is unit-tested in
@@ -198,19 +175,10 @@ vi.mock("@/lib/book-pending-changes", () => ({
   },
 }));
 
-const { deleteAccount } = await import("./actions");
+const { deleteAccountNow } = await import("./account-deletion");
 
-async function run(extra: Record<string, string> = {}, confirmation = "FSHI"): Promise<string> {
-  const fd = new FormData();
-  fd.set("confirmation", confirmation);
-  for (const [k, v] of Object.entries(extra)) fd.set(k, v);
-  try {
-    await deleteAccount(fd);
-  } catch (error) {
-    if (error instanceof RedirectSignal) return error.target;
-    throw error;
-  }
-  throw new Error("deleteAccount returned without redirecting");
+async function run(): Promise<string> {
+  return deleteAccountNow(serviceClient() as never, USER_ID);
 }
 
 const removalsFor = (bucket: string) => storageCalls.filter((c) => c.bucket === bucket);
@@ -220,36 +188,30 @@ const COVER_WARNING =
   "deleteAccount: stored book cover_path values that are not this user's canonical keys were skipped; count:";
 const MANUSCRIPT_WARNING =
   "deleteAccount: stored book file_path values that are not this user's canonical keys were skipped; count:";
-const PREPARE_ERROR = "/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.";
+const PREPARE_ERROR = "prepare_failed";
 
 function expectNothingIrreversible() {
-  expect(adminClientsCreated).toBe(0);
   expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
   expect(storageCalls).toEqual([]);
-  expect(signOut).not.toHaveBeenCalled();
-  expect(revalidatePath).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
-  authUser = { id: USER_ID };
   staffResult = { data: null, error: null };
   profileResult = { data: { avatar_path: null }, error: null };
   booksResult = { data: [], error: null };
   purchaseCount = 0;
+  purchaseError = null;
   purchaseBookIds = null;
   deleteUserError = null;
   storageCalls = [];
   events = [];
   adminClientsCreated = 0;
-  signOut = vi.fn();
-  revalidatePath.mockReset();
   failingRemoveBuckets = new Set();
   objects = {
     covers: new Set([OWN_COVER, OWN_BOOK_2_COVER, ...VICTIM_OBJECTS.covers]),
     manuscripts: new Set([OWN_MANUSCRIPT, OWN_BOOK_2_MANUSCRIPT, ...VICTIM_OBJECTS.manuscripts]),
     avatars: new Set([`${USER_ID}/avatar.png`, ...VICTIM_OBJECTS.avatars]),
   };
-  cookieStore.get.mockReset().mockImplementation(() => undefined);
   resetBookReviewsDouble();
   pendingRows = [];
   pendingReadOk = true;
@@ -320,17 +282,16 @@ describe("books read fails closed (1, 2)", () => {
 describe("successful reads", () => {
   it("3: a successful empty result still permits ordinary deletion, with no book removal", async () => {
     setBooks([]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(events).toContain(`deleteUser:${USER_ID}`);
     expect(removalsFor("covers")).toEqual([]);
     expect(removalsFor("manuscripts")).toEqual([]);
     expect(events).not.toContain("read:purchases");
-    expect(signOut).toHaveBeenCalledTimes(1);
   });
 
   it("4, 21: exact canonical own cover and manuscript are removed, only after deleteUser, through the service role with the exact bucket and array", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -350,7 +311,7 @@ describe("successful reads", () => {
     const NEW_COVER = "0f0e0d0c-0b0a-4908-8706-050403020100/cover.png";
     objects.covers.add(NEW_COVER);
     setBooks([{ id: BOOK_ID, cover_path: NEW_COVER, file_path: OWN_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [NEW_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -366,13 +327,13 @@ describe("successful reads", () => {
     "0f0e0d0c-0b0a-4908-8706-050403020100/pen-name.png",
   ])("a near-miss of the new cover shape (%s) is skipped", async (value) => {
     setBooks([{ id: BOOK_ID, cover_path: value, file_path: null }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(removalsFor("covers")).toEqual([]);
   });
 
   it("a canonical .jpg cover is removed too", async () => {
     setBooks([{ id: OTHER_BOOK_ID, cover_path: OWN_BOOK_2_COVER, file_path: null }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([{ via: "service", bucket: "covers", paths: [OWN_BOOK_2_COVER] }]);
   });
 
@@ -381,7 +342,7 @@ describe("successful reads", () => {
       { id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT },
       { id: OTHER_BOOK_ID, cover_path: OWN_BOOK_2_COVER, file_path: OWN_BOOK_2_MANUSCRIPT },
     ]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER, OWN_BOOK_2_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT, OWN_BOOK_2_MANUSCRIPT] },
@@ -390,7 +351,7 @@ describe("successful reads", () => {
 
   it("10: null paths create no removal call and no warning", async () => {
     setBooks([{ id: BOOK_ID, cover_path: null, file_path: null }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(console.warn).not.toHaveBeenCalled();
     expect(events).toContain(`deleteUser:${USER_ID}`);
@@ -401,7 +362,7 @@ describe("successful reads", () => {
       { id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT },
       { id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT },
     ]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -412,34 +373,34 @@ describe("successful reads", () => {
 describe("foreign canonical keys are skipped (5-8)", () => {
   it("5: another author's canonical cover is skipped", async () => {
     setBooks([{ id: OTHER_BOOK_ID, cover_path: VICTIM_COVER, file_path: null }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(allLogCalls()).toEqual([[COVER_WARNING, 1]]);
   });
 
   it("6: another author's canonical manuscript is skipped", async () => {
     setBooks([{ id: OTHER_BOOK_ID, cover_path: null, file_path: VICTIM_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(allLogCalls()).toEqual([[MANUSCRIPT_WARNING, 1]]);
   });
 
   it("another author's key for this very book id is skipped", async () => {
     setBooks([{ id: BOOK_ID, cover_path: `${OTHER_ID}/${BOOK_ID}-cover.png`, file_path: `${OTHER_ID}/${BOOK_ID}.epub` }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
   });
 
   it("7: another book's canonical cover (own author prefix) is skipped", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_BOOK_2_COVER, file_path: null }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(objects.covers.has(OWN_BOOK_2_COVER)).toBe(true);
   });
 
   it("8: another book's canonical manuscript (own author prefix) is skipped", async () => {
     setBooks([{ id: BOOK_ID, cover_path: null, file_path: OWN_BOOK_2_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(objects.manuscripts.has(OWN_BOOK_2_MANUSCRIPT)).toBe(true);
   });
@@ -448,25 +409,14 @@ describe("foreign canonical keys are skipped (5-8)", () => {
     for (const id of [BOOK_ID.toUpperCase(), "book-1", null, 7]) {
       storageCalls = [];
       setBooks([{ id, cover_path: `${USER_ID}/${String(id)}-cover.png`, file_path: `${USER_ID}/${String(id)}.epub` }]);
-      expect(await run()).toBe("/?account=deleted");
+      expect(await run()).toBe("deleted");
       expect(storageCalls).toEqual([]);
     }
   });
 
-  it("identity comes only from the session: client-supplied author/book/path fields change nothing", async () => {
+  it("identity comes only from the account id given: another author's rows are never read or removed", async () => {
     setBooks([{ id: OTHER_BOOK_ID, cover_path: VICTIM_COVER, file_path: VICTIM_MANUSCRIPT }]);
-    expect(
-      await run({
-        userId: OTHER_ID,
-        user_id: OTHER_ID,
-        authorId: OTHER_ID,
-        author_id: OTHER_ID,
-        bookId: OTHER_BOOK_ID,
-        cover_path: VICTIM_COVER,
-        file_path: VICTIM_MANUSCRIPT,
-        bucket: "covers",
-      }),
-    ).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([]);
     expect(events.filter((e) => e.startsWith("read:books"))).toEqual([
       `read:books:id, cover_path, file_path:author_id=${USER_ID}`,
@@ -487,7 +437,7 @@ describe("9, 12, 22: every hostile path class is skipped, never reaches remove, 
 
   it.each(UNSAFE_COVER_PATHS)("cover: %s", async (_label, value) => {
     setBooks([{ id: BOOK_ID, cover_path: value, file_path: OWN_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     // Only the safe manuscript is removed; no cover removal at all.
     expect(storageCalls).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
     expect(allLogCalls()).toEqual([[COVER_WARNING, 1]]);
@@ -497,7 +447,7 @@ describe("9, 12, 22: every hostile path class is skipped, never reaches remove, 
 
   it.each(UNSAFE_MANUSCRIPT_PATHS)("manuscript: %s", async (_label, value) => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: value }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER] }]);
     expect(allLogCalls()).toEqual([[MANUSCRIPT_WARNING, 1]]);
     expectNotLogged(value);
@@ -512,7 +462,7 @@ describe("9, 12, 22: every hostile path class is skipped, never reaches remove, 
       { id: OTHER_BOOK_ID, cover_path: OWN_BOOK_2_COVER, file_path: OWN_BOOK_2_MANUSCRIPT },
     ];
     setBooks(rows);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER, OWN_BOOK_2_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT, OWN_BOOK_2_MANUSCRIPT] },
@@ -528,13 +478,13 @@ describe("9, 12, 22: every hostile path class is skipped, never reaches remove, 
 describe("11: mixed safe/unsafe rows remove only the safe values, bucket by bucket", () => {
   it("an unsafe cover does not suppress the same row's safe manuscript", async () => {
     setBooks([{ id: BOOK_ID, cover_path: VICTIM_COVER, file_path: OWN_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
   });
 
   it("an unsafe manuscript does not suppress the same row's safe cover", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: VICTIM_MANUSCRIPT }]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER] }]);
   });
 
@@ -543,7 +493,7 @@ describe("11: mixed safe/unsafe rows remove only the safe values, bucket by buck
       { id: OTHER_BOOK_ID, cover_path: VICTIM_COVER, file_path: VICTIM_MANUSCRIPT },
       { id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT },
     ]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -557,17 +507,15 @@ describe("destructive ordering (13-16)", () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     deleteUserError = { message: "restrict violation" };
-    expect(await run()).toBe("/account?error=Di%C3%A7ka%20shkoi%20keq%20gjat%C3%AB%20fshirjes%20s%C3%AB%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
+    expect(await run()).toBe("delete_failed");
     expect(storageCalls).toEqual([]);
-    expect(signOut).not.toHaveBeenCalled();
-    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("14: a cover-removal failure does not prevent manuscript and avatar cleanup", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     failingRemoveBuckets.add("covers");
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls.map((c) => c.bucket)).toEqual(["covers", "manuscripts", "avatars"]);
     expect(console.error).toHaveBeenCalledWith("deleteAccount: failed to remove orphaned cover files:", { message: "storage down" });
     expect(objects.manuscripts.has(OWN_MANUSCRIPT)).toBe(false);
@@ -577,7 +525,7 @@ describe("destructive ordering (13-16)", () => {
   it("15: a manuscript-removal failure triggers no retry, no rollback and no further privileged call", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     failingRemoveBuckets.add("manuscripts");
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -590,7 +538,7 @@ describe("destructive ordering (13-16)", () => {
   it("16: avatar cleanup is unchanged: canonical avatar removed last, alone, in its own bucket", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(storageCalls).toEqual([
       { via: "service", bucket: "covers", paths: [OWN_COVER] },
       { via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] },
@@ -601,23 +549,22 @@ describe("destructive ordering (13-16)", () => {
   it("16: an unsafe avatar is still skipped with its own warning, independently of books", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${OTHER_ID}/avatar.png` }, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(removalsFor("avatars")).toEqual([]);
     expect(console.warn).toHaveBeenCalledWith(
       "deleteAccount: stored avatar_path is not this user's canonical avatar key; avatar cleanup skipped",
     );
   });
 
-  it("the full irreversible sequence is: reads, then admin client, then deleteUser, then removals, then sign-out", async () => {
+  it("the full irreversible sequence is: reads, then deleteUser, then removals", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(events).toEqual([
       "read:staff",
       "read:profile",
       `read:books:id, cover_path, file_path:author_id=${USER_ID}`,
       "read:purchases",
-      "admin:create",
       `read:waiting:${BOOK_ID}`,
       "read:pending",
       `deleteUser:${USER_ID}`,
@@ -625,47 +572,25 @@ describe("destructive ordering (13-16)", () => {
       "remove:covers",
       "remove:manuscripts",
       "remove:avatars",
-      "signOut",
     ]);
-    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });
 
-describe("17, 18: existing gates stay ahead of the books read", () => {
+describe("17, 18: the staff, profile and acquisition gates stay ahead of anything irreversible", () => {
   beforeEach(() => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
   });
 
-  it("recovery session: /reset-password, nothing read", async () => {
-    cookieStore.get.mockImplementation((name: string) => (name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined));
-    expect(await run()).toContain("/reset-password");
-    expect(events).toEqual([]);
-    expectNothingIrreversible();
-  });
-
-  it("unauthenticated: /login, nothing read", async () => {
-    authUser = null;
-    expect(await run()).toBe("/login");
-    expect(events).toEqual([]);
-    expectNothingIrreversible();
-  });
-
   it("active staff: blocked before the books read", async () => {
     staffResult = { data: { role: "owner" }, error: null };
-    expect(await run()).toBe("/account?error=Hiqeni%20k%C3%ABt%C3%AB%20llogari%20nga%20stafi%20i%20Librum%20para%20se%20ta%20fshini.");
+    expect(await run()).toBe("staff");
     expect(events).toEqual(["read:staff"]);
     expectNothingIrreversible();
   });
 
   it("staff lookup error: blocked before the books read", async () => {
     staffResult = { data: null, error: { message: "x" } };
-    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20t%C3%AB%20kontrollojm%C3%AB%20n%C3%ABse%20kjo%20llogari%20mund%20t%C3%AB%20fshihet.%20Provoni%20p%C3%ABrs%C3%ABri.");
-    expect(events).toEqual(["read:staff"]);
-    expectNothingIrreversible();
-  });
-
-  it.each(["", "fshi", "FSHI ", "Fshi", "DELETE"])("wrong confirmation %j: blocked before the books read", async (confirmation) => {
-    expect(await run({}, confirmation)).toBe("/account?error=Shkruani%20FSHI%20p%C3%ABr%20ta%20konfirmuar.");
+    expect(await run()).toBe("staff_check_failed");
     expect(events).toEqual(["read:staff"]);
     expectNothingIrreversible();
   });
@@ -679,8 +604,15 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
 
   it("18: acquisition history still blocks, checked over this user's book ids, before any privileged call", async () => {
     purchaseCount = 1;
-    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
+    expect(await run()).toBe("has_buyers");
     expect(purchaseBookIds).toEqual([BOOK_ID]);
+    expectNothingIrreversible();
+  });
+
+  it("DEL: a failed purchases count is not 'no buyers' -- nothing irreversible happens", async () => {
+    purchaseError = { message: "x" };
+    expect(await run()).toBe(PREPARE_ERROR);
+    expect(events).toContain("read:purchases");
     expectNothingIrreversible();
   });
 
@@ -690,7 +622,7 @@ describe("17, 18: existing gates stay ahead of the books read", () => {
       { id: OTHER_BOOK_ID, cover_path: VICTIM_COVER, file_path: VICTIM_MANUSCRIPT },
     ]);
     purchaseCount = 2;
-    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
+    expect(await run()).toBe("has_buyers");
     expect(purchaseBookIds).toEqual([BOOK_ID, OTHER_BOOK_ID]);
     expectNothingIrreversible();
   });
@@ -713,7 +645,7 @@ describe("review snapshots (ADMIN-3, N3/P5)", () => {
       { book_id: BOOK_ID, file_path: VERSIONED_OLD, status: "cancelled" },
       { book_id: BOOK_ID, file_path: VERSIONED_CURRENT, status: "pending" },
     ];
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(bookReviewsDoubleState.calls).toContainEqual({ fn: "readReviewSnapshots", bookId: BOOK_ID });
     const [manuscripts] = removalsFor("manuscripts");
     expect(new Set(manuscripts.paths as string[])).toEqual(new Set([VERSIONED_CURRENT, OWN_MANUSCRIPT, VERSIONED_OLD]));
@@ -728,7 +660,7 @@ describe("review snapshots (ADMIN-3, N3/P5)", () => {
       { book_id: BOOK_ID, file_path: OWN_BOOK_2_MANUSCRIPT, status: "approved" },
       { book_id: BOOK_ID, file_path: `${USER_ID}/${BOOK_ID}/../x.epub`, status: "cancelled" },
     ];
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
   });
 
@@ -738,12 +670,11 @@ describe("review snapshots (ADMIN-3, N3/P5)", () => {
     expect(await run()).toBe(PREPARE_ERROR);
     expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(storageCalls).toEqual([]);
-    expect(signOut).not.toHaveBeenCalled();
   });
 
   it("no authored books: no snapshot read", async () => {
     setBooks([]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(bookReviewsDoubleState.calls).toEqual([]);
   });
 });
@@ -761,7 +692,7 @@ describe("waiting changes of a live book (P5b-3b)", () => {
     objects.covers.add(WAITING_COVER);
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     pendingRows = [{ book_id: BOOK_ID, file_path: WAITING_EPUB, cover_path: WAITING_COVER }];
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(pendingReadIds).toEqual([[BOOK_ID]]);
     expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER, WAITING_COVER] }]);
     expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT, WAITING_EPUB] }]);
@@ -772,7 +703,7 @@ describe("waiting changes of a live book (P5b-3b)", () => {
   it("a waiting value that is not this account's own key for that book is never removed", async () => {
     setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
     pendingRows = [{ book_id: BOOK_ID, file_path: VICTIM_MANUSCRIPT, cover_path: VICTIM_COVER }];
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [OWN_COVER] }]);
     expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT] }]);
   });
@@ -781,7 +712,7 @@ describe("waiting changes of a live book (P5b-3b)", () => {
     objects.covers.add(WAITING_COVER);
     setBooks([{ id: BOOK_ID, cover_path: WAITING_COVER, file_path: OWN_MANUSCRIPT }]);
     pendingRows = [{ book_id: BOOK_ID, file_path: null, cover_path: WAITING_COVER }];
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(removalsFor("covers")).toEqual([{ via: "service", bucket: "covers", paths: [WAITING_COVER] }]);
   });
 
@@ -791,12 +722,11 @@ describe("waiting changes of a live book (P5b-3b)", () => {
     expect(await run()).toBe(PREPARE_ERROR);
     expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(storageCalls).toEqual([]);
-    expect(signOut).not.toHaveBeenCalled();
   });
 
   it("no authored books: no read", async () => {
     setBooks([]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(pendingReadIds).toEqual([]);
   });
 });
@@ -807,7 +737,7 @@ describe("R22 (I3): readers waiting on the account's pre-orders", () => {
   it("are read before deleteUser and told only after it succeeded", async () => {
     setBooks([{ id: BOOK_ID, cover_path: null, file_path: null }]);
     waitingByBook = WAITING();
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     const read = events.indexOf(`read:waiting:${BOOK_ID}`);
     const del = events.indexOf(`deleteUser:${USER_ID}`);
     const sched = events.indexOf("schedule:cancelled-emails");
@@ -823,7 +753,6 @@ describe("R22 (I3): readers waiting on the account's pre-orders", () => {
     expect(await run()).toBe(PREPARE_ERROR);
     expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(storageCalls).toEqual([]);
-    expect(signOut).not.toHaveBeenCalled();
     expect(scheduledWaiting).toEqual([]);
     expect(objects.covers.has(OWN_COVER)).toBe(true);
   });
@@ -838,7 +767,7 @@ describe("R22 (I3): readers waiting on the account's pre-orders", () => {
 
   it("an account with no books reads nothing and schedules an empty list", async () => {
     setBooks([]);
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(events.some((e) => e.startsWith("read:waiting"))).toBe(false);
     expect(scheduledWaiting).toEqual([new Map()]);
   });

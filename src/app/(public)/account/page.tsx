@@ -13,6 +13,7 @@ import { formControlClasses } from "@/lib/form-styles";
 import type { Metadata } from "next";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { MY_NOTICES_PATH, MY_NOTICES_TITLE } from "@/lib/preorder-reader";
+import { LEAVE_NOTE_MAX_LENGTH, LEAVE_REASONS } from "@/lib/account-deletion-reasons";
 
 export const metadata: Metadata = {
   title: "Llogaria",
@@ -179,14 +180,22 @@ export default async function AccountPage({
         </button>
       </form>
 
+      {/* DEL (del1 a .. del8 c): 30 days to change your mind; reviews stay. */}
       <section className="mt-10 rounded-card border-l-4 border-red-600 bg-surface p-6">
         <h2 className="font-serif text-lg font-normal text-red-800">Zonë rreziku</h2>
         <p className="mt-2 text-sm text-foreground/90">
-          Fshirja e llogarisë. Kjo fshin përgjithmonë llogarinë tuaj
+          Fshirja e llogarisë. Llogaria juaj fshihet përgjithmonë 30 ditë pasi ta
+          kërkoni. Deri atëherë mund ta riktheni: hyni në llogari dhe shtypni
+          «Riktheni llogarinë time». Ju dërgojmë një email me datën.
+        </p>
+        <p className="mt-2 text-sm text-foreground/90">
           {isAuthor
-            ? ", çdo libër që keni botuar dhe skedarët e tyre"
-            : " dhe ju heq aksesin te biblioteka juaj"}
-          . Ky veprim nuk kthehet pas.
+            ? "Gjatë këtyre 30 ditëve librat tuaj, emrat e autorit dhe vlerësimet tuaja nuk shihen në Librum. Pas 30 ditësh fshihen përgjithmonë librat dhe skedarët e tyre."
+            : "Gjatë këtyre 30 ditëve vlerësimet tuaja nuk shihen në Librum. Pas 30 ditësh humbni aksesin te biblioteka juaj, përfshirë librat e blerë."}
+        </p>
+        <p className="mt-2 text-sm text-foreground/90">
+          Vlerësimet që keni shkruar mbeten në Librum me emrin tuaj të vlerësimeve
+          edhe pasi të fshihet llogaria, dhe nuk mund të hiqen.
           {!isAuthor && (
             <>
               {" "}
@@ -204,12 +213,30 @@ export default async function AccountPage({
         )}
 
         <form action={deleteAccount} className="mt-4 flex flex-col gap-3">
+          <fieldset className="flex flex-col gap-2 text-sm">
+            <legend className="mb-1">Pse po largoheni? (nuk është e detyrueshme)</legend>
+            {LEAVE_REASONS.map((r) => (
+              <label key={r.code} className="flex min-h-11 items-center gap-2">
+                <input type="radio" name="reason" value={r.code} /> {r.label}
+              </label>
+            ))}
+            <label className="mt-1 flex flex-col gap-1">
+              Doni të na tregoni më shumë? (nuk është e detyrueshme)
+              <textarea
+                name="reason_note"
+                rows={3}
+                maxLength={LEAVE_NOTE_MAX_LENGTH}
+                className={formControlClasses}
+              />
+            </label>
+            <p className="text-muted">Përgjigjja ruhet pa emrin dhe emailin tuaj.</p>
+          </fieldset>
           <label className="flex flex-col gap-1 text-sm">
             Shkruani FSHI për ta konfirmuar
             <input name="confirmation" type="text" required className={formControlClasses} />
           </label>
           <button type="submit" className={`w-fit ${buttonClasses("danger", "md")}`}>
-            Fshini përgjithmonë llogarinë time
+            Fshini llogarinë time
           </button>
         </form>
       </section>

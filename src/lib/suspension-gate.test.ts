@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { decideSuspension, isBannedNow, isUserBannedError, wantsStatusInsteadOfRedirect } from "./suspension-gate";
+import {
+  decideSuspension,
+  isBannedNow,
+  isUserBannedError,
+  shouldRedirectForDeletionPending,
+  wantsStatusInsteadOfRedirect,
+} from "./suspension-gate";
 
 // PEOPLE-2: the per-request suspension decision Proxy makes.
 const NOW = new Date("2026-10-23T09:00:00Z");
@@ -31,25 +37,26 @@ describe("decideSuspension", () => {
   const ok = (data: unknown) => ({ data, error: null });
 
   it("a ban in the future is enough, whatever the RPC says", () => {
-    for (const rpc of [ok(false), ok(true), { data: null, error: { code: "XX000" } }]) {
+    for (const rpc of [ok("active"), ok("suspended"), ok("deletion_pending"), { data: null, error: { code: "XX000" } }]) {
       expect(decideSuspension({ bannedUntil: "2126-10-23T09:00:00Z", rpc, now: NOW })).toBe("suspended");
     }
   });
 
   it("the suspension row is enough when the ban step failed", () => {
-    expect(decideSuspension({ bannedUntil: null, rpc: ok(true), now: NOW })).toBe("suspended");
+    expect(decideSuspension({ bannedUntil: null, rpc: ok("suspended"), now: NOW })).toBe("suspended");
   });
 
-  it("allows only on an explicit false", () => {
-    expect(decideSuspension({ bannedUntil: null, rpc: ok(false), now: NOW })).toBe("allow");
-    expect(decideSuspension({ bannedUntil: "2026-01-01T00:00:00Z", rpc: ok(false), now: NOW })).toBe("allow");
+  it("allows only on an explicit 'active' or 'deletion_pending' (DEL: the Restore gate decides the latter)", () => {
+    expect(decideSuspension({ bannedUntil: null, rpc: ok("active"), now: NOW })).toBe("allow");
+    expect(decideSuspension({ bannedUntil: "2026-01-01T00:00:00Z", rpc: ok("active"), now: NOW })).toBe("allow");
+    expect(decideSuspension({ bannedUntil: null, rpc: ok("deletion_pending"), now: NOW })).toBe("allow");
   });
 
   it("fails closed on an RPC error or a non-boolean answer", () => {
-    expect(decideSuspension({ bannedUntil: null, rpc: { data: false, error: { code: "PGRST000" } }, now: NOW })).toBe(
+    expect(decideSuspension({ bannedUntil: null, rpc: { data: "active", error: { code: "PGRST000" } }, now: NOW })).toBe(
       "check_failed",
     );
-    for (const data of [null, undefined, "true", 1, {}, []]) {
+    for (const data of [null, undefined, true, false, "true", "Active", 1, {}, []]) {
       expect(decideSuspension({ bannedUntil: null, rpc: ok(data), now: NOW })).toBe("check_failed");
     }
   });
@@ -75,5 +82,23 @@ describe("wantsStatusInsteadOfRedirect", () => {
     expect(wantsStatusInsteadOfRedirect(request("GET", "/api/downloads/x"))).toBe(true);
     expect(wantsStatusInsteadOfRedirect(request("POST", "/login"))).toBe(true);
     expect(wantsStatusInsteadOfRedirect(request("DELETE", "/x"))).toBe(true);
+  });
+});
+
+describe("shouldRedirectForDeletionPending (DEL)", () => {
+  it("only a deletion_pending answer redirects", () => {
+    for (const data of ["active", "suspended", null, undefined, true]) {
+      expect(shouldRedirectForDeletionPending("/library", data)).toBe(false);
+    }
+    expect(shouldRedirectForDeletionPending("/library", "deletion_pending")).toBe(true);
+  });
+
+  it("leaves exactly the Restore page, /login, /auth/callback and /reset-password open, by exact path", () => {
+    for (const path of ["/account/restore", "/login", "/auth/callback", "/reset-password"]) {
+      expect(shouldRedirectForDeletionPending(path, "deletion_pending")).toBe(false);
+    }
+    for (const path of ["/", "/account", "/account/restore/", "/account/restore/x", "/login/x", "/reset-password/x", "/api/health", "/dashboard"]) {
+      expect(shouldRedirectForDeletionPending(path, "deletion_pending")).toBe(true);
+    }
   });
 });

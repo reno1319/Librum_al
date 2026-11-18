@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RECOVERY_COOKIE_NAME } from "@/lib/recovery-session";
 import {
   AVATAR_FIXTURE_OTHER_ID as OTHER_ID,
   AVATAR_FIXTURE_USER_ID as USER_ID,
@@ -17,12 +16,13 @@ import {
 // (or failed to), and vice versa. Book/cover/manuscript cleanup is NOT
 // changed by this patch (see F3 in the Patch 9 report): the suite pins
 // that it still happens exactly as before, alongside the avatar decision.
+//
+// DEL (Renato 11-18): the deletion moved from the deleteAccount Server
+// Action to deleteAccountNow() in src/lib/account-deletion.ts (the daily
+// job, service role). Same cases, called directly; the action's own
+// gates (recovery session, sign-in, FSHI) are tested in
+// src/app/(public)/account/actions.test.ts.
 
-class RedirectSignal extends Error {
-  constructor(public target: string) {
-    super(`REDIRECT:${target}`);
-  }
-}
 // ADMIN-3-REVIEW: book_reviews reads/writes replaced by a settable
 // double (default: nothing pending, approval valid); see
 // src/lib/book-reviews-test-double.ts.
@@ -30,20 +30,10 @@ vi.mock("@/lib/book-reviews", async (importOriginal) => {
   const { bookReviewsDouble } = await import("@/lib/book-reviews-test-double");
   return bookReviewsDouble(await importOriginal<object>());
 });
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw new RedirectSignal(url);
-  },
-}));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-
-const cookieStore = { get: vi.fn((_name: string) => undefined as { value: string } | undefined) };
-vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(cookieStore) }));
 
 type Book = { id: string; cover_path: string | null; file_path: string | null };
 type StorageCall = { via: "session" | "service"; bucket: string; op: string; paths: unknown };
 
-let authUser: { id: string } | null;
 let staffResult: { data: unknown; error: unknown };
 let profileResult: { data: unknown; error: unknown };
 let books: Book[];
@@ -51,8 +41,6 @@ let purchaseCount: number;
 let deleteUserError: unknown;
 let storageCalls: StorageCall[];
 let events: string[];
-let adminClientsCreated: number;
-let signOut: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 let failingRemoveBucket: string | null;
 let penNamesResult: { data: unknown; error: unknown };
 
@@ -110,32 +98,23 @@ function storage(via: "session" | "service") {
   };
 }
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: authUser } }), signOut: (...a: unknown[]) => signOut(...a) },
-    from: sessionFrom,
-    storage: storage("session"),
-  }),
-}));
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => {
-    adminClientsCreated += 1;
-    return {
-      auth: {
-        admin: {
-          deleteUser: async (id: string) => {
-            events.push(`deleteUser:${id}`);
-            return { error: deleteUserError };
-          },
+function serviceClient() {
+  return {
+    auth: {
+      admin: {
+        deleteUser: async (id: string) => {
+          events.push(`deleteUser:${id}`);
+          return { error: deleteUserError };
         },
       },
-      storage: storage("service"),
-    };
-  },
-}));
+    },
+    from: sessionFrom,
+    storage: storage("service"),
+  };
+}
 
 // BD15 P5b-3b: no live book here has waiting changes (that read is
-// covered in book-storage-deletion.test.ts).
+// covered in account-deletion.book-storage.test.ts).
 // R22 (I3): no waiting "Më njofto" readers in these cases (the pre-order
 // read itself is covered in account-deletion-preorder-readers.test.ts).
 vi.mock("@/lib/preorder-emails", () => ({
@@ -146,18 +125,10 @@ vi.mock("@/lib/book-pending-changes", () => ({
   readPendingChangesForBooks: async () => ({ ok: true, byBook: new Map() }),
 }));
 
-const { deleteAccount } = await import("./actions");
+const { deleteAccountNow } = await import("./account-deletion");
 
-async function run(confirmation = "FSHI"): Promise<string> {
-  const fd = new FormData();
-  fd.set("confirmation", confirmation);
-  try {
-    await deleteAccount(fd);
-  } catch (error) {
-    if (error instanceof RedirectSignal) return error.target;
-    throw error;
-  }
-  throw new Error("deleteAccount returned without redirecting");
+async function run(): Promise<string> {
+  return deleteAccountNow(serviceClient() as never, USER_ID);
 }
 
 const avatarRemovals = () => storageCalls.filter((c) => c.bucket === "avatars");
@@ -170,7 +141,6 @@ const OWN_BOOK: Book = {
 };
 
 beforeEach(() => {
-  authUser = { id: USER_ID };
   staffResult = { data: null, error: null };
   profileResult = { data: { avatar_path: null }, error: null };
   books = [];
@@ -178,11 +148,8 @@ beforeEach(() => {
   deleteUserError = null;
   storageCalls = [];
   events = [];
-  adminClientsCreated = 0;
-  signOut = vi.fn();
   failingRemoveBucket = null;
   penNamesResult = { data: [], error: null };
-  cookieStore.get.mockReset().mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -191,21 +158,20 @@ describe("deleteAccount: valid canonical avatar", () => {
   it.each(["png", "jpg"])("removes exactly the user's own avatar.%s, once, from the avatars bucket, after deleteUser", async (ext) => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.${ext}` }, error: null };
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     expect(avatarRemovals()).toEqual([
       { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.${ext}`] },
     ]);
     expect(nonAvatarRemovals()).toEqual([]);
     expect(events.indexOf(`deleteUser:${USER_ID}`)).toBeLessThan(events.indexOf("remove:avatars"));
-    expect(signOut).toHaveBeenCalledTimes(1);
   });
 
   it("with authored books: the avatar removal is the avatar alone, and book cleanup is unchanged and separate", async () => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     books = [OWN_BOOK];
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     expect(avatarRemovals()).toEqual([
       { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.png`] },
@@ -220,7 +186,7 @@ describe("deleteAccount: valid canonical avatar", () => {
 describe("deleteAccount: unsafe or absent avatar_path -> zero privileged avatar removals", () => {
   it("null avatar_path: no avatar removal, no warning, account deleted", async () => {
     profileResult = { data: { avatar_path: null }, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(avatarRemovals()).toEqual([]);
     expect(console.warn).not.toHaveBeenCalled();
     expect(events).toContain(`deleteUser:${USER_ID}`);
@@ -228,7 +194,7 @@ describe("deleteAccount: unsafe or absent avatar_path -> zero privileged avatar 
 
   it("no profile row at all: no avatar removal, account deleted", async () => {
     profileResult = { data: null, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(avatarRemovals()).toEqual([]);
     expect(events).toContain(`deleteUser:${USER_ID}`);
   });
@@ -238,7 +204,7 @@ describe("deleteAccount: unsafe or absent avatar_path -> zero privileged avatar 
     async (_label, value) => {
       profileResult = { data: { avatar_path: value }, error: null };
 
-      expect(await run()).toBe("/?account=deleted");
+      expect(await run()).toBe("deleted");
 
       expect(avatarRemovals()).toEqual([]);
       expect(storageCalls.filter((c) => JSON.stringify(c.paths ?? null).includes("avatar"))).toEqual([]);
@@ -257,7 +223,7 @@ describe("deleteAccount: unsafe or absent avatar_path -> zero privileged avatar 
     profileResult = { data: { avatar_path: `${OTHER_ID}/avatar.png` }, error: null };
     books = [OWN_BOOK];
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     expect(avatarRemovals()).toEqual([]);
     expect(nonAvatarRemovals().map((c) => c.bucket)).toEqual(["covers", "manuscripts"]);
@@ -266,28 +232,27 @@ describe("deleteAccount: unsafe or absent avatar_path -> zero privileged avatar 
 
   it("the check is bound to the deleting user: another user's genuinely canonical key is still foreign", async () => {
     profileResult = { data: { avatar_path: `${OTHER_ID}/avatar.jpg` }, error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(avatarRemovals()).toEqual([]);
   });
 });
 
 describe("deleteAccount: failures stop before anything irreversible", () => {
-  it("a failed profile read stops: no admin client, no deleteUser, no removal of any kind", async () => {
+  it("a failed profile read stops: no deleteUser, no removal of any kind", async () => {
     profileResult = { data: { avatar_path: `${OTHER_ID}/avatar.png` }, error: { message: "db down" } };
 
-    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
+    expect(await run()).toBe("prepare_failed");
 
-    expect(adminClientsCreated).toBe(0);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(storageCalls).toEqual([]);
-    expect(signOut).not.toHaveBeenCalled();
   });
 
   it("a failed profile read that still carries a canonical-looking row is not trusted either", async () => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: { message: "partial" } };
-    expect(await run()).toContain("/account?error=");
+    expect(await run()).toBe("prepare_failed");
     expect(storageCalls).toEqual([]);
-    expect(adminClientsCreated).toBe(0);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
   });
 
   it("a failed Auth user deletion leaves every file, including a valid avatar, untouched", async () => {
@@ -295,7 +260,7 @@ describe("deleteAccount: failures stop before anything irreversible", () => {
     books = [OWN_BOOK];
     deleteUserError = { message: "restrict violation" };
 
-    expect(await run()).toBe("/account?error=Di%C3%A7ka%20shkoi%20keq%20gjat%C3%AB%20fshirjes%20s%C3%AB%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
+    expect(await run()).toBe("delete_failed");
     expect(storageCalls).toEqual([]);
   });
 
@@ -303,62 +268,38 @@ describe("deleteAccount: failures stop before anything irreversible", () => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     failingRemoveBucket = "avatars";
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(avatarRemovals()).toHaveLength(1);
     expect(console.error).toHaveBeenCalledWith("deleteAccount: failed to remove orphaned avatar file:", { message: "storage down" });
   });
 });
 
-describe("deleteAccount: existing gates are intact and run before any profile read or privileged call", () => {
-  it("an active recovery session is sent to /reset-password first", async () => {
-    cookieStore.get.mockImplementation((name: string) => (name === RECOVERY_COOKIE_NAME ? { value: "1" } : undefined));
-    profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
-    expect(await run()).toContain("/reset-password");
-    expect(events).toEqual([]);
-    expect(adminClientsCreated).toBe(0);
-    expect(storageCalls).toEqual([]);
-  });
-
-  it("unauthenticated: /login, nothing read, nothing removed", async () => {
-    authUser = null;
-    expect(await run()).toBe("/login");
-    expect(events).toEqual([]);
-    expect(adminClientsCreated).toBe(0);
-  });
-
+describe("deleteAccount: the staff and acquisition gates run before anything irreversible", () => {
   it("active staff: blocked before the profile read", async () => {
     staffResult = { data: { role: "owner" }, error: null };
-    expect(await run()).toBe("/account?error=Hiqeni%20k%C3%ABt%C3%AB%20llogari%20nga%20stafi%20i%20Librum%20para%20se%20ta%20fshini.");
+    expect(await run()).toBe("staff");
     expect(events).toEqual(["read:staff"]);
-    expect(adminClientsCreated).toBe(0);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
   });
 
   it("staff lookup error: blocked before the profile read", async () => {
     staffResult = { data: null, error: { message: "x" } };
-    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20t%C3%AB%20kontrollojm%C3%AB%20n%C3%ABse%20kjo%20llogari%20mund%20t%C3%AB%20fshihet.%20Provoni%20p%C3%ABrs%C3%ABri.");
+    expect(await run()).toBe("staff_check_failed");
     expect(events).toEqual(["read:staff"]);
-    expect(adminClientsCreated).toBe(0);
-  });
-
-  it.each(["", "fshi", "FSHI ", "Fshi", "DELETE"])("wrong confirmation %j: blocked before the profile read", async (confirmation) => {
-    profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
-    expect(await run(confirmation)).toBe("/account?error=Shkruani%20FSHI%20p%C3%ABr%20ta%20konfirmuar.");
-    expect(events).toEqual(["read:staff"]);
-    expect(adminClientsCreated).toBe(0);
-    expect(storageCalls).toEqual([]);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
   });
 
   it("books with acquisitions: blocked before any privileged call", async () => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     books = [OWN_BOOK];
     purchaseCount = 1;
-    expect(await run()).toContain("/account?error=Llogaria%20juaj%20nuk%20mund%20t%C3%AB%20fshihet");
-    expect(adminClientsCreated).toBe(0);
+    expect(await run()).toBe("has_buyers");
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
     expect(storageCalls).toEqual([]);
   });
 
   it("the happy path deletes exactly the authenticated user", async () => {
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(events.filter((e) => e.startsWith("deleteUser"))).toEqual([`deleteUser:${USER_ID}`]);
   });
 });
@@ -378,7 +319,7 @@ describe("deleteAccount: pen name photos", () => {
       error: null,
     };
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     expect(avatarRemovals()).toEqual([
       { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.png`] },
@@ -395,7 +336,7 @@ describe("deleteAccount: pen name photos", () => {
     ["upper case", "D0000000-0000-4000-8000-000000000001/pen-name.png"],
   ])("a non-canonical stored value (%s) is skipped, never passed to service-role remove", async (_label, value) => {
     penNamesResult = { data: [{ avatar_path: value }], error: null };
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
     expect(avatarRemovals()).toEqual([]);
     expect(console.warn).toHaveBeenCalled();
   });
@@ -406,7 +347,7 @@ describe("deleteAccount: pen name photos", () => {
     profileResult = { data: { avatar_path: `${USER_ID}/avatar.png` }, error: null };
     penNamesResult = { data: [{ avatar_path: `${USER_ID}/avatar.png` }, { avatar_path: PHOTO_A }], error: null };
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     const removed = avatarRemovals().flatMap((c) => c.paths);
     expect(removed.filter((p) => p === `${USER_ID}/avatar.png`)).toHaveLength(1);
@@ -417,7 +358,7 @@ describe("deleteAccount: pen name photos", () => {
     profileResult = { data: { avatar_path: null }, error: null };
     penNamesResult = { data: [{ avatar_path: `${USER_ID}/avatar.jpg` }], error: null };
 
-    expect(await run()).toBe("/?account=deleted");
+    expect(await run()).toBe("deleted");
 
     expect(avatarRemovals()).toEqual([
       { via: "service", bucket: "avatars", op: "remove", paths: [`${USER_ID}/avatar.jpg`] },
@@ -426,7 +367,7 @@ describe("deleteAccount: pen name photos", () => {
 
   it("a pen names read failure stops before anything irreversible", async () => {
     penNamesResult = { data: null, error: { message: "down" } };
-    expect(await run()).toBe("/account?error=Nuk%20mund%C3%ABm%20ta%20p%C3%ABrgatisim%20fshirjen%20e%20llogaris%C3%AB.%20Provoni%20p%C3%ABrs%C3%ABri.");
+    expect(await run()).toBe("prepare_failed");
     expect(events).not.toContain(`deleteUser:${USER_ID}`);
     expect(storageCalls).toEqual([]);
   });
