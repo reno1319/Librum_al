@@ -40,6 +40,8 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Dorëshkrimi i zgjedhur nuk vlen më. Zgjidhni skedarin përsëri",
   "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
   "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
+  // DEL: Restore after the daily job has started the real deletion.
+  "Fshirja e llogarisë ka nisur dhe nuk mund të ndalet më.",
   "EPUB-i është shumë i madh ose ka shumë skedarë.",
   "Each keyword must be 40 characters or fewer.",
   "Emri duhet të ketë nga 2 deri në 40 karaktere.",
@@ -129,7 +131,6 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Nuk mund ta rihapim me siguri këtë pagesë. Nëse keni paguar tashmë, shikoni Bibliotekën tuaj; përndryshe na kontaktoni për ta përfunduar blerjen.",
   "Nuk mund ta vlerësoni librin tuaj.",
   "Nuk mundëm ta kalojmë llogarinë tuaj në llogari autori. Provoni përsëri.",
-  "Nuk mundëm ta përgatisim fshirjen e llogarisë. Provoni përsëri.",
   "Nuk mundëm të konfirmojmë nëse ndryshimet tuaja u ruajtën. Rifreskoni këtë paketë për ta kontrolluar para se të provoni përsëri.",
   "Nuk mundëm të konfirmojmë nëse paketa u krijua. Kontrolloni paketat tuaja para se të provoni përsëri.",
   "Nuk mundëm të konfirmojmë që paketa u fshi. Rifreskoni këtë faqe për ta kontrolluar para se të provoni përsëri.",
@@ -166,6 +167,8 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "SEO title must be 70 characters or fewer.",
   "Seria nuk u krijua dot. Provoni përsëri.",
   "Shkruani FSHI për ta konfirmuar.",
+  // DEL: the optional "why are you leaving?" note is too long.
+  "Shkruani deri në 500 shkronja te «Doni të na tregoni më shumë?».",
   "Shkruani IBAN-in tuaj.",
   "Shkruani emrin e mbajtësit të llogarisë.",
   "Shkruani emrin që do të shfaqet te vlerësimi.",

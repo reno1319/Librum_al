@@ -782,3 +782,40 @@ export async function sendAuthorWelcomeEmail(to: string, { name }: { name: strin
   const { subject, html } = authorWelcomeEmail({ name });
   await sendEmail(to, subject, html, { replyTo: SUPPORT_EMAIL });
 }
+
+// DEL (del5 a): sent once, when someone asks to delete their account.
+// Text as approved (EMAIL-TEXT-r1); the password line only for an
+// account that has a password (not one that signs in with Google only).
+// `requestedOn` and `deleteOn` are already formatted Albanian dates.
+export function accountDeletionRequestedEmail({
+  requestedOn,
+  deleteOn,
+  hasPassword,
+}: {
+  requestedOn: string;
+  deleteOn: string;
+  hasPassword: boolean;
+}): { subject: string; html: string } {
+  const notYouLine = hasPassword
+    ? "Nëse nuk e keni kërkuar ju këtë, hyni menjëherë në llogari, riktheni atë dhe ndryshoni fjalëkalimin."
+    : "Nëse nuk e keni kërkuar ju këtë, hyni menjëherë në llogari dhe riktheni atë.";
+  return {
+    subject: "Kërkesa për fshirjen e llogarisë suaj në Librum",
+    html: `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <p>Përshëndetje,</p>
+        <p>Morëm kërkesën tuaj për ta fshirë llogarinë në Librum më ${escapeEmailHtml(requestedOn)}.</p>
+        <p>Llogaria juaj do të fshihet përgjithmonë më <strong>${escapeEmailHtml(deleteOn)}</strong>.</p>
+        <p>Nëse ndërroni mendje, hyni në llogari para kësaj date dhe shtypni «Riktheni llogarinë time».</p>
+        <p>${notYouLine}</p>
+        <p>Ekipi i Librum</p>
+      </div>`,
+  };
+}
+
+export async function sendAccountDeletionRequestedEmail(
+  to: string,
+  details: { requestedOn: string; deleteOn: string; hasPassword: boolean },
+) {
+  const { subject, html } = accountDeletionRequestedEmail(details);
+  await sendEmail(to, subject, html, { replyTo: SUPPORT_EMAIL });
+}

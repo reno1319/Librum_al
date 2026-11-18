@@ -36,7 +36,7 @@ let simulateAuthCookieRefresh = false;
 // not suspended; signOut() clears the session cookie through setAll, as
 // the real client does.
 const mockRpc = vi.fn((_fn: string): Promise<{ data: unknown; error: unknown }> =>
-  Promise.resolve({ data: false, error: null }),
+  Promise.resolve({ data: "active", error: null }),
 );
 const mockSignOut = vi.fn((_options: unknown): Promise<{ error: unknown }> => Promise.resolve({ error: null }));
 let signOutClearsCookie = true;
@@ -323,7 +323,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
     simulateAuthCookieRefresh = false;
     signOutClearsCookie = true;
     mockGetUser.mockReset().mockResolvedValue({ data: { user: USER }, error: null } as never);
-    mockRpc.mockReset().mockResolvedValue({ data: false, error: null });
+    mockRpc.mockReset().mockResolvedValue({ data: "active", error: null });
     mockSignOut.mockReset().mockResolvedValue({ error: null });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
@@ -366,14 +366,14 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
 
   it("a signed-in, not suspended account passes through", async () => {
     const response = await updateSession(makeRequest("/dashboard", SESSION));
-    expect(mockRpc).toHaveBeenCalledWith("my_account_is_suspended");
+    expect(mockRpc).toHaveBeenCalledWith("my_account_status");
     expect(mockSignOut).not.toHaveBeenCalled();
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
   });
 
   it("a suspended account is signed out globally, its cookies cleared, and sent to /login?suspended=1", async () => {
-    mockRpc.mockResolvedValue({ data: true, error: null });
+    mockRpc.mockResolvedValue({ data: "suspended", error: null });
     const response = await updateSession(makeRequest("/dashboard", SESSION));
     expect(mockSignOut).toHaveBeenCalledWith({ scope: "global" });
     const location = new URL(response.headers.get("location")!);
@@ -390,7 +390,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
   });
 
   it("clears the cookies even when signOut() throws or never clears them", async () => {
-    mockRpc.mockResolvedValue({ data: true, error: null });
+    mockRpc.mockResolvedValue({ data: "suspended", error: null });
     signOutClearsCookie = false;
     mockSignOut.mockRejectedValue(new Error("network"));
     const response = await updateSession(makeRequest("/dashboard", SESSION));
@@ -399,7 +399,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
   });
 
   it("a server action gets a 403, not a redirect", async () => {
-    mockRpc.mockResolvedValue({ data: true, error: null });
+    mockRpc.mockResolvedValue({ data: "suspended", error: null });
     const request = new NextRequest("https://librumal.vercel.app/dashboard", {
       method: "POST",
       headers: { "next-action": "abc123" },
@@ -414,7 +414,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
   });
 
   it("an /api request gets a 403, not a redirect", async () => {
-    mockRpc.mockResolvedValue({ data: true, error: null });
+    mockRpc.mockResolvedValue({ data: "suspended", error: null });
     const response = await updateSession(makeRequest("/api/downloads/abc", SESSION));
     expect(response.status).toBe(403);
     expect(response.headers.get("location")).toBeNull();
@@ -431,7 +431,7 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
     expect(response.cookies.get("sb-project-auth-token")).toBeUndefined();
   });
 
-  it("fails closed with a 503 when the RPC throws or returns a non-boolean", async () => {
+  it("fails closed with a 503 when the RPC throws or returns no known status", async () => {
     mockRpc.mockRejectedValueOnce(new Error("fetch failed"));
     expect((await updateSession(makeRequest("/dashboard", SESSION))).status).toBe(503);
     mockRpc.mockResolvedValueOnce({ data: null, error: null });
@@ -448,8 +448,91 @@ describe("updateSession: the suspension check (PEOPLE-2)", () => {
   });
 
   it("runs before the recovery redirect: a suspended recovery session goes to /login", async () => {
-    mockRpc.mockResolvedValue({ data: true, error: null });
+    mockRpc.mockResolvedValue({ data: "suspended", error: null });
     const response = await updateSession(makeRequest("/library", { ...SESSION, [RECOVERY_COOKIE_NAME]: "1" }));
     expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
+  });
+  // DEL (del2 b): an account waiting to be deleted reaches only the
+  // Restore page, keeps its session, and is never signed out here.
+  it("a deletion-pending account's page request goes to /account/restore, session kept", async () => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const response = await updateSession(makeRequest("/library", SESSION));
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/account/restore");
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(response.cookies.get("sb-project-auth-token")).toBeUndefined();
+  });
+
+  it.each(["/account/restore", "/login", "/auth/callback", "/reset-password"])("a deletion-pending account may open %s", async (path) => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const response = await updateSession(makeRequest(path, SESSION));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it.each(["/account", "/account/restore/x", "/dashboard", "/"])("a deletion-pending account is sent away from %s", async (path) => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const response = await updateSession(makeRequest(path, SESSION));
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/account/restore");
+  });
+
+  // AUDIT B1: pending + a password-reset session must not loop between
+  // /reset-password and /account/restore.
+  it("a deletion-pending account in a password-reset session reaches /reset-password and its form, with no loop", async () => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const withRecovery = { ...SESSION, [RECOVERY_COOKIE_NAME]: "1" };
+    const page = await updateSession(makeRequest("/reset-password", withRecovery));
+    expect(page.status).toBe(200);
+    expect(page.headers.get("location")).toBeNull();
+
+    const request = new NextRequest("https://librumal.vercel.app/reset-password", {
+      method: "POST",
+      headers: { "next-action": "abc123" },
+    });
+    for (const [name, value] of Object.entries(withRecovery)) request.cookies.set(name, value);
+    const action = await updateSession(request);
+    expect(action.status).toBe(200);
+
+    // Anywhere else goes to exactly one of the two pages, and each of
+    // those pages is let through, so there is no cycle.
+    const elsewhere = await updateSession(makeRequest("/library", withRecovery));
+    const first = new URL(elsewhere.headers.get("location")!).pathname;
+    const next = await updateSession(makeRequest(first, withRecovery));
+    expect(next.headers.get("location") === null || new URL(next.headers.get("location")!).pathname === "/reset-password").toBe(true);
+    const last = await updateSession(makeRequest("/reset-password", withRecovery));
+    expect(last.headers.get("location")).toBeNull();
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
+  it("a deletion-pending account's server action or /api request elsewhere gets a 403", async () => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const request = new NextRequest("https://librumal.vercel.app/dashboard", {
+      method: "POST",
+      headers: { "next-action": "abc123" },
+    });
+    for (const [name, value] of Object.entries(SESSION)) request.cookies.set(name, value);
+    const action = await updateSession(request);
+    expect(action.status).toBe(403);
+    expect(action.headers.get("location")).toBeNull();
+    const api = await updateSession(makeRequest("/api/books/x/download", SESSION));
+    expect(api.status).toBe(403);
+    expect(mockSignOut).not.toHaveBeenCalled();
+  });
+
+  it("the Restore page's own server actions still reach it", async () => {
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const request = new NextRequest("https://librumal.vercel.app/account/restore", {
+      method: "POST",
+      headers: { "next-action": "abc123" },
+    });
+    for (const [name, value] of Object.entries(SESSION)) request.cookies.set(name, value);
+    const response = await updateSession(request);
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps a token refresh from this request on the Restore redirect", async () => {
+    simulateAuthCookieRefresh = true;
+    mockRpc.mockResolvedValue({ data: "deletion_pending", error: null });
+    const response = await updateSession(makeRequest("/library", SESSION));
+    expect(response.cookies.get("sb-project-auth-token")?.value).toBe("refreshed-session-value");
   });
 });

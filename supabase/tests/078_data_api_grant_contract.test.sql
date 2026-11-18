@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 271 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 277 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -35,7 +35,8 @@
 --   20261115200000), plus K6's three classic_authors and three
 --   public_classic_authors rows (migration 20261116180000), plus the blog's
 --   four is_editorial and keywords column SELECT rows (migration
---   20261117230000). A relation with no
+--   20261117230000), plus DEL's three account_deletion_requests and three
+--   account_deletion_feedback rows (migration 20261118170000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -141,6 +142,12 @@ insert into grant_contract_expected (kind, line) values
 ('col','series.author_id | authenticated | INSERT'),
 ('col','series.pen_name_id | authenticated | INSERT'),
 ('col','series.title | authenticated | INSERT'),
+('rel','r account_deletion_feedback | anon | -'),
+('rel','r account_deletion_feedback | authenticated | -'),
+('rel','r account_deletion_feedback | service_role | SELECT'),
+('rel','r account_deletion_requests | anon | -'),
+('rel','r account_deletion_requests | authenticated | -'),
+('rel','r account_deletion_requests | service_role | SELECT'),
 ('rel','r account_suspensions | anon | -'),
 ('rel','r account_suspensions | authenticated | -'),
 ('rel','r account_suspensions | service_role | SELECT'),
@@ -367,8 +374,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 271 then
-    raise exception 'FAIL: part1: the snapshot must hold 271 rows, holds %', v_expected;
+  if v_expected <> 277 then
+    raise exception 'FAIL: part1: the snapshot must hold 277 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

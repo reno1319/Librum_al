@@ -94,11 +94,12 @@ describe("locked page", () => {
     expect(siteLockResponse(request("/login", { method: "POST" }))?.status).toBe(503);
   });
 
-  it("leaves exactly the seven machine routes open", () => {
+  it("leaves exactly the eight machine routes open", () => {
     vi.stubEnv(SITE_LOCK_ENV, KEY);
     expect([...SITE_LOCK_OPEN_PATHS].sort()).toEqual([
       "/api/health",
       "/api/health/db",
+      "/api/internal/account-deletions/run",
       "/api/internal/payouts/run",
       "/api/internal/preorders/run",
       "/api/internal/tmp-uploads/cleanup",

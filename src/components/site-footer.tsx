@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import { IconInstagram } from "@/components/icons";
+import { LibrumLogo } from "@/components/librum-logo";
 
 // SOCIAL (Renato soc3, 2026-11-18): Librum's real Instagram page, as an
 // icon under the reply promise, on every page. A plain link; nothing
@@ -55,7 +56,9 @@ export function SiteFooter() {
     <footer className="bg-primary-hover text-primary-foreground">
       <div className="page-container flex flex-col gap-8 py-8 md:flex-row md:justify-between">
         <div className="max-w-xs">
-          <span className="font-serif text-[1.625rem]">Librum</span>
+          {/* LOGO (Renato 11-18, lg1 a): same wordmark as the header; the
+              margins keep the old serif text's spacing around it. */}
+          <LibrumLogo className="mt-2 mb-3 block h-[1.375rem] w-auto" />
           <p className="mt-2 text-[0.9375rem] leading-relaxed text-primary-foreground/80">
             Libra elektronikë të pavarur, të botuar drejtpërdrejt nga ata
             që i shkruajnë.
