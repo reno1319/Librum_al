@@ -3,15 +3,14 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { IconClose } from "@/components/icons";
 
-// P1 book page (design B, 2026-11-10): the three small browser-side
+// P1 book page (design B, 2026-11-10): the small browser-side
 // pieces of the new book page. Each one renders the plain, complete
 // content on the server, so without JavaScript nothing is hidden:
 // - ExpandableText: the full text; once the browser has measured it and
 //   it is taller than `lines` lines, it folds and "Lexo më shumë" opens it.
 // - CoverZoom: a link to the cover image itself; with JavaScript it opens
 //   the large cover in a popup instead.
-// - CopyLinkButton: a link to this book's page; with JavaScript it copies
-//   that address instead.
+// (CopyLinkButton moved into the share row, src/components/share-buttons.tsx.)
 
 export function ExpandableText({
   children,
@@ -120,38 +119,5 @@ export function CoverZoom({
         </div>
       </dialog>
     </>
-  );
-}
-
-export function CopyLinkButton({ path, className }: { path: string; className?: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-
-  useEffect(() => {
-    if (state === "idle") return;
-    const timer = window.setTimeout(() => setState("idle"), 2500);
-    return () => window.clearTimeout(timer);
-  }, [state]);
-
-  return (
-    <a
-      href={path}
-      className={className}
-      onClick={(event) => {
-        event.preventDefault();
-        const url = new URL(path, window.location.origin).toString();
-        if (!navigator.clipboard?.writeText) {
-          setState("failed");
-          return;
-        }
-        navigator.clipboard.writeText(url).then(
-          () => setState("copied"),
-          () => setState("failed"),
-        );
-      }}
-    >
-      <span aria-live="polite">
-        {state === "copied" ? "U kopjua" : state === "failed" ? "Kopjojeni nga shiriti i adresës" : "Kopjo lidhjen"}
-      </span>
-    </a>
   );
 }

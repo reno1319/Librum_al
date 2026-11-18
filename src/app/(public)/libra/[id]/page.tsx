@@ -75,7 +75,8 @@ import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { classicAuthorPath, formatClassicYears, loadClassicAuthorsByWork } from "@/lib/classic-authors";
 import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER, DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
-import { bookWhatsappShareHref } from "@/lib/contact";
+import { bookShareTarget } from "@/lib/contact";
+import { ShareButtons } from "@/components/share-buttons";
 import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { editorPath } from "@/lib/book-editor-copy";
@@ -92,7 +93,7 @@ import {
   readingAgeValue,
 } from "@/lib/book-reader-details";
 import { BookDescriptionView } from "@/components/book-description-view";
-import { CopyLinkButton, CoverZoom, ExpandableText } from "@/components/book-page-extras";
+import { CoverZoom, ExpandableText } from "@/components/book-page-extras";
 import { StickyBuyBar } from "@/components/sticky-buy-bar";
 import {
   IconCalendar,
@@ -855,7 +856,7 @@ export default async function BookDetailPage({
     : null;
   const penIsTranslator = translatorLine !== null && translatorNames.length === 0;
   // TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded from WhatsApp.
-  const whatsappShareHref = bookWhatsappShareHref(book, bookByline);
+  const shareTarget = bookShareTarget(book, bookByline);
   // P2: schema.org Book data for Google, only on a published book (the
   // author's own preview and an earlier buyer's view of an unpublished
   // book carry none, the same rule as generateMetadata's).
@@ -1473,24 +1474,11 @@ export default async function BookDetailPage({
               </p>
             )}
 
-            {/* TRUST PACK (item 5, 6. a): a plain wa.me link, nothing loaded
-                from WhatsApp. P1: plus "Kopjo lidhjen" (this page's own
-                address, copied in the browser). */}
-            {whatsappShareHref && (
-              <p className="flex flex-wrap items-center gap-x-1.5 border-t border-border pt-1 text-xs">
-                <span className="text-muted">Ndajeni:</span>
-                <a
-                  href={whatsappShareHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Ndajeni në WhatsApp"
-                  className={SHARE_LINK_CLASSES}
-                >
-                  WhatsApp
-                </a>
-                <span aria-hidden="true" className="text-muted">·</span>
-                <CopyLinkButton path={bookPagePath(book.id)} className={SHARE_LINK_CLASSES} />
-              </p>
+            {/* TRUST PACK (item 5, 6. a) -> SOCIAL (Renato soc2, 2026-11-18):
+                the share row, logos only, plain links (nothing loaded from
+                those sites). */}
+            {shareTarget && (
+              <ShareButtons url={shareTarget.url} text={shareTarget.text} className="border-t border-border pt-1 text-xs" />
             )}
           </div>
         </aside>
@@ -1883,8 +1871,6 @@ const BREADCRUMB_LINK_CLASSES =
   "focus-ring inline-flex min-h-11 items-center rounded-sm underline underline-offset-2 hover:text-primary hover:decoration-2";
 const NOTICE_CLASSES = "mt-4 max-w-[32.5rem] rounded-[8px] px-3 py-2 text-sm";
 const BOX_NOTE_CLASSES = "text-[0.8125rem] text-muted";
-const SHARE_LINK_CLASSES =
-  "focus-ring inline-flex min-h-11 items-center rounded-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
 const TILE_ICON_CLASSES = "size-[1.375rem]";
 // BD3 patch 4 -> P1: the role after the translator's name.
 const TRANSLATOR_ROLE = "(Përkthyes)";

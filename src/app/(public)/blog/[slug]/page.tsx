@@ -11,6 +11,7 @@ import { BLOG_RELATED_POSTS_LIMIT, selectRelatedPosts, type BlogLandingCandidate
 import { BlogMarkdown } from "@/components/blog-markdown";
 import { BlogArticleCard, NgaLibrumTag, type BlogArticleCardPost } from "@/components/blog-article-card";
 import { BlogCta } from "@/components/blog-category-nav";
+import { ShareButtons } from "@/components/share-buttons";
 import type { BlogCategory } from "@/lib/types";
 
 type PublicBlogPostDetail = {
@@ -242,6 +243,10 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
           <BlogMarkdown markdown={post.content_markdown} />
         </div>
       </article>
+
+      {/* SOCIAL (Renato soc2, 2026-11-18): the same share row as the book
+          page, at the end of the article. */}
+      <ShareButtons url={url} text={`${post.title} në Librum`} className="mt-10 text-sm" />
 
       {related.length > 0 && (
         <section className="mt-14 border-t border-border pt-8">

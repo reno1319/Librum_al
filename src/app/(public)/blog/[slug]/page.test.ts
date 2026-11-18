@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ReactElement } from "react";
 import { readFileSync } from "fs";
 import path from "path";
+import { ShareButtons } from "@/components/share-buttons";
 
 // LIBRUM 2.0 BLOG-1D: mirrors this repo's established Server Component
 // test pattern (see e.g. src/app/admin/(protected)/blog/[id]/preview/page.test.ts)
@@ -35,7 +36,9 @@ function walk(node: unknown, visit: (el: ReactElement<Record<string, unknown>>) 
   const element = node as ReactElement<Record<string, unknown>>;
   if (!("props" in element)) return;
   visit(element);
-  if (typeof element.type === "function") {
+  // SOCIAL: the share row is a client component with hooks, so it can't
+  // be called directly here; its props are still walked.
+  if (typeof element.type === "function" && element.type !== ShareButtons) {
     const rendered = (element.type as (props: unknown) => unknown)(element.props);
     walk(rendered, visit);
     return;
@@ -69,6 +72,7 @@ function allText(node: unknown): string {
   if (Array.isArray(node)) return node.map(allText).join("");
   if (typeof node !== "object" || !("props" in (node as object))) return "";
   const element = node as ReactElement<Record<string, unknown>>;
+  if (element.type === ShareButtons) return "";
   if (typeof element.type === "function") {
     return allText((element.type as (props: unknown) => unknown)(element.props));
   }
@@ -307,6 +311,19 @@ describe("BlogArticlePage", () => {
     expect(text).toContain("1 janar 2026 · ");
     expect(hrefs).toContain("/signup?role=author");
     expect(hrefs).not.toContain("/librari");
+  });
+
+  it("SOCIAL (soc2): the share row follows the article, with the article's full address and title", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const rows: Record<string, unknown>[] = [];
+    walk(page, (element) => {
+      if (element.type === ShareButtons) rows.push(element.props);
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].url).toBe("http://localhost:3000/blog/how-to-publish");
+    expect(rows[0].text).toBe(`${basePost.title} në Librum`);
   });
 
   it("a reader-category post (Kulturë) ends with the Shfletoni librarinë button", async () => {
