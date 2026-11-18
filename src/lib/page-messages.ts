@@ -8,6 +8,7 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  "A live article needs at least one keyword. Add one in Keywords and save.",
   "A review name has 2 to 40 characters.",
   "Arsyeja duhet të ketë më pak se 2000 karaktere.",
   "Autorët duhet të jenë 18 vjeç ose më shumë. Shënoni kutinë për ta konfirmuar.",
@@ -40,6 +41,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Dorëshkrimi nuk u ngarkua dot. Provoni përsëri",
   "Duhet të pranoni Kushtet e përdorimit para se të bëheni autor.",
   "EPUB-i është shumë i madh ose ka shumë skedarë.",
+  "Each keyword must be 40 characters or fewer.",
   "Emri duhet të ketë nga 2 deri në 40 karaktere.",
   "Emri mund të ketë deri në 120 karaktere",
   "Emri nuk mund të jetë bosh",
@@ -228,6 +230,7 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Title must be 200 characters or fewer.",
   "Të dhënat bankare nuk u ruajtën. Kontrolloni të dhënat dhe provoni përsëri.",
   "Unable to sign in. Check your credentials and try again.",
+  "Use at most 10 keywords.",
   "Vendosni çmimin e librit në lekë para se ta publikoni.",
   "Vendosni çmimin e paketës në lekë para se ta publikoni.",
   "We couldn't review this report. Please try again.",

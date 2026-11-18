@@ -156,8 +156,8 @@ do $$
 declare
   func record;
   sigs text[] := array[
-    'create_blog_post(text,text,text,text,text,text,boolean,text,text)',
-    'update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text)',
+    'create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[])',
+    'update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[])',
     'publish_blog_post(uuid)',
     'unpublish_blog_post(uuid)',
     'delete_blog_post(uuid)'
@@ -401,7 +401,7 @@ begin
   -- attempt to influence (created_by is not even a parameter).
   select public.create_blog_post(
     'Editor Post', 'editor-post', 'An excerpt.', 'Body content.', null,
-    'kultura', false, null, null
+    'kultura', false, null, null, false, array['test']
   ) into v_new_id;
 
   perform pg_temp.assert(v_new_id is not null, 'part4: create_blog_post() must return a new id');

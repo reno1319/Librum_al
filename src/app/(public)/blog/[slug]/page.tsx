@@ -21,6 +21,7 @@ type PublicBlogPostDetail = {
   content_markdown: string;
   cover_image_path: string | null;
   category: BlogCategory;
+  is_editorial: boolean;
   seo_title: string | null;
   seo_description: string | null;
   published_at: string | null;
@@ -45,7 +46,7 @@ const getPublishedBlogPostBySlug = cache(async (slug: string) => {
   const { data } = await supabase
     .from("blog_posts")
     .select(
-      "id, title, slug, excerpt, content_markdown, cover_image_path, category, seo_title, seo_description, published_at, updated_at",
+      "id, title, slug, excerpt, content_markdown, cover_image_path, category, is_editorial, seo_title, seo_description, published_at, updated_at",
     )
     .eq("slug", slug)
     .eq("status", "published")
@@ -126,7 +127,7 @@ function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; ur
     // Blog categories audit F3 (Renato 2026-11-17, a): only an
     // Editorial post names an author; every other post has none (blog3:
     // no byline), only Librum as publisher.
-    ...(post.category === "editorial" ? { author: { "@type": "Organization", name: "Librum Editorial" } } : {}),
+    ...(post.is_editorial ? { author: { "@type": "Organization", name: "Librum Editorial" } } : {}),
     publisher: { "@type": "Organization", name: "Librum" },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     ...(coverUrl ? { image: [coverUrl] } : {}),
@@ -162,7 +163,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   // the current article's own body a second time.
   const { data: relatedCandidatesData } = await supabase
     .from("blog_posts")
-    .select("id, slug, title, excerpt, category, cover_image_path, published_at, status, featured")
+    .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
     .eq("category", post.category)
     .neq("id", post.id)
@@ -177,9 +178,10 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   // "Nga Librum" tag, a thin gold line and the byline "Nga Librum"
   // (blog1/blog3); every other post links its category name to the
   // category page and has no byline. The bottom button follows the
-  // category (blog6).
+  // category (blog6). bs1: an Editorial post is the tick on top of a
+  // real category, so it shows the tag AND its category link.
   const categoryInfo = getBlogCategory(post.category);
-  const isEditorial = post.category === "editorial";
+  const isEditorial = post.is_editorial === true;
   const origin = resolveSiteOrigin();
   const url = `${origin}/blog/${post.slug}`;
 
@@ -189,6 +191,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       title: candidate.title,
       excerpt: candidate.excerpt,
       category: candidate.category,
+      is_editorial: candidate.is_editorial,
       coverUrl: candidate.cover_image_path
         ? supabase.storage.from("blog").getPublicUrl(candidate.cover_image_path).data.publicUrl
         : null,
@@ -205,12 +208,10 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
       </Link>
 
       <article className={isEditorial ? "mt-4 border-t-[3px] border-accent pt-5" : "mt-4"}>
-        {isEditorial ? (
-          <p>
-            <NgaLibrumTag />
-          </p>
-        ) : categoryInfo ? (
-          <p className="text-xs font-medium uppercase tracking-wide">
+        {isEditorial || categoryInfo ? (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium uppercase tracking-wide">
+            {isEditorial && <NgaLibrumTag />}
+            {categoryInfo && (
             <Link
               href={blogCategoryHref(categoryInfo)}
               className="underline underline-offset-[3px] hover:decoration-2"
@@ -218,6 +219,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
             >
               {categoryInfo.label}
             </Link>
+            )}
           </p>
         ) : null}
         <h1 className="mt-1 font-serif text-3xl font-normal text-foreground md:text-4xl">

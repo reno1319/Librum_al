@@ -6,7 +6,11 @@ import {
   getBlogCategory,
   getBlogCategoryByUrlSlug,
   isBlogCategory,
+  isPostInSection,
+  BLOG_POST_CATEGORIES,
 } from "./blog-categories";
+import { readFileSync } from "fs";
+import path from "path";
 
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {
@@ -33,9 +37,31 @@ describe("blog categories", () => {
     expect(BLOG_CATEGORY_LABELS.tregu).toBe("Tregu i Librit & Botimet");
   });
 
-  it("stored values are ASCII and match the migration's CHECK list", () => {
+  it("the six section values are ASCII (Editorial + the five stored categories)", () => {
     const migration = BLOG_CATEGORIES.map((c) => `'${c.value}'`).join(", ");
     expect(migration).toBe("'editorial', 'zeja', 'tregu', 'kultura', 'reflektime', 'vleresime'");
+  });
+
+  it("bs1: a post can be filed under five categories only; Editorial is a section (the tick), never a stored category", () => {
+    expect(BLOG_POST_CATEGORIES.map((c) => c.value)).toEqual(["zeja", "tregu", "kultura", "reflektime", "vleresime"]);
+    expect(isBlogCategory("editorial")).toBe(false);
+    expect(getBlogCategory("editorial")?.label).toBe("Editorial");
+    const migration = readFileSync(
+      path.join(__dirname, "../../supabase/migrations/20261117230000_blog_editorial_keywords.sql"),
+      "utf8",
+    );
+    const list = BLOG_POST_CATEGORIES.map((c) => `'${c.value}'`).join(", ");
+    expect(migration).toContain(`check (category in (${list}))`);
+  });
+
+  it("bs1 a: isPostInSection -- Editorial follows the tick, every other section the post's own category", () => {
+    const ticked = { category: "tregu", is_editorial: true };
+    const plain = { category: "tregu", is_editorial: false };
+    expect(isPostInSection(ticked, "editorial")).toBe(true);
+    expect(isPostInSection(ticked, "tregu")).toBe(true);
+    expect(isPostInSection(ticked, "zeja")).toBe(false);
+    expect(isPostInSection(plain, "editorial")).toBe(false);
+    expect(isPostInSection(plain, "tregu")).toBe(true);
   });
 
   it("the four old values are no longer categories", () => {

@@ -13,8 +13,8 @@ import type { BlogCategory } from "@/lib/types";
 // actually small.
 //
 // Blog categories (2026-11-17): the label line is the category name in
-// the category's own colour; an Editorial post shows the yellow
-// "Nga Librum" tag instead. `compactOnMobile` (the /blog lists and the
+// the category's own colour; an Editorial post (bs1, is_editorial)
+// shows the yellow "Nga Librum" tag first, then its category name. `compactOnMobile` (the /blog lists and the
 // category pages) turns the card into a row with a small square
 // picture and no excerpt below the sm breakpoint.
 export type BlogArticleCardPost = {
@@ -22,6 +22,7 @@ export type BlogArticleCardPost = {
   title: string;
   excerpt: string;
   category: BlogCategory;
+  is_editorial: boolean;
   coverUrl: string | null;
   published_at: string | null;
 };
@@ -34,13 +35,24 @@ export function NgaLibrumTag() {
   );
 }
 
-export function BlogCategoryLabel({ category }: { category: BlogCategory }) {
+export function BlogCategoryLabel({
+  category,
+  isEditorial,
+}: {
+  category: BlogCategory;
+  isEditorial: boolean;
+}) {
   const info = getBlogCategory(category);
-  if (!info) return null;
-  if (info.value === "editorial") return <NgaLibrumTag />;
-  return (
+  const name = info ? (
     <span className="text-xs font-medium uppercase tracking-wide" style={{ color: info.ink }}>
       {info.label}
+    </span>
+  ) : null;
+  if (!isEditorial) return name;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      <NgaLibrumTag />
+      {name}
     </span>
   );
 }
@@ -71,7 +83,7 @@ export function BlogArticleCard({
         <div className={`aspect-[3/2] w-full rounded-card bg-border${imageSize}`} />
       )}
       <div className="min-w-0">
-        <BlogCategoryLabel category={post.category} />
+        <BlogCategoryLabel category={post.category} isEditorial={post.is_editorial} />
         <p className="font-serif text-base font-semibold leading-snug text-foreground">
           {post.title}
         </p>

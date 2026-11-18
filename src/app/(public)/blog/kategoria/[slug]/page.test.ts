@@ -74,13 +74,14 @@ function props(slug: string, faqe?: string | string[]) {
   };
 }
 
-function row(id: string, category = "zeja") {
+function row(id: string, category = "zeja", isEditorial = false) {
   return {
     id,
     slug: id,
     title: `Post ${id}`,
     excerpt: "Excerpt",
     category,
+    is_editorial: isEditorial,
     cover_image_path: null,
     published_at: "2026-11-01T00:00:00Z",
     status: "published",
@@ -119,6 +120,32 @@ describe("BlogCategoryPage", () => {
     expect(chain.eq).toHaveBeenCalledWith("category", "zeja");
     expect(chain.order).toHaveBeenCalledWith("published_at", { ascending: false });
     expect(chain.range).toHaveBeenCalledWith(0, 11);
+  });
+
+  it("bs1 a: the Editorial page lists ticked posts (never category=editorial), each card naming its own category", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [row("ed", "tregu", true), row("plain", "tregu", false)], count: 2 });
+    const page = await BlogCategoryPage(props("editorial"));
+    expect(chain.eq).toHaveBeenCalledWith("is_editorial", true);
+    expect(chain.eq).not.toHaveBeenCalledWith("category", "editorial");
+    const links = hrefs(page);
+    expect(links).toContain("/blog/ed");
+    expect(links).not.toContain("/blog/plain");
+    const text = allText(page);
+    expect(text).toContain("Nga Librum");
+    expect(text).toContain("Tregu i Librit & Botimet");
+  });
+
+  it("bs1 a: a category page also lists that category's Editorial posts", async () => {
+    mockReturns.mockResolvedValueOnce({ data: [row("ed", "tregu", true)], count: 1 });
+    const page = await BlogCategoryPage(props("tregu-i-librit-dhe-botimet"));
+    expect(chain.eq).toHaveBeenCalledWith("category", "tregu");
+    expect(hrefs(page)).toContain("/blog/ed");
+  });
+
+  it("bs6: the blog search box sits above the category buttons", () => {
+    const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
+    expect(source.indexOf("<BlogSearchBox />")).toBeGreaterThan(-1);
+    expect(source.indexOf("<BlogSearchBox />")).toBeLessThan(source.indexOf("<BlogCategoryButtons"));
   });
 
   it("page 2 asks for rows 12-23 and shows the page numbers with Më parë", async () => {

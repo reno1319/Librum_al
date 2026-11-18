@@ -18,6 +18,7 @@ function post(overrides: Partial<BlogLandingCandidate> & { id: string }): BlogLa
     title: `Post ${overrides.id}`,
     excerpt: "Excerpt",
     category: "zeja",
+    is_editorial: false,
     cover_image_path: null,
     published_at: "2026-01-01T00:00:00Z",
     status: "published",
@@ -92,6 +93,15 @@ describe("selectLatestPosts", () => {
 });
 
 describe("selectCategoryPosts", () => {
+  it("bs1 a: the Editorial section takes ticked posts; their own category keeps them too", () => {
+    const candidates = [
+      post({ id: "ed", category: "tregu", is_editorial: true }),
+      post({ id: "plain", category: "tregu" }),
+    ];
+    expect(selectCategoryPosts(candidates, "editorial").map((p) => p.id)).toEqual(["ed"]);
+    expect(selectCategoryPosts(candidates, "tregu").map((p) => p.id).sort()).toEqual(["ed", "plain"]);
+  });
+
   it("returns only published posts from the given category, newest first", () => {
     const candidates = [
       post({ id: "writing-old", category: "zeja", published_at: "2026-01-01T00:00:00Z" }),

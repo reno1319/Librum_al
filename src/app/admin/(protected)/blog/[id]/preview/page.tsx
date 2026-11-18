@@ -19,6 +19,7 @@ type PreviewBlogPost = {
   content_markdown: string;
   cover_image_path: string | null;
   category: BlogCategory;
+  is_editorial: boolean;
   status: BlogPostStatus;
   published_at: string | null;
 };
@@ -39,7 +40,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
   const supabase = await createClient();
   const { data: post } = await supabase
     .from("blog_posts")
-    .select("id, title, excerpt, content_markdown, cover_image_path, category, status, published_at")
+    .select("id, title, excerpt, content_markdown, cover_image_path, category, is_editorial, status, published_at")
     .eq("id", id)
     .maybeSingle<PreviewBlogPost>();
 
@@ -66,6 +67,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
       <article className="mt-6">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">
           {BLOG_CATEGORY_LABELS[post.category]}
+          {post.is_editorial && " · Editorial"}
         </p>
         <h1 className="mt-1 font-serif text-3xl font-semibold text-foreground md:text-4xl">{post.title}</h1>
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>

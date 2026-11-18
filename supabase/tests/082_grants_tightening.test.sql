@@ -179,7 +179,7 @@ select pg_temp.assert((select count(*) from unnest(array[
     'public.clear_expired_book_reservations()',
     'public.clear_expired_reader_holds()',
     'public.complete_refund_issuance_attempt(uuid,text,text)',
-    'public.create_blog_post(text,text,text,text,text,text,boolean,text,text)',
+    'public.create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[])',
     'public.create_book_checkout_intent(uuid,text,boolean,uuid)',
     'public.create_bundle_checkout_snapshot(uuid,text,text,integer)',
     'public.delete_blog_post(uuid)',
@@ -219,7 +219,7 @@ select pg_temp.assert((select count(*) from unnest(array[
     'public.staff_profile_display_names(uuid[])',
     'public.staff_remove_pen_name_links(uuid)',
     'public.unpublish_blog_post(uuid)',
-    'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text)',
+    'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[])',
     'public.user_owns_book(uuid)'
   ]) as f where has_function_privilege('service_role', f::regprocedure, 'EXECUTE')) = 53,
   'part2: service_role holds EXECUTE on all 53 functions');
@@ -277,13 +277,16 @@ select pg_temp.assert(
   -- pd_edition_redirect(uuid), a replaced edition's old book page.
   -- Download count (migration 20261115200000): book_download_count(uuid),
   -- the number on the book page for signed-out visitors (a count, no one named).
+  -- Blog search (migration 20261117230000): search_blog_posts(text,integer),
+  -- published posts only, SECURITY INVOKER like search_books.
   = 'book_download_count(uuid) ; book_is_publicly_listed(books) ; book_makes_pen_name_public(books) ; '
     || 'enforce_author_payouts_immutability() ; enforce_book_rights_declarations_append_only() ; '
     || 'enforce_bundle_checkout_snapshots_financial_facts_immutability() ; enforce_payout_reversal_matches_original() ; '
     || 'pd_edition_redirect(uuid) ; '
     || 'pen_name_links_valid(jsonb) ; reject_payout_destination_snapshot_mutation() ; '
+    || 'search_blog_posts(text,integer) ; '
     || 'search_books(text,text,integer,integer,integer) ; staff_has_permission(text) ; user_owns_book(uuid)',
-  'part4: anon can EXECUTE exactly the thirteen allowed public functions');
+  'part4: anon can EXECUTE exactly the fourteen allowed public functions');
 
 do $$
 begin

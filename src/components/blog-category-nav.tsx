@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { BLOG_CATEGORIES, BLOG_CTA, blogCategoryHref } from "@/lib/blog-categories";
-import type { BlogCategory } from "@/lib/types";
+import type { BlogSection } from "@/lib/types";
 
 // Blog categories (2026-11-17): the row of category buttons under the
 // /blog intro and on every category page. "Të gjitha" goes back to
 // /blog; each other button opens its category page and carries a dot
 // in the category's colour (the active one is filled instead). One row
 // at desktop; on a phone the row scrolls sideways.
-export function BlogCategoryButtons({ active }: { active: BlogCategory | null }) {
+export function BlogCategoryButtons({ active }: { active: BlogSection | null }) {
   const base =
     "focus-ring inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm";
   return (
