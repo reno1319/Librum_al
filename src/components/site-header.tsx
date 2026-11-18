@@ -8,6 +8,7 @@ import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
 import { FeedbackButton } from "@/components/feedback-button";
 import { accountFirstName } from "@/lib/account-first-name";
+import { LibrumLogo } from "@/components/librum-logo";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
 // so it's directly unit-testable (src/components/site-header.test.ts)
@@ -155,11 +156,15 @@ export async function SiteHeader() {
           the right group shrinks first, never the logo. */}
       <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-4 xl:gap-x-8">
         <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-4 xl:gap-x-8">
+          {/* LOGO (Renato 11-18, lg1 a): the "librum." wordmark, the same
+              height as the old serif "Librum" so the header row doesn't move.
+              lg2 a: the padding keeps the old 42px tap height; the
+              negative margin cancels it, so nothing moves. */}
           <Link
             href="/"
-            className="focus-ring rounded-sm font-serif text-[1.75rem] font-bold text-primary-foreground"
+            className="focus-ring -my-[9px] block rounded-sm py-[9px] text-primary-foreground"
           >
-            Librum
+            <LibrumLogo className="block h-6 w-auto" />
           </Link>
 
           {/* Wraps onto a second row rather than scrolling sideways when
