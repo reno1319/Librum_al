@@ -38,9 +38,16 @@ describe("vercel.json cron configuration", () => {
     expect(payout?.schedule).toBe(PAYOUT_CYCLE_CRON_EXPRESSION);
   });
 
-  it("contains exactly four cron entries -- payouts, the BD5 clean-up and the two BD16 pre-order runs", () => {
+  it("contains exactly five cron entries -- payouts, the BD5 clean-up, the two BD16 pre-order runs and DEL's account deletions", () => {
     const config = readVercelConfig();
-    expect(config.crons).toHaveLength(4);
+    expect(config.crons).toHaveLength(5);
+  });
+
+  // DEL: the accounts whose 30 days are over, daily at 03:30 UTC.
+  it("registers the daily account-deletion job", () => {
+    const config = readVercelConfig();
+    const run = config.crons.find((cron) => cron.path === "/api/internal/account-deletions/run");
+    expect(run?.schedule).toBe("30 3 * * *");
   });
 
   // BD16 P5 (PLAN-BD16-r1 §3.5): Vercel crons are UTC and Tirana is

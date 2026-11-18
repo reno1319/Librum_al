@@ -10,6 +10,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/internal/account-deletions/run",
+      "schedule": "30 3 * * *"
+    },
+    {
       "path": "/api/internal/preorders/run?at=0600",
       "schedule": "0 6 * * *"
     },

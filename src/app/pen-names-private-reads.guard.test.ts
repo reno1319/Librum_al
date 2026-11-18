@@ -68,12 +68,14 @@ const PUBLIC_FILES = [
 ].filter((f) => !rel(f).startsWith("app/(public)/dashboard/") && !NOT_PUBLIC_LIB.has(rel(f)));
 
 // The own-row checks the brief lists (isAuthor and "your review"), plus
-// deleteAccount's own-books read. Each must carry an own-row filter.
+// the account deletion's own-books read. Each must carry an own-row filter.
 const PUBLIC_BASE_READS: Record<string, string[]> = {
   "app/(public)/libra/[id]/page.tsx": ["books", "reviews"],
   "app/(public)/libra/[id]/actions.ts": ["books"],
   "app/(public)/paketa/[id]/page.tsx": ["bundles"],
-  "app/(public)/account/actions.ts": ["books"],
+  // DEL: the final deletion (the daily job) reads the account's own
+  // books with the service-role client, filtered by the account's id.
+  "lib/account-deletion.ts": ["books"],
   // The author's own book for the rights declaration (16a).
   "lib/book-rights.ts": ["books"],
   // ADMIN-3-REVIEW (N3): the retention cleanup re-reads the book's
@@ -85,6 +87,7 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
 // A helper that takes the author id as a parameter names it so.
 const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {
   "lib/book-reviews.ts": /\.eq\("author_id",\s*params\.authorId\)/,
+  "lib/account-deletion.ts": /\.eq\("author_id",\s*userId\)/,
 };
 
 describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base tables", () => {

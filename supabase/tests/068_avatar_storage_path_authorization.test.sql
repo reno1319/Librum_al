@@ -218,11 +218,13 @@ begin
 
   -- Triggers on profiles: the BEFORE DELETE reader-hold cleanup and,
   -- since PEN-NAMES-1 (migration 20261019184512), the AFTER trigger that
-  -- keeps the default pen name equal to public_author_name.
+  -- keeps the default pen name equal to public_author_name; and since
+  -- DEL (migration 20261118170000), the BEFORE DELETE trigger that keeps
+  -- a deleted reader's approved reviews.
   perform pg_temp.assert(
     (select string_agg(tgname, ',' order by tgname) from pg_trigger
       where tgrelid = 'public.profiles'::regclass and not tgisinternal)
-      = 'clear_expired_reader_holds_trigger,profiles_sync_default_pen_name',
+      = 'clear_expired_reader_holds_trigger,profiles_keep_approved_reviews,profiles_sync_default_pen_name',
     'part1: profiles triggers unchanged');
 
   -- PEN-NAMES-2 (C5): the public_author_profiles view is gone.

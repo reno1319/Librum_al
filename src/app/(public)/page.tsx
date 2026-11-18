@@ -22,6 +22,8 @@ import {
   TEXT_LINK_CLASSES,
 } from "@/components/page-bands";
 import type { Metadata } from "next";
+import { isDayParam } from "@/lib/account-deletion-reasons";
+import { formatDateOnly } from "@/lib/book-detail-dates";
 
 // LIBRUM 2.0 UI-3: this page is the AUTHOR/self-publishing homepage --
 // permanent product boundary, locked by this phase: HOMEPAGE = AUTHORS,
@@ -195,9 +197,9 @@ const HERO_IMAGE_SRC = "/images/author-hero.jpg";
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string }>;
+  searchParams: Promise<{ account?: string; until?: string }>;
 }) {
-  const { account } = await searchParams;
+  const { account, until } = await searchParams;
   const supabase = await createClient();
 
   const [newestCovers, rowCovers, slots, userResult] = await Promise.all([
@@ -245,9 +247,14 @@ export default async function Home({
 
   return (
     <main className="flex-1">
-      {account === "deleted" && (
+      {/* DEL (del1 a): the account is hidden, deleted 30 days later. */}
+      {account === "deletion_requested" && (
         <div className="page-container pt-10">
-          <Alert variant="success">Llogaria juaj u fshi.</Alert>
+          <Alert variant="success">
+            {isDayParam(until)
+              ? `Llogaria juaj do të fshihet përgjithmonë më ${formatDateOnly(until)}. Deri atëherë mund ta riktheni duke hyrë në llogari. Ju dërguam një email me këto të dhëna.`
+              : "Llogaria juaj do të fshihet përgjithmonë pas 30 ditësh. Deri atëherë mund ta riktheni duke hyrë në llogari. Ju dërguam një email me këto të dhëna."}
+          </Alert>
         </div>
       )}
 

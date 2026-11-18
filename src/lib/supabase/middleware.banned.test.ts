@@ -20,7 +20,7 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
   requested.push(`${init?.method ?? "GET"} ${url.pathname}`);
   const routes: Route[] = [
     (u) => (u.pathname === "/auth/v1/user" ? authUserResponse() : undefined),
-    (u) => (u.pathname === "/rest/v1/rpc/my_account_is_suspended" ? Response.json(false) : undefined),
+    (u) => (u.pathname === "/rest/v1/rpc/my_account_status" ? Response.json("active") : undefined),
   ];
   for (const route of routes) {
     const response = route(url, init);
@@ -91,7 +91,7 @@ describe("updateSession against the real auth client (PEOPLE-2 F1)", () => {
       expect(response.cookies.get(COOKIE)?.maxAge).toBe(0);
       // No signOut: /logout is refused for a banned token the same way.
       expect(requested.some((r) => r.includes("/logout"))).toBe(false);
-      expect(requested.some((r) => r.includes("my_account_is_suspended"))).toBe(false);
+      expect(requested.some((r) => r.includes("my_account_status"))).toBe(false);
     });
   }
 
@@ -114,7 +114,7 @@ describe("updateSession against the real auth client (PEOPLE-2 F1)", () => {
   it("a valid, unsuspended session passes through after the RPC check", async () => {
     authUserResponse = () => Response.json({ id: USER_ID, aud: "authenticated", role: "authenticated", app_metadata: {}, user_metadata: {}, created_at: "2026-10-01T00:00:00Z" });
     const response = await updateSession(request("/dashboard"));
-    expect(requested).toContain("POST /rest/v1/rpc/my_account_is_suspended");
+    expect(requested).toContain("POST /rest/v1/rpc/my_account_status");
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
   });

@@ -12,8 +12,11 @@
 //     Suspend action's ban step succeeded (isUserBannedError);
 //   * the auth user's banned_until in the future (older Supabase Auth,
 //     which still returned a banned user from /user); and
-//   * my_account_is_suspended() -- the account_suspensions row is the
-//     source of truth, so this still works when the ban step failed.
+//   * my_account_status() = 'suspended' -- the account_suspensions row
+//     is the source of truth, so this still works when the ban step
+//     failed. (DEL: one call that also answers 'deletion_pending', see
+//     shouldRedirectForDeletionPending below; it replaced my_account_is_suspended()
+//     here, migration 20261118170000.)
 // If the RPC errors for a signed-in user, we cannot tell, so we fail
 // CLOSED for that user (503, session kept, nothing signed out).
 // Anonymous requests never reach this.
@@ -47,8 +50,8 @@ export function decideSuspension(input: {
 }): SuspensionDecision {
   if (isBannedNow(input.bannedUntil, input.now)) return "suspended";
   if (input.rpc.error) return "check_failed";
-  if (input.rpc.data === true) return "suspended";
-  if (input.rpc.data === false) return "allow";
+  if (input.rpc.data === "suspended") return "suspended";
+  if (input.rpc.data === "active" || input.rpc.data === "deletion_pending") return "allow";
   // Anything else (null, a string, an object) is not an answer.
   return "check_failed";
 }
@@ -64,4 +67,22 @@ export function wantsStatusInsteadOfRedirect(request: {
   if (request.headers.get("next-action")) return true;
   if (request.nextUrl.pathname === "/api" || request.nextUrl.pathname.startsWith("/api/")) return true;
   return request.method !== "GET" && request.method !== "HEAD";
+}
+
+// DEL (del2 b): an account waiting to be deleted sees only the Restore
+// page. Reached only after decideSuspension allowed the request, so the
+// RPC answered. Exact paths only: /auth/callback and /login so signing
+// in again works; the Restore page's own Server Actions (Restore, Sign
+// out) post to /account/restore; and /reset-password, the one page the
+// recovery containment (recovery-session.ts, which runs after this)
+// allows -- without it a pending account in a password-reset session
+// would loop between the two pages and could never reach Restore. Once
+// the password is changed the recovery cookie is cleared and the next
+// page is Restore.
+export const DELETION_PENDING_PATH = "/account/restore";
+export const DELETION_PENDING_MESSAGE = "Kjo llogari do të fshihet. Hyni dhe riktheni llogarinë për të vazhduar.";
+const DELETION_PENDING_ALLOWED_PATHS = new Set([DELETION_PENDING_PATH, "/auth/callback", "/login", "/reset-password"]);
+
+export function shouldRedirectForDeletionPending(pathname: string, rpcData: unknown): boolean {
+  return rpcData === "deletion_pending" && !DELETION_PENDING_ALLOWED_PATHS.has(pathname);
 }
