@@ -30,7 +30,8 @@ export const SITE_LOCK_RETRY_AFTER_SECONDS = 86400;
 
 // Machine routes that must keep working for everyone (2a): POK's
 // server-to-server webhook, the monthly payout job, the daily
-// temporary-upload clean-up (BD5) and the daily pre-order job (BD16,
+// temporary-upload clean-up (BD5), the daily account deletions (DEL)
+// and the daily pre-order job (BD16,
 // both ?at= cron entries; the query is not part of the pathname)
 // (vercel.json, each guarded by its own CRON_SECRET check), the liveness check and the uptime monitor's
 // database check (ALERTS-1, 2a: returns only ok or not ok), and the email
@@ -41,6 +42,7 @@ export const SITE_LOCK_OPEN_PATHS: ReadonlySet<string> = new Set([
   "/api/payments/pok/webhook",
   "/api/internal/payouts/run",
   "/api/internal/tmp-uploads/cleanup",
+  "/api/internal/account-deletions/run",
   "/api/internal/preorders/run",
   "/api/health",
   "/api/health/db",

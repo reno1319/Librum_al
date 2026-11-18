@@ -210,7 +210,9 @@ export default function PrivacyPage() {
                 pseudonimin e tyre, dhe emri i llogarisë së një autori mbetet
                 privat. Autorët shohin shitjet e librave të tyre, por jo kush
                 i bleu. Për një libër në parapublikim, autori sheh vetëm sa
-                lexues presin njoftimin, jo kush janë.
+                lexues presin njoftimin, jo kush janë. Vlerësimet tuaja mbeten në
+                Librum me emrin tuaj të vlerësimeve edhe pasi ta fshini llogarinë,
+                dhe nuk mund të hiqen.
               </p>
             </section>
 
@@ -289,8 +291,9 @@ export default function PrivacyPage() {
               <ul className="mt-2 list-disc pl-5">
                 <li>
                   <strong>Llogaria dhe profili:</strong> derisa ta fshini
-                  llogarinë. Fshirja heq menjëherë profilin dhe aksesin e
-                  zakonshëm që lidhet me të.
+                  llogarinë. Kur kërkoni fshirjen, llogaria juaj nuk shihet më në
+                  Librum dhe fshihet përgjithmonë pas 30 ditësh. Deri atëherë mund
+                  ta riktheni duke hyrë në llogari.
                 </li>
                 <li>
                   <strong>Blerjet, pagesat, rimbursimet dhe pagesat për autorët:</strong>{" "}

@@ -11,7 +11,10 @@ import {
   SUSPENDED_LOGIN_PATH,
   SUSPENDED_MESSAGE,
   SUSPENSION_CHECK_FAILED_MESSAGE,
+  DELETION_PENDING_MESSAGE,
+  DELETION_PENDING_PATH,
   decideSuspension,
+  shouldRedirectForDeletionPending,
   isUserBannedError,
   wantsStatusInsteadOfRedirect,
 } from "@/lib/suspension-gate";
@@ -119,7 +122,7 @@ export async function updateSession(request: NextRequest) {
   if (user) {
     let rpc: { data: unknown; error: unknown };
     try {
-      rpc = await supabase.rpc("my_account_is_suspended");
+      rpc = await supabase.rpc("my_account_status");
     } catch (rpcError) {
       rpc = { data: null, error: rpcError };
     }
@@ -155,6 +158,21 @@ export async function updateSession(request: NextRequest) {
         console.error("updateSession: signOut threw while cutting off a suspended session", { error: signOutError });
       }
       return cutOffSuspendedSession(request, supabaseResponse);
+    }
+
+    // DEL (del2 b): an account waiting to be deleted reaches only the
+    // Restore page; the session is kept, so Restore can be pressed. A
+    // page is redirected there; a Server Action or /api elsewhere gets a
+    // plain 403. Cookies the refresh above set are carried over.
+    if (shouldRedirectForDeletionPending(request.nextUrl.pathname, rpc.data)) {
+      const pending = wantsStatusInsteadOfRedirect(request)
+        ? new NextResponse(DELETION_PENDING_MESSAGE, {
+            status: 403,
+            headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+          })
+        : NextResponse.redirect(new URL(DELETION_PENDING_PATH, request.url));
+      supabaseResponse.cookies.getAll().forEach((cookie) => pending.cookies.set(cookie));
+      return pending;
     }
   }
 
