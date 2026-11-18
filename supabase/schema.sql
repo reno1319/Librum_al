@@ -20694,3 +20694,38 @@ $$;
 revoke all on function public.account_deletion_claim(uuid)
   from public, anon, authenticated, service_role;
 grant execute on function public.account_deletion_claim(uuid) to service_role;
+
+-- ============================================================
+-- DEL follow-up: reviews stay visible while an account waits to be
+-- deleted (migration 20261118190000_account_deletion_reviews_stay_visible.sql).
+-- Same statement as the migration; see its header.
+-- ============================================================
+
+create or replace view public.public_reviews
+  with (security_barrier)
+as
+  select r.id, r.book_id, r.rating, r.body, r.created_at,
+         coalesce(
+           (select p.review_name from public.profiles p where p.id = r.reader_id),
+           r.deleted_reader_review_name
+         ) as reviewer_name,
+         exists (
+           select 1 from public.purchases pu
+            where pu.book_id = r.book_id
+              and pu.reader_id = r.reader_id
+              and pu.refunded_at is null
+              and pu.amount_cents > 0
+              and not exists (
+                select 1 from public.payment_disputes d
+                 where d.stripe_payment_intent_id = pu.stripe_payment_intent_id
+                   and d.status = 'lost'
+              )
+         ) as verified,
+         r.reviewer_is_author
+  from public.reviews r
+  where r.status = 'approved'
+    and exists (select 1 from public.public_books pb where pb.id = r.book_id)
+    and not exists (
+      select 1 from public.account_suspensions sus
+       where sus.user_id = r.reader_id and sus.lifted_at is null
+    );
