@@ -24,6 +24,7 @@ import {
   type BlogArticleCardPost,
 } from "@/components/blog-article-card";
 import { BlogCategoryButtons, BlogCta } from "@/components/blog-category-nav";
+import { BlogSearchBox } from "@/components/blog-search-box";
 import { EmptyState } from "@/components/ui/empty-state";
 
 // LIBRUM 2.0 BLOG-1D: static metadata -- no per-request DB call is
@@ -64,6 +65,7 @@ function toCardPost(post: BlogLandingCandidate, coverUrl: string | null): BlogAr
     title: post.title,
     excerpt: post.excerpt,
     category: post.category,
+    is_editorial: post.is_editorial,
     coverUrl,
     published_at: post.published_at,
   };
@@ -82,7 +84,7 @@ export default async function BlogIndexPage() {
   // even if this filter were ever accidentally removed).
   const { data } = await supabase
     .from("blog_posts")
-    .select("id, slug, title, excerpt, category, cover_image_path, published_at, status, featured")
+    .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
     .order("published_at", { ascending: false })
     .limit(BLOG_LANDING_CANDIDATE_LIMIT)
@@ -99,17 +101,19 @@ export default async function BlogIndexPage() {
   // wrongly say "coming soon". Six bounded queries (3 rows each,
   // summary columns only) run in parallel; selectCategoryPosts()
   // re-checks status and category on whatever comes back.
+  // bs1 a: the Editorial band reads the is_editorial tick; every
+  // other band reads category, so an Editorial post shows in both.
   const bandResults = await Promise.all(
-    BLOG_CATEGORIES.map((c) =>
-      supabase
+    BLOG_CATEGORIES.map((c) => {
+      const q = supabase
         .from("blog_posts")
-        .select("id, slug, title, excerpt, category, cover_image_path, published_at, status, featured")
-        .eq("status", "published")
-        .eq("category", c.value)
+        .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
+        .eq("status", "published");
+      return (c.value === "editorial" ? q.eq("is_editorial", true) : q.eq("category", c.value))
         .order("published_at", { ascending: false })
         .limit(BLOG_CATEGORY_SECTION_LIMIT)
-        .returns<BlogLandingRow[]>(),
-    ),
+        .returns<BlogLandingRow[]>();
+    }),
   );
   const categorySections = BLOG_CATEGORIES.map((c, i) => ({
     category: c,
@@ -122,7 +126,10 @@ export default async function BlogIndexPage() {
     return path ? supabase.storage.from("blog").getPublicUrl(path).data.publicUrl : null;
   }
 
-  const featuredInfo = featured ? getBlogCategory(featured.category) : undefined;
+  // An Editorial lead keeps the Editorial colour line it had before bs1.
+  const featuredInfo = featured
+    ? getBlogCategory(featured.is_editorial ? "editorial" : featured.category)
+    : undefined;
   const featuredCover = featured ? coverUrlFor(featured.cover_image_path) : null;
 
   return (
@@ -140,6 +147,10 @@ export default async function BlogIndexPage() {
         </div>
 
         <div className="mt-7">
+          <BlogSearchBox />
+        </div>
+
+        <div className="mt-5">
           <BlogCategoryButtons active={null} />
         </div>
       </div>
@@ -177,7 +188,7 @@ export default async function BlogIndexPage() {
                     <div className="aspect-[3/2] w-full rounded-card bg-border" />
                   )}
                   <div>
-                    <BlogCategoryLabel category={featured.category} />
+                    <BlogCategoryLabel category={featured.category} isEditorial={featured.is_editorial} />
                     <p className="mt-3 font-serif text-2xl leading-tight text-foreground group-hover:underline md:text-3xl">
                       {featured.title}
                     </p>

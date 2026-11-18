@@ -7,6 +7,7 @@ import {
   BLOG_CATEGORY_EMPTY_LINE,
   blogCategoryHref,
   getBlogCategoryByUrlSlug,
+  isPostInSection,
   type BlogCategoryInfo,
 } from "@/lib/blog-categories";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/lib/blog-landing-logic";
 import { BlogArticleCard } from "@/components/blog-article-card";
 import { BlogCategoryButtons, BlogCta } from "@/components/blog-category-nav";
+import { BlogSearchBox } from "@/components/blog-search-box";
 
 // Blog categories (Renato 2026-11-17, approved pictures): one page per
 // category at /blog/kategoria/<urlSlug>. A header band in the
@@ -69,19 +71,23 @@ export default async function BlogCategoryPage({
 
   const supabase = await createClient();
   const { from, to } = blogCategoryPageRange(page);
-  const { data, count } = await supabase
+  const base = supabase
     .from("blog_posts")
-    .select("id, slug, title, excerpt, category, cover_image_path, published_at, status, featured", {
+    .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured", {
       count: "exact",
     })
-    .eq("status", "published")
-    .eq("category", category.value)
+    .eq("status", "published");
+  // bs1 a: /blog/kategoria/editorial lists the ticked posts; every other
+  // page lists its category, Editorial posts included.
+  const { data, count } = await (category.value === "editorial"
+    ? base.eq("is_editorial", true)
+    : base.eq("category", category.value))
     .order("published_at", { ascending: false })
     .order("id", { ascending: true })
     .range(from, to)
     .returns<BlogLandingCandidate[]>();
 
-  const posts = (data ?? []).filter((p) => p.status === "published" && p.category === category.value);
+  const posts = (data ?? []).filter((p) => p.status === "published" && isPostInSection(p, category.value));
   const pageCount = blogCategoryPageCount(count ?? 0);
   if (page > pageCount) notFound();
 
@@ -112,7 +118,11 @@ export default async function BlogCategoryPage({
       </div>
 
       <div className="page-container pt-7 pb-12">
-        <BlogCategoryButtons active={category.value} />
+        <BlogSearchBox />
+
+        <div className="mt-5">
+          <BlogCategoryButtons active={category.value} />
+        </div>
 
         {posts.length > 0 ? (
           <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-8 lg:grid-cols-3">
@@ -125,6 +135,7 @@ export default async function BlogCategoryPage({
                   title: post.title,
                   excerpt: post.excerpt,
                   category: post.category,
+                  is_editorial: post.is_editorial,
                   coverUrl: coverUrlFor(post.cover_image_path),
                   published_at: post.published_at,
                 }}

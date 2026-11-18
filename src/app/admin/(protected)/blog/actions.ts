@@ -136,6 +136,8 @@ function fieldsFromFormData(formData: FormData) {
     contentMarkdown: String(formData.get("contentMarkdown") ?? ""),
     category: String(formData.get("category") ?? ""),
     featured: formData.get("featured") === "on",
+    isEditorial: formData.get("isEditorial") === "on",
+    keywords: String(formData.get("keywords") ?? ""),
     seoTitle: String(formData.get("seoTitle") ?? ""),
     seoDescription: String(formData.get("seoDescription") ?? ""),
   };
@@ -167,6 +169,8 @@ export async function createBlogPostAction(formData: FormData) {
     p_cover_image_path: null,
     p_category: validation.value.category,
     p_featured: validation.value.featured,
+    p_is_editorial: validation.value.isEditorial,
+    p_keywords: validation.value.keywords,
     p_seo_title: validation.value.seoTitle,
     p_seo_description: validation.value.seoDescription,
   });
@@ -206,6 +210,8 @@ export async function createBlogPostAction(formData: FormData) {
       p_cover_image_path: permanentPath,
       p_category: validation.value.category,
       p_featured: validation.value.featured,
+      p_is_editorial: validation.value.isEditorial,
+      p_keywords: validation.value.keywords,
       p_seo_title: validation.value.seoTitle,
       p_seo_description: validation.value.seoDescription,
     });
@@ -289,6 +295,8 @@ export async function updateBlogPostAction(postId: string, formData: FormData) {
     p_cover_image_path: coverImagePath,
     p_category: validation.value.category,
     p_featured: validation.value.featured,
+    p_is_editorial: validation.value.isEditorial,
+    p_keywords: validation.value.keywords,
     p_seo_title: validation.value.seoTitle,
     p_seo_description: validation.value.seoDescription,
   });

@@ -109,6 +109,7 @@ const basePost = {
   content_markdown: "# Heading\n\nSome reasonably long article content used for reading time.",
   cover_image_path: null as string | null,
   category: "tregu" as const,
+  is_editorial: false,
   seo_title: null as string | null,
   seo_description: null as string | null,
   published_at: "2026-01-01T00:00:00Z" as string | null,
@@ -218,7 +219,7 @@ describe("BlogArticlePage", () => {
   });
 
   it("audit F3: an Editorial post's JSON-LD names Librum Editorial as author", async () => {
-    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "editorial" } });
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, is_editorial: true } });
     mockReturns.mockResolvedValueOnce({ data: [] });
     const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
     const jsonLd = JSON.parse(findScriptHtml(page)!.replace(/\\u003c/g, "<"));
@@ -318,13 +319,15 @@ describe("BlogArticlePage", () => {
     expect(hrefs).not.toContain("/signup?role=author");
   });
 
-  it("an Editorial post: yellow Nga Librum tag (no category link), byline Nga Librum, gold line, browse button", async () => {
-    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "editorial" } });
+  it("an Editorial post (bs1): yellow Nga Librum tag AND its category link, byline Nga Librum, gold line, its category's button", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "kultura", is_editorial: true } });
     mockReturns.mockResolvedValueOnce({ data: [] });
     const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
     const text = allText(page);
     const hrefs = collectLinkHrefs(page);
     expect(text).toContain("Nga Librum · 1 janar 2026 · ");
+    expect(text).toContain("Kulturë & Njohuri");
+    expect(hrefs).toContain("/blog/kategoria/kulture-dhe-njohuri");
     expect(hrefs).not.toContain("/blog/kategoria/editorial");
     expect(hrefs).toContain("/librari");
     let article: ReactElement<Record<string, unknown>> | null = null;

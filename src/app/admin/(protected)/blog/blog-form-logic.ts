@@ -13,6 +13,28 @@ export const EXCERPT_MAX_LENGTH = 500;
 export const CONTENT_MARKDOWN_MAX_LENGTH = 50000;
 export const SEO_TITLE_MAX_LENGTH = 70;
 export const SEO_DESCRIPTION_MAX_LENGTH = 160;
+// bs4 (Renato 2026-11-17): hidden search keywords, typed in one box
+// separated by commas; at most 10, each at most 40 characters. At least
+// one is needed to publish (checked by publish_blog_post() and, for a
+// post already live, update_blog_post()); a draft may have none.
+export const KEYWORDS_MAX_COUNT = 10;
+export const KEYWORD_MAX_LENGTH = 40;
+
+// "vetë-botim,  Vetë-botim , self publishing,," -> ["vetë-botim",
+// "self publishing"]: split on commas, trim, inner spaces collapsed,
+// blanks dropped, repeats (ignoring capitals) dropped, first spelling
+// kept. Never truncates: the caller rejects too many / too long.
+export function parseKeywords(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const k = part.replace(/\s+/g, " ").trim();
+    if (!k || seen.has(k.toLowerCase())) continue;
+    seen.add(k.toLowerCase());
+    out.push(k);
+  }
+  return out;
+}
 
 export type BlogPostFieldInput = {
   title: string;
@@ -21,6 +43,8 @@ export type BlogPostFieldInput = {
   contentMarkdown: string;
   category: string;
   featured: boolean;
+  isEditorial: boolean;
+  keywords: string;
   seoTitle: string;
   seoDescription: string;
 };
@@ -32,6 +56,8 @@ export type ValidatedBlogPostFields = {
   contentMarkdown: string;
   category: BlogCategory;
   featured: boolean;
+  isEditorial: boolean;
+  keywords: string[];
   seoTitle: string | null;
   seoDescription: string | null;
 };
@@ -78,6 +104,14 @@ export function validateBlogPostFields(input: BlogPostFieldInput): BlogValidatio
     return { ok: false, error: "Please choose a valid category." };
   }
 
+  const keywords = parseKeywords(input.keywords);
+  if (keywords.length > KEYWORDS_MAX_COUNT) {
+    return { ok: false, error: `Use at most ${KEYWORDS_MAX_COUNT} keywords.` };
+  }
+  if (keywords.some((k) => k.length > KEYWORD_MAX_LENGTH)) {
+    return { ok: false, error: `Each keyword must be ${KEYWORD_MAX_LENGTH} characters or fewer.` };
+  }
+
   const seoTitle = input.seoTitle.trim();
   if (seoTitle.length > SEO_TITLE_MAX_LENGTH) {
     return { ok: false, error: `SEO title must be ${SEO_TITLE_MAX_LENGTH} characters or fewer.` };
@@ -100,6 +134,8 @@ export function validateBlogPostFields(input: BlogPostFieldInput): BlogValidatio
       contentMarkdown,
       category: input.category,
       featured: input.featured,
+      isEditorial: input.isEditorial,
+      keywords,
       seoTitle: seoTitle || null,
       seoDescription: seoDescription || null,
     },
@@ -134,6 +170,10 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
       "That article can't be published right now -- it may already be published.",
     "no published post found for this id":
       "That article can't be unpublished right now -- it may already be a draft.",
+    "a published article needs at least one keyword":
+      "A live article needs at least one keyword. Add one in Keywords and save.",
+    "too many keywords": `Use at most ${KEYWORDS_MAX_COUNT} keywords.`,
+    "each keyword must be between 1 and 40 characters": `Each keyword must be ${KEYWORD_MAX_LENGTH} characters or fewer.`,
     "only a draft post can be deleted, or it does not exist":
       "Only draft articles can be deleted. Unpublish this article first.",
   };

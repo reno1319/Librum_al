@@ -8,6 +8,9 @@ import {
   TITLE_MAX_LENGTH,
   mapBlogRpcError,
   validateBlogPostFields,
+  parseKeywords,
+  KEYWORDS_MAX_COUNT,
+  KEYWORD_MAX_LENGTH,
   type BlogPostFieldInput,
 } from "./blog-form-logic";
 
@@ -19,6 +22,8 @@ function validInput(overrides: Partial<BlogPostFieldInput> = {}): BlogPostFieldI
     contentMarkdown: "Some article body content.",
     category: "tregu",
     featured: false,
+    isEditorial: false,
+    keywords: "",
     seoTitle: "",
     seoDescription: "",
     ...overrides,
@@ -104,10 +109,60 @@ describe("validateBlogPostFields", () => {
     }
   });
 
-  it("accepts every one of the six approved categories", () => {
-    for (const category of ["editorial", "zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
+  it("accepts every one of the five categories and rejects editorial (bs1: a tick, not a category)", () => {
+    for (const category of ["zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
       expect(validateBlogPostFields(validInput({ category })).ok).toBe(true);
     }
+    expect(validateBlogPostFields(validInput({ category: "editorial" }))).toEqual({
+      ok: false,
+      error: "Please choose a valid category.",
+    });
+  });
+
+  it("passes the Editorial tick through", () => {
+    const result = validateBlogPostFields(validInput({ isEditorial: true }));
+    expect(result.ok && result.value.isEditorial).toBe(true);
+  });
+
+  it("bs4: keywords are split on commas, trimmed, de-duplicated (ignoring capitals), blanks dropped", () => {
+    expect(parseKeywords("vetë-botim,  Vetë-botim , self   publishing,, ,e-libër")).toEqual([
+      "vetë-botim",
+      "self publishing",
+      "e-libër",
+    ]);
+    expect(parseKeywords("")).toEqual([]);
+    const result = validateBlogPostFields(validInput({ keywords: " a, b ,a" }));
+    expect(result.ok && result.value.keywords).toEqual(["a", "b"]);
+  });
+
+  it("bs4: no keywords is fine for a draft (the database checks publishing)", () => {
+    const result = validateBlogPostFields(validInput({ keywords: "" }));
+    expect(result.ok && result.value.keywords).toEqual([]);
+  });
+
+  it("bs4: rejects more than 10 keywords and a keyword over 40 characters", () => {
+    const eleven = Array.from({ length: KEYWORDS_MAX_COUNT + 1 }, (_, i) => `k${i}`).join(",");
+    expect(validateBlogPostFields(validInput({ keywords: eleven }))).toEqual({
+      ok: false,
+      error: "Use at most 10 keywords.",
+    });
+    const ten = Array.from({ length: KEYWORDS_MAX_COUNT }, (_, i) => `k${i}`).join(",");
+    expect(validateBlogPostFields(validInput({ keywords: ten })).ok).toBe(true);
+    expect(validateBlogPostFields(validInput({ keywords: "a".repeat(KEYWORD_MAX_LENGTH + 1) }))).toEqual({
+      ok: false,
+      error: "Each keyword must be 40 characters or fewer.",
+    });
+    expect(validateBlogPostFields(validInput({ keywords: "a".repeat(KEYWORD_MAX_LENGTH) })).ok).toBe(true);
+  });
+
+  it("maps the database's keyword errors to plain staff messages", () => {
+    expect(mapBlogRpcError({ message: "a published article needs at least one keyword" })).toBe(
+      "A live article needs at least one keyword. Add one in Keywords and save.",
+    );
+    expect(mapBlogRpcError({ message: "too many keywords" })).toBe("Use at most 10 keywords.");
+    expect(mapBlogRpcError({ message: "each keyword must be between 1 and 40 characters" })).toBe(
+      "Each keyword must be 40 characters or fewer.",
+    );
   });
 
   it("rejects an seo title over the max length", () => {

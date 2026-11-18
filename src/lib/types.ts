@@ -37,12 +37,18 @@ export type BookStatus = "draft" | "published" | "preorder";
 // boundary).
 export type BlogPostStatus = "draft" | "published";
 
-// Exactly the six fixed categories (the blog_posts CHECK constraint,
-// migration 20261117180000_blog_categories.sql) --
+// Exactly the five post categories (the blog_posts CHECK constraint,
+// migration 20261117230000_blog_editorial_keywords.sql) --
 // src/lib/blog-categories.ts is the single place these are paired with
 // a display label; this type alone is what the DB and every RPC
 // parameter are typed against.
-export type BlogCategory = "editorial" | "zeja" | "tregu" | "kultura" | "reflektime" | "vleresime";
+export type BlogCategory = "zeja" | "tregu" | "kultura" | "reflektime" | "vleresime";
+
+// The six /blog sections: the five categories plus Editorial (bs1,
+// Renato 2026-11-17). Editorial is not a category any more: it is the
+// is_editorial tick on top of one of the five, and an Editorial post
+// shows in both its own category and the Editorial section.
+export type BlogSection = "editorial" | BlogCategory;
 
 export type BlogPost = {
   id: string;
@@ -52,6 +58,10 @@ export type BlogPost = {
   content_markdown: string;
   cover_image_path: string | null;
   category: BlogCategory;
+  is_editorial: boolean;
+  // Hidden search words (bs3/bs4): never shown to readers; at least one
+  // is needed to publish.
+  keywords: string[];
   status: BlogPostStatus;
   featured: boolean;
   seo_title: string | null;

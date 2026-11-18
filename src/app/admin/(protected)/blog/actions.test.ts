@@ -142,6 +142,41 @@ describe("createBlogPostAction", () => {
     expect(mockRedirect).toHaveBeenCalledWith("/admin/blog/22222222-2222-4222-8222-222222222222/edit");
   });
 
+  it("bs1/bs4: passes the Editorial tick and the cleaned keyword list to create_blog_post", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
+    });
+
+    await expect(
+      createBlogPostAction(validFormData({ isEditorial: "on", keywords: " vetë-botim , e-libër,,Vetë-botim" })),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "create_blog_post",
+      expect.objectContaining({ p_is_editorial: true, p_keywords: ["vetë-botim", "e-libër"] }),
+    );
+  });
+
+  it("no tick and no keywords: p_is_editorial false, p_keywords [] (a draft may have none)", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
+    });
+
+    await expect(createBlogPostAction(validFormData())).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "create_blog_post",
+      expect.objectContaining({ p_is_editorial: false, p_keywords: [] }),
+    );
+  });
+
+  it("11 keywords are rejected before calling create_blog_post", async () => {
+    const formData = validFormData({ keywords: Array.from({ length: 11 }, (_, i) => `k${i}`).join(",") });
+    await expect(createBlogPostAction(formData)).rejects.toBeInstanceOf(RedirectSignal);
+    expect(currentMockSupabase._spies.rpc).not.toHaveBeenCalled();
+    expect(mockRedirect.mock.calls[0][0]).toContain(encodeURIComponent("Use at most 10 keywords."));
+  });
+
   it("never passes status/published_at/created_by as RPC parameters -- those are not exposed at all", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
@@ -347,6 +382,38 @@ describe("updateBlogPostAction", () => {
     );
     // No cover replacement happened, so nothing is removed from storage.
     expect(currentMockSupabase._spies.remove).not.toHaveBeenCalled();
+  });
+
+  it("bs1/bs4: update_blog_post always gets the tick and keywords from the form (never left to the database default)", async () => {
+    currentMockSupabase = makeMockSupabase({
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null },
+      rpcResults: { update_blog_post: { data: null, error: null } },
+    });
+
+    await expect(
+      updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData({ keywords: "mision" })),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "update_blog_post",
+      expect.objectContaining({ p_is_editorial: false, p_keywords: ["mision"] }),
+    );
+  });
+
+  it("a live article saved with no keywords shows the plain keyword message", async () => {
+    currentMockSupabase = makeMockSupabase({
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null },
+      rpcResults: {
+        update_blog_post: { data: null, error: { message: "a published article needs at least one keyword" } },
+      },
+    });
+
+    await expect(updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData())).rejects.toBeInstanceOf(
+      RedirectSignal,
+    );
+    expect(mockRedirect.mock.calls.at(-1)?.[0]).toContain(
+      encodeURIComponent("A live article needs at least one keyword. Add one in Keywords and save."),
+    );
   });
 
   it("never passes status/published_at/created_by/created_at as RPC parameters", async () => {
