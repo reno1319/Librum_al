@@ -57,6 +57,12 @@ const mockCreateClient = vi.fn(() =>
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// Patch B: the categories come from blog_categories; these tests use the
+// six rows the migration inserts.
+vi.mock("@/lib/blog-categories-server", async () => {
+  const { SEEDED_BLOG_CATEGORIES } = await import("@/lib/blog-categories.fixture");
+  return { getBlogCategories: async () => SEEDED_BLOG_CATEGORIES };
+});
 
 const { default: BlogSearchPage, metadata } = await import("./page");
 

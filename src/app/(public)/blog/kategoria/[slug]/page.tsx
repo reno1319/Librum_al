@@ -11,6 +11,7 @@ import {
   isPostInSection,
   type BlogCategoryInfo,
 } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import {
   blogCategoryPageCount,
   blogCategoryPageRange,
@@ -44,7 +45,7 @@ export async function generateMetadata({
   searchParams: Promise<{ faqe?: string | string[] }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const category = getBlogCategoryByUrlSlug(slug);
+  const category = getBlogCategoryByUrlSlug(await getBlogCategories(), slug);
   const page = parseBlogPageParam((await searchParams).faqe);
   if (!category || page === null) return {};
 
@@ -66,7 +67,8 @@ export default async function BlogCategoryPage({
   searchParams: Promise<{ faqe?: string | string[] }>;
 }) {
   const { slug } = await params;
-  const category = getBlogCategoryByUrlSlug(slug);
+  const categories = await getBlogCategories();
+  const category = getBlogCategoryByUrlSlug(categories, slug);
   const page = parseBlogPageParam((await searchParams).faqe);
   if (!category || page === null) notFound();
 
@@ -123,7 +125,7 @@ export default async function BlogCategoryPage({
         <BlogSearchBox />
 
         <div className="mt-5">
-          <BlogCategoryButtons active={category.value} />
+          <BlogCategoryButtons active={category.value} categories={categories} />
         </div>
 
         {posts.length > 0 ? (
@@ -131,6 +133,7 @@ export default async function BlogCategoryPage({
             {posts.map((post) => (
               <BlogArticleCard
                 key={post.id}
+                categories={categories}
                 compactOnMobile
                 post={{
                   slug: post.slug,

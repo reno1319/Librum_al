@@ -20,7 +20,9 @@ import {
   CancelScheduleButton,
 } from "../blog-status-actions";
 import { blogPublishState, canBeScheduled, formatTiranaDateTime, instantToTiranaInputs } from "@/lib/blog-schedule";
-import type { BlogCategory, BlogPostStatus } from "@/lib/types";
+import type { BlogPostStatus } from "@/lib/types";
+import { blogPostCategories } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
@@ -35,7 +37,7 @@ type EditableBlogPost = {
   excerpt: string;
   content_markdown: string;
   cover_image_path: string | null;
-  category: BlogCategory;
+  category: string;
   status: BlogPostStatus;
   published_at: string | null;
   featured: boolean;
@@ -145,6 +147,7 @@ export default async function EditBlogPostPage({
         slugReadOnly={state === "published"}
         submitLabel="Save"
         pinnedElsewhereTitle={pinned?.title ?? null}
+        categories={blogPostCategories(await getBlogCategories())}
         initialValues={{
           title: post.title,
           slug: post.slug,

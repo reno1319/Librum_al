@@ -97,18 +97,16 @@ describe("validateBlogPostFields", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("rejects an invalid category", () => {
-    const result = validateBlogPostFields(validInput({ category: "not-a-real-category" }));
-    expect(result).toEqual({ ok: false, error: "Please choose a valid category." });
-  });
-
-  it("rejects the blank first choice and the four old categories", () => {
-    for (const category of ["", "publishing", "writing", "authors-books", "librum-guides"]) {
+  it("patch B: rejects a category value that cannot be stored (shape only; the database checks it exists)", () => {
+    for (const category of ["", "Not Valid", "a--b", "-zeja", "zeja-", "Zeja", "x".repeat(61)]) {
       expect(validateBlogPostFields(validInput({ category }))).toEqual({
         ok: false,
         error: "Please choose a valid category.",
       });
     }
+    // A well-formed value passes here; create/update_blog_post() refuse
+    // one that is not a blog_categories row ('invalid category').
+    expect(validateBlogPostFields(validInput({ category: "perkthime" })).ok).toBe(true);
   });
 
   it("accepts every one of the five categories and rejects editorial (bs1: a tick, not a category)", () => {
@@ -212,6 +210,12 @@ describe("validateBlogPostFields", () => {
 });
 
 describe("mapBlogRpcError", () => {
+  it("patch B: a category deleted while the form was open (foreign key) asks for another", () => {
+    expect(mapBlogRpcError({ code: "23503", message: "violates foreign key constraint" })).toBe(
+      "Please choose a valid category.",
+    );
+  });
+
   it("maps a unique_violation (duplicate slug) to a friendly message", () => {
     expect(mapBlogRpcError({ code: "23505", message: "duplicate key value" })).toBe(
       "That URL slug is already in use. Please choose a different one.",

@@ -4,7 +4,8 @@ import { requireStaff, hasPermission } from "@/lib/staff";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
-import { BLOG_CATEGORY_LABELS } from "@/lib/blog-categories";
+import { getBlogCategory } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import { blogPublishState, formatTiranaDateTime, type BlogPublishState } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
@@ -59,6 +60,7 @@ export default async function AdminBlogListPage({
   // uses (e.g. reports.view vs reports.resolve).
   await requireStaff("blog.view");
   const canManage = await hasPermission("blog.manage");
+  const canCategories = await hasPermission("blog.categories");
 
   const supabase = await createClient();
   const { status: statusParam, success: rawSuccess, error: rawError } = await searchParams;
@@ -77,6 +79,7 @@ export default async function AdminBlogListPage({
     .order("updated_at", { ascending: false })
     .returns<AdminBlogPostRow[]>();
 
+  const categories = await getBlogCategories();
   const now = new Date();
   const allPosts = (posts ?? []).map((p) => ({ ...p, state: blogPublishState(p, now) }));
   const visiblePosts = activeFilter === "all" ? allPosts : allPosts.filter((p) => p.state === activeFilter);
@@ -91,10 +94,21 @@ export default async function AdminBlogListPage({
           title="Blog"
           description={`${allPosts.length} article${allPosts.length === 1 ? "" : "s"}`}
           actions={
-            canManage ? (
-              <Link href="/admin/blog/new">
-                <Button type="button">New article</Button>
-              </Link>
+            canManage || canCategories ? (
+              <div className="flex flex-wrap gap-2">
+                {canCategories && (
+                  <Link href="/admin/blog/categories">
+                    <Button type="button" variant="outline">
+                      Categories
+                    </Button>
+                  </Link>
+                )}
+                {canManage && (
+                  <Link href="/admin/blog/new">
+                    <Button type="button">New article</Button>
+                  </Link>
+                )}
+              </div>
             ) : undefined
           }
         />
@@ -159,7 +173,7 @@ export default async function AdminBlogListPage({
                   )}
                 </p>
                 <p className="text-xs text-muted">
-                  {BLOG_CATEGORY_LABELS[post.category as keyof typeof BLOG_CATEGORY_LABELS] ?? post.category}
+                  {getBlogCategory(categories, post.category)?.label ?? post.category}
                   {post.is_editorial && " · Editorial"}
                   {" · "}
                   Updated{" "}

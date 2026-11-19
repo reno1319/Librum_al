@@ -138,6 +138,21 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Nuk mundëm të përcaktojmë shumën që rimbursohet për këtë blerje. Na shkruani te mbështetja.",
   "Numri maksimal i përdorimeve duhet të jetë një numër i plotë nga 1 deri në 100.000",
   "Only draft articles can be deleted. Unpublish this article first.",
+  // Blog categories, patch B (2026-11-19).
+  "Name must be 1 to 60 characters.",
+  "Short name must be 1 to 24 characters.",
+  "Description must be 1 to 200 characters.",
+  "Address: use only a-z, 0-9 and single dashes (for example perkthime-letrare).",
+  "Address: use only a-z, 0-9 and single dashes.",
+  "Pick one of the 8 colours.",
+  "Pick the button at the bottom of the page.",
+  "That category could not be found. It may have just been deleted.",
+  "That address is already used by another category. Pick another.",
+  "There are already 50 categories. Delete one before adding another.",
+  "Editorial can't be deleted.",
+  "Editorial always comes first.",
+  "Choose another category for its articles.",
+  "Tick the box to confirm the delete.",
   // Blog pin + schedule + images (2026-11-19).
   "Pick a go-live time at least a few minutes from now.",
   "Pick a go-live time within the next year.",
@@ -349,6 +364,11 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // Blog categories, patch B (2026-11-19).
+  "Category created. It is last in the order: move it with the arrows.",
+  "Category saved.",
+  "Category deleted.",
+  "Category deleted. Its articles were moved.",
   "Account suspended. They're signed out, and their books are out of the Bookstore.",
   "Article published.",
   "Article scheduled.",

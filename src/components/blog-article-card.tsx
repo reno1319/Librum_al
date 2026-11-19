@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
-import { getBlogCategory } from "@/lib/blog-categories";
-import type { BlogCategory } from "@/lib/types";
+import { getBlogCategory, type BlogCategoryInfo } from "@/lib/blog-categories";
 
 // LIBRUM 2.0 BLOG-1D: the shared public article card -- /blog's
 // featured/latest/category sections, the category pages and the
@@ -21,7 +20,7 @@ export type BlogArticleCardPost = {
   slug: string;
   title: string;
   excerpt: string;
-  category: BlogCategory;
+  category: string;
   is_editorial: boolean;
   coverUrl: string | null;
   published_at: string | null;
@@ -38,11 +37,13 @@ export function NgaLibrumTag() {
 export function BlogCategoryLabel({
   category,
   isEditorial,
+  categories,
 }: {
-  category: BlogCategory;
+  category: string;
   isEditorial: boolean;
+  categories: readonly BlogCategoryInfo[];
 }) {
-  const info = getBlogCategory(category);
+  const info = getBlogCategory(categories, category);
   const name = info ? (
     <span className="text-xs font-medium uppercase tracking-wide" style={{ color: info.ink }}>
       {info.label}
@@ -59,9 +60,11 @@ export function BlogCategoryLabel({
 
 export function BlogArticleCard({
   post,
+  categories,
   compactOnMobile = false,
 }: {
   post: BlogArticleCardPost;
+  categories: readonly BlogCategoryInfo[];
   compactOnMobile?: boolean;
 }) {
   const imageSize = compactOnMobile ? " max-sm:aspect-square max-sm:w-24 max-sm:flex-none" : "";
@@ -83,7 +86,7 @@ export function BlogArticleCard({
         <div className={`aspect-[3/2] w-full rounded-card bg-border${imageSize}`} />
       )}
       <div className="min-w-0">
-        <BlogCategoryLabel category={post.category} isEditorial={post.is_editorial} />
+        <BlogCategoryLabel category={post.category} isEditorial={post.is_editorial} categories={categories} />
         <p className="font-serif text-base font-semibold leading-snug text-foreground">
           {post.title}
         </p>

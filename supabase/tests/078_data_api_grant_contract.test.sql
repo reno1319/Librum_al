@@ -36,7 +36,8 @@
 --   public_classic_authors rows (migration 20261116180000), plus the blog's
 --   four is_editorial and keywords column SELECT rows (migration
 --   20261117230000), plus DEL's three account_deletion_requests and three
---   account_deletion_feedback rows (migration 20261118170000). A relation with no
+--   account_deletion_feedback rows (migration 20261118170000), plus patch B's
+--   three blog_categories rows (migration 20261119180000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -166,6 +167,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r author_payouts | anon | -'),
 ('rel','r author_payouts | authenticated | SELECT'),
 ('rel','r author_payouts | service_role | SELECT'),
+('rel','r blog_categories | anon | SELECT'),
+('rel','r blog_categories | authenticated | SELECT'),
+('rel','r blog_categories | service_role | -'),
 ('rel','r blog_posts | anon | -'),
 ('rel','r blog_posts | authenticated | -'),
 ('rel','r blog_posts | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
