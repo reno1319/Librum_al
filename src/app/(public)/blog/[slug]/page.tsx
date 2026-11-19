@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
@@ -51,6 +52,7 @@ const getPublishedBlogPostBySlug = cache(async (slug: string) => {
     )
     .eq("slug", slug)
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .maybeSingle<PublicBlogPostDetail>();
   return data;
 });
@@ -166,6 +168,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
     .from("blog_posts")
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .eq("category", post.category)
     .neq("id", post.id)
     .order("published_at", { ascending: false })

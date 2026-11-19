@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { BLOG_SEARCH_RESULT_LIMIT, parseBlogSearchQuery } from "@/lib/blog-search";
@@ -39,6 +40,7 @@ export default async function BlogSearchPage({
         .from("blog_posts")
         .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
         .eq("status", "published")
+        .lte("published_at", blogNowIso())
         .in("id", ids)
         .returns<BlogLandingCandidate[]>();
       const byId = new Map((data ?? []).map((p) => [p.id, p]));

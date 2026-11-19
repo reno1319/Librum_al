@@ -6,7 +6,9 @@ import {
   SEO_TITLE_MAX_LENGTH,
   SLUG_MAX_LENGTH,
   TITLE_MAX_LENGTH,
+  findDisallowedImageUrls,
   mapBlogRpcError,
+  markdownImageUrls,
   validateBlogPostFields,
   parseKeywords,
   KEYWORDS_MAX_COUNT,
@@ -267,5 +269,54 @@ describe("mapBlogRpcError", () => {
   it("handles a null/undefined error safely", () => {
     expect(mapBlogRpcError(null)).toBe("Something went wrong. Please try again.");
     expect(mapBlogRpcError(undefined)).toBe("Something went wrong. Please try again.");
+  });
+});
+
+describe("markdownImageUrls / findDisallowedImageUrls (e2)", () => {
+  const BLOG = "https://ref.supabase.co/storage/v1/object/public/blog/";
+  it("finds inline and reference images, not plain links", () => {
+    const md = [
+      `![a](${BLOG}inline/1.jpg "Caption")`,
+      "![b](<https://x.test/b.png>)",
+      "[a link](https://x.test/page)",
+      "![c][pic] and ![pic2] and ![d][]",
+      "[pic]: https://x.test/c.png",
+      "[pic2]: https://x.test/c2.png 'title'",
+      "[d]: https://x.test/d.png",
+    ].join("\n\n"); // a definition cannot interrupt a paragraph
+    expect(markdownImageUrls(md)).toEqual([
+      `${BLOG}inline/1.jpg`,
+      "https://x.test/b.png",
+      "https://x.test/c.png",
+      "https://x.test/c2.png",
+      "https://x.test/d.png",
+    ]);
+  });
+  it("blocks new outside images, keeps Librum's and ones already saved", () => {
+    const previous = "![old](https://old.test/a.jpg)";
+    const md = `![old](https://old.test/a.jpg)\n![ok](${BLOG}inline/2.jpg)\n![new](https://new.test/b.jpg)`;
+    expect(findDisallowedImageUrls(md, BLOG, previous)).toEqual(["https://new.test/b.jpg"]);
+    expect(findDisallowedImageUrls(md, BLOG, null)).toEqual(["https://old.test/a.jpg", "https://new.test/b.jpg"]);
+    expect(findDisallowedImageUrls(`![x](${BLOG}../avatars/a.jpg)`, BLOG, null)).toEqual([`${BLOG}../avatars/a.jpg`]);
+  });
+  it("reads Markdown like the article page does (audit A-r1 N1)", () => {
+    // Brackets inside the alt text, an image inside a link, odd spacing,
+    // and a case-insensitive reference label are all still found.
+    expect(markdownImageUrls("![a [b]](https://evil.test/x.png)")).toEqual(["https://evil.test/x.png"]);
+    expect(markdownImageUrls("[![a](https://evil.test/y.png)](https://x.test)")).toEqual(["https://evil.test/y.png"]);
+    expect(markdownImageUrls("![a]( https://evil.test/z.png )")).toEqual(["https://evil.test/z.png"]);
+    expect(markdownImageUrls("![a][PIC]\n\n[pic]: https://evil.test/r.png")).toEqual(["https://evil.test/r.png"]);
+    // Code is shown as text, not as a picture, so it is not an image.
+    expect(markdownImageUrls("`![a](https://x.test/c.png)`\n\n    ![b](https://x.test/d.png)")).toEqual([]);
+    expect(findDisallowedImageUrls("![a [b]](https://evil.test/x.png)", BLOG, null)).toEqual(["https://evil.test/x.png"]);
+  });
+});
+
+describe("mapBlogRpcError: pin and schedule messages", () => {
+  it("maps the new database messages", () => {
+    expect(mapBlogRpcError({ message: "the go-live time must be in the future" })).toMatch(/at least a few minutes/);
+    expect(mapBlogRpcError({ message: "only a draft that has never been live can be scheduled" })).toMatch(/Use Publish/);
+    expect(mapBlogRpcError({ code: "23505", message: 'duplicate key value violates unique constraint "blog_posts_one_pin_idx"' })).toMatch(/pinned at the same moment/);
+    expect(mapBlogRpcError({ code: "23505", message: 'duplicate key value violates unique constraint "blog_posts_slug_key"' })).toMatch(/slug is already in use/);
   });
 });

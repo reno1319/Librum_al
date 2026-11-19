@@ -1,5 +1,6 @@
 import { isBlogCategory } from "@/lib/blog-categories";
 import type { BlogCategory } from "@/lib/types";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 // LIBRUM 2.0 BLOG-1C: mirrors migration 047's own CHECK constraints and
 // RPC-level length validation exactly (see that migration's own
@@ -157,6 +158,9 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
   // (the only UNIQUE constraint blog_posts has), surfaced by either
   // create_blog_post() or update_blog_post().
   if (error.code === "23505") {
+    if ((error.message ?? "").includes("blog_posts_one_pin_idx")) {
+      return "Another article was pinned at the same moment. Please try again.";
+    }
     return "That URL slug is already in use. Please choose a different one.";
   }
 
@@ -176,6 +180,10 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
     "each keyword must be between 1 and 40 characters": `Each keyword must be ${KEYWORD_MAX_LENGTH} characters or fewer.`,
     "only a draft post can be deleted, or it does not exist":
       "Only draft articles can be deleted. Unpublish this article first.",
+    "the go-live time must be in the future": "Pick a go-live time at least a few minutes from now.",
+    "the go-live time must be within a year": "Pick a go-live time within the next year.",
+    "only a draft that has never been live can be scheduled":
+      "Only an article that has never been live can be scheduled. Use Publish instead.",
   };
 
   const message = error.message ?? "";
@@ -194,3 +202,53 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
 }
 
 export const NOT_AUTHENTICATED_RPC_MESSAGE = "not authenticated";
+
+// e2 (Renato 2026-11-19): images inside an article come only from
+// Librum's own blog storage (the Image button uploads them there). An
+// image that was already in the saved article is still accepted, so an
+// older post with an outside picture can still be saved.
+//
+// Finds every image address in the Markdown: inline ![alt](url "title")
+// and reference style ![alt][ref] / ![alt][] / ![ref] with their
+// [ref]: url definitions.
+// Every image address in the Markdown, found with the same Markdown
+// parser the article page renders with (react-markdown uses
+// mdast-util-from-markdown through remark-parse), so the uploads-only
+// check sees exactly the pictures a reader would see (audit A-r1 N1:
+// a regex missed `![a [b]](url)`). Covers inline images and
+// reference-style images with their definitions.
+export function markdownImageUrls(markdown: string): string[] {
+  const urls: string[] = [];
+  const defs = new Map<string, string>();
+  const refs: string[] = [];
+  const walk = (node: MdNode) => {
+    if (node.type === "image" && typeof node.url === "string") urls.push(node.url);
+    else if (node.type === "imageReference" && typeof node.identifier === "string") refs.push(node.identifier);
+    else if (node.type === "definition" && typeof node.identifier === "string" && typeof node.url === "string") {
+      if (!defs.has(node.identifier)) defs.set(node.identifier, node.url);
+    }
+    if (node.children) for (const c of node.children) walk(c);
+  };
+  walk(fromMarkdown(markdown) as MdNode);
+  for (const id of refs) {
+    const url = defs.get(id);
+    if (url !== undefined) urls.push(url);
+  }
+  return urls;
+}
+
+type MdNode = { type: string; url?: unknown; identifier?: unknown; children?: MdNode[] };
+
+export function findDisallowedImageUrls(
+  markdown: string,
+  allowedPrefix: string,
+  previousMarkdown: string | null,
+): string[] {
+  const previous = new Set(previousMarkdown ? markdownImageUrls(previousMarkdown) : []);
+  return markdownImageUrls(markdown).filter(
+    (url) => !(url.startsWith(allowedPrefix) && !url.includes("..")) && !previous.has(url),
+  );
+}
+
+export const OUTSIDE_IMAGE_ERROR =
+  "Images must be uploaded with the Image button. Remove the picture linked from another website and add it again with Image.";

@@ -138,6 +138,13 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Nuk mundëm të përcaktojmë shumën që rimbursohet për këtë blerje. Na shkruani te mbështetja.",
   "Numri maksimal i përdorimeve duhet të jetë një numër i plotë nga 1 deri në 100.000",
   "Only draft articles can be deleted. Unpublish this article first.",
+  // Blog pin + schedule + images (2026-11-19).
+  "Pick a go-live time at least a few minutes from now.",
+  "Pick a go-live time within the next year.",
+  "Only an article that has never been live can be scheduled. Use Publish instead.",
+  "Another article was pinned at the same moment. Please try again.",
+  "Pick a real date and time (Tirana time).",
+  "Images must be uploaded with the Image button. Remove the picture linked from another website and add it again with Image.",
   "Pagesa duhet të shqyrtohet nga ne.",
   "Pagesa juaj po niset. Provoni përsëri pas pak.",
   "Pagesa nuk mund të nisej. Provoni përsëri.",
@@ -344,6 +351,8 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Account suspended. They're signed out, and their books are out of the Bookstore.",
   "Article published.",
+  "Article scheduled.",
+  "Schedule cancelled. The article is a draft again.",
   "Article saved.",
   "Article unpublished. It will no longer be visible on the public Blog once BLOG-1D ships.",
   "Book approved. It's live in the Bookstore now.",

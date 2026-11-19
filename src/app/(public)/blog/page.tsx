@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
@@ -86,6 +87,7 @@ export default async function BlogIndexPage() {
     .from("blog_posts")
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .order("published_at", { ascending: false })
     .limit(BLOG_LANDING_CANDIDATE_LIMIT)
     .returns<BlogLandingRow[]>();
@@ -108,7 +110,8 @@ export default async function BlogIndexPage() {
       const q = supabase
         .from("blog_posts")
         .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
-        .eq("status", "published");
+        .eq("status", "published")
+        .lte("published_at", blogNowIso());
       return (c.value === "editorial" ? q.eq("is_editorial", true) : q.eq("category", c.value))
         .order("published_at", { ascending: false })
         .limit(BLOG_CATEGORY_SECTION_LIMIT)

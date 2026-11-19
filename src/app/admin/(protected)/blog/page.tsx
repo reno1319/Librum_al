@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { BLOG_CATEGORY_LABELS } from "@/lib/blog-categories";
-import type { BlogPostStatus } from "@/lib/types";
+import { blogPublishState, formatTiranaDateTime, type BlogPublishState } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
@@ -13,19 +13,24 @@ export const metadata: Metadata = {
   title: "Blog",
 };
 
-const STATUS_CLASS: Record<BlogPostStatus, string> = {
+// e3 (2026-11-19): a scheduled article is published with its time
+// still ahead; the list shows it as its own state.
+const STATUS_CLASS: Record<BlogPublishState, string> = {
   draft: "text-muted",
+  scheduled: "font-semibold text-amber-800",
   published: "font-semibold text-green-700",
 };
 
-const STATUS_LABEL: Record<BlogPostStatus, string> = {
+const STATUS_LABEL: Record<BlogPublishState, string> = {
   draft: "Draft",
+  scheduled: "Scheduled",
   published: "Published",
 };
 
-const FILTERS: { value: BlogPostStatus | "all"; label: string }[] = [
+const FILTERS: { value: BlogPublishState | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "draft", label: "Draft" },
+  { value: "scheduled", label: "Scheduled" },
   { value: "published", label: "Published" },
 ];
 
@@ -33,7 +38,8 @@ type AdminBlogPostRow = {
   id: string;
   title: string;
   slug: string;
-  status: BlogPostStatus;
+  status: string;
+  featured: boolean;
   category: string;
   is_editorial: boolean;
   published_at: string | null;
@@ -58,20 +64,22 @@ export default async function AdminBlogListPage({
   const { status: statusParam, success: rawSuccess, error: rawError } = await searchParams;
   const success = pageSuccessMessage(rawSuccess);
   const error = pageErrorMessage(rawError);
-  const activeFilter: BlogPostStatus | "all" =
-    statusParam === "draft" || statusParam === "published" ? statusParam : "all";
+  const activeFilter: BlogPublishState | "all" =
+    statusParam === "draft" || statusParam === "scheduled" || statusParam === "published" ? statusParam : "all";
 
   // Explicit column select, never select("*") -- this list only ever
-  // renders these six fields; content_markdown/seo_*/created_by/
-  // cover_image_path/featured aren't needed here at all.
+  // renders these fields; content_markdown/seo_*/created_by/
+  // cover_image_path aren't needed here at all. featured drives the
+  // 📌 Pinned label and published_at the Scheduled state (2026-11-19).
   const { data: posts } = await supabase
     .from("blog_posts")
-    .select("id, title, slug, status, category, is_editorial, published_at, updated_at")
+    .select("id, title, slug, status, featured, category, is_editorial, published_at, updated_at")
     .order("updated_at", { ascending: false })
     .returns<AdminBlogPostRow[]>();
 
-  const allPosts = posts ?? [];
-  const visiblePosts = activeFilter === "all" ? allPosts : allPosts.filter((p) => p.status === activeFilter);
+  const now = new Date();
+  const allPosts = (posts ?? []).map((p) => ({ ...p, state: blogPublishState(p, now) }));
+  const visiblePosts = activeFilter === "all" ? allPosts : allPosts.filter((p) => p.state === activeFilter);
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -142,7 +150,14 @@ export default async function AdminBlogListPage({
               className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm"
             >
               <div className="min-w-0">
-                <p className="truncate font-medium">{post.title}</p>
+                <p className="truncate font-medium">
+                  {post.title}
+                  {post.featured && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 align-middle text-xs font-semibold text-amber-800">
+                      📌 Pinned
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-muted">
                   {BLOG_CATEGORY_LABELS[post.category as keyof typeof BLOG_CATEGORY_LABELS] ?? post.category}
                   {post.is_editorial && " · Editorial"}
@@ -153,7 +168,13 @@ export default async function AdminBlogListPage({
                     month: "short",
                     day: "numeric",
                   })}
-                  {post.status === "published" && post.published_at && (
+                  {post.state === "scheduled" && post.published_at && (
+                    <>
+                      {" · "}
+                      Goes live {formatTiranaDateTime(post.published_at)} Tirana time
+                    </>
+                  )}
+                  {post.state === "published" && post.published_at && (
                     <>
                       {" · "}
                       Published{" "}
@@ -168,7 +189,7 @@ export default async function AdminBlogListPage({
               </div>
 
               <div className="flex shrink-0 items-center gap-3">
-                <span className={`text-sm ${STATUS_CLASS[post.status]}`}>{STATUS_LABEL[post.status]}</span>
+                <span className={`text-sm ${STATUS_CLASS[post.state]}`}>{STATUS_LABEL[post.state]}</span>
                 <Link href={`/admin/blog/${post.id}/preview`} className="text-sm text-primary underline underline-offset-2 hover:decoration-2">
                   Preview
                 </Link>
