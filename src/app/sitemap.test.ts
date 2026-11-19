@@ -16,7 +16,7 @@ function mockQuery(table: string) {
   const query: Query = { table, calls: [] };
   queries.push(query);
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "in", "not", "order", "range", "returns"]) {
+  for (const method of ["select", "eq", "lte", "in", "not", "order", "range", "returns"]) {
     builder[method] = (...args: unknown[]) => {
       query.calls.push({ method, args });
       return builder;
@@ -103,6 +103,8 @@ describe("sitemap", () => {
   it("queries only status='published' -- drafts are filtered at the query level, matching every other public Blog query", async () => {
     await sitemap();
     expect(argsOf(queriesOf("blog_posts")[0], "eq")).toContainEqual(["status", "published"]);
+    // e3: a scheduled article (published, time still ahead) is left out.
+    expect(argsOf(queriesOf("blog_posts")[0], "lte")[0][0]).toBe("published_at");
   });
 
   it("selects only slug and updated_at -- never article bodies", async () => {

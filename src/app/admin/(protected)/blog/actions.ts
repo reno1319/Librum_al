@@ -9,9 +9,12 @@ import { requireStaff } from "@/lib/staff";
 import { ADMIN_LOGIN_PATH } from "@/lib/admin-safe-redirect";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { BLOG_COVER_SIZE, IMAGE_CACHE_CONTROL_SECONDS, shrinkImageToJpeg } from "@/lib/cover-resize";
+import { tiranaLocalToInstant } from "@/lib/blog-schedule";
 import {
+  findDisallowedImageUrls,
   mapBlogRpcError,
   NOT_AUTHENTICATED_RPC_MESSAGE,
+  OUTSIDE_IMAGE_ERROR,
   validateBlogPostFields,
 } from "./blog-form-logic";
 
@@ -143,6 +146,13 @@ function fieldsFromFormData(formData: FormData) {
   };
 }
 
+// e2: the public address prefix of Librum's own blog storage (the same
+// shape Storage's getPublicUrl() returns).
+function blogImagePrefix(): string {
+  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim().replace(/\/+$/, "");
+  return `${base}/storage/v1/object/public/${BLOG_BUCKET}/`;
+}
+
 // ============================================================
 // createBlogPostAction: BLOG-1B's own "create draft first, cover
 // second" sequence (Section 13 of the BLOG-1C brief) -- the post id
@@ -159,6 +169,9 @@ export async function createBlogPostAction(formData: FormData) {
   const validation = validateBlogPostFields(fieldsFromFormData(formData));
   if (!validation.ok) {
     redirect(`/admin/blog/new?error=${encodeURIComponent(validation.error)}`);
+  }
+  if (findDisallowedImageUrls(validation.value.contentMarkdown, blogImagePrefix(), null).length > 0) {
+    redirect(`/admin/blog/new?error=${encodeURIComponent(OUTSIDE_IMAGE_ERROR)}`);
   }
 
   const { data: newId, error: createError } = await supabase.rpc("create_blog_post", {
@@ -249,7 +262,7 @@ export async function updateBlogPostAction(postId: string, formData: FormData) {
 
   const { data: existing } = await supabase
     .from("blog_posts")
-    .select("id, cover_image_path")
+    .select("id, cover_image_path, content_markdown")
     .eq("id", postId)
     .maybeSingle();
 
@@ -260,6 +273,15 @@ export async function updateBlogPostAction(postId: string, formData: FormData) {
   const validation = validateBlogPostFields(fieldsFromFormData(formData));
   if (!validation.ok) {
     redirect(`/admin/blog/${postId}/edit?error=${encodeURIComponent(validation.error)}`);
+  }
+  if (
+    findDisallowedImageUrls(
+      validation.value.contentMarkdown,
+      blogImagePrefix(),
+      (existing.content_markdown as string | null) ?? null,
+    ).length > 0
+  ) {
+    redirect(`/admin/blog/${postId}/edit?error=${encodeURIComponent(OUTSIDE_IMAGE_ERROR)}`);
   }
 
   const coverResult = await resolveStagedCoverInput(supabase, userId, formData, `/admin/blog/${postId}/edit`);
@@ -411,4 +433,107 @@ export async function deleteBlogPostAction(postId: string) {
 
   revalidatePath("/admin/blog");
   redirect(`/admin/blog?success=${encodeURIComponent("Draft deleted.")}`);
+}
+
+// ============================================================
+// Scheduling (e3): a draft that has never been live, or a scheduled
+// article that is not live yet, goes live at the Tirana date and time
+// picked. Cancelling is the database's unpublish on a not-yet-live
+// article, which turns it back into a never-live draft.
+// ============================================================
+export async function scheduleBlogPostAction(postId: string, formData: FormData) {
+  await requireStaff("blog.manage");
+  const supabase = await createClient();
+
+  const goLive = tiranaLocalToInstant(
+    String(formData.get("scheduleDate") ?? ""),
+    String(formData.get("scheduleTime") ?? ""),
+  );
+  if (!goLive) {
+    redirect(
+      `/admin/blog/${postId}/edit?error=${encodeURIComponent("Pick a real date and time (Tirana time).")}`,
+    );
+  }
+
+  const { error } = await supabase.rpc("schedule_blog_post", { p_id: postId, p_go_live: goLive!.toISOString() });
+
+  if (error) {
+    if (error.message === NOT_AUTHENTICATED_RPC_MESSAGE) redirect(ADMIN_LOGIN_PATH);
+    redirect(`/admin/blog/${postId}/edit?error=${encodeURIComponent(mapBlogRpcError(error))}`);
+  }
+
+  revalidatePath("/admin/blog");
+  revalidatePath(`/admin/blog/${postId}/edit`);
+  redirect(`/admin/blog/${postId}/edit?success=${encodeURIComponent("Article scheduled.")}`);
+}
+
+export async function cancelBlogScheduleAction(postId: string) {
+  await requireStaff("blog.manage");
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc("unpublish_blog_post", { p_id: postId });
+
+  if (error) {
+    if (error.message === NOT_AUTHENTICATED_RPC_MESSAGE) redirect(ADMIN_LOGIN_PATH);
+    redirect(`/admin/blog/${postId}/edit?error=${encodeURIComponent(mapBlogRpcError(error))}`);
+  }
+
+  revalidatePath("/admin/blog");
+  revalidatePath(`/admin/blog/${postId}/edit`);
+  redirect(`/admin/blog/${postId}/edit?success=${encodeURIComponent("Schedule cancelled. The article is a draft again.")}`);
+}
+
+// ============================================================
+// Images inside an article (e2). The browser stages the file exactly
+// like a cover (<staff-uid>/tmp/blog/<uuid>.<jpg|png> in the private
+// bucket; a WebP is turned into a JPEG in the browser first). Here it
+// is checked, shrunk to a JPEG and stored at inline/<uuid>.jpg in the
+// public blog bucket; the editor then inserts its public address. The
+// staged file is always removed.
+// ============================================================
+export type InlineImageResult = { ok: true; url: string } | { ok: false; error: string };
+
+export async function uploadBlogInlineImageAction(tempPath: string): Promise<InlineImageResult> {
+  const { userId } = await requireStaff("blog.manage");
+  const supabase = await createClient();
+  const failed: InlineImageResult = { ok: false, error: "We couldn't add this image. Please try again." };
+
+  if (
+    typeof tempPath !== "string" ||
+    !tempPath.startsWith(`${userId}/tmp/blog/`) ||
+    !/^[^/]+\/tmp\/blog\/[0-9a-f-]{36}\.(jpe?g|png)$/i.test(tempPath)
+  ) {
+    return { ok: false, error: "That image reference is no longer valid. Please choose the file again." };
+  }
+
+  const { data, error: downloadError } = await supabase.storage.from(STAGING_BUCKET).download(tempPath);
+  if (downloadError || !data) {
+    console.error("uploadBlogInlineImageAction: temp download failed:", downloadError);
+    return failed;
+  }
+  const bytes = Buffer.from(await data.arrayBuffer());
+  const cleanup = () => supabase.storage.from(STAGING_BUCKET).remove([tempPath]);
+
+  if (bytes.length > MAX_COVER_BYTES) {
+    await cleanup();
+    return { ok: false, error: "Images must be under 5 MB." };
+  }
+  const kind = await detectCoverImageKind(new File([new Uint8Array(bytes)], "image", { type: "application/octet-stream" }));
+  if (!kind) {
+    await cleanup();
+    return { ok: false, error: "That doesn't look like a JPG, PNG or WebP image." };
+  }
+  const shrunk = await shrinkImageToJpeg(bytes, BLOG_COVER_SIZE);
+  await cleanup();
+  if (!shrunk) return failed;
+
+  const path = `inline/${randomUUID()}.jpg`;
+  const { error: uploadError } = await createAdminClient()
+    .storage.from(BLOG_BUCKET)
+    .upload(path, shrunk, { contentType: "image/jpeg", cacheControl: IMAGE_CACHE_CONTROL_SECONDS });
+  if (uploadError) {
+    console.error("uploadBlogInlineImageAction: upload failed:", uploadError);
+    return failed;
+  }
+  return { ok: true, url: `${blogImagePrefix()}${path}` };
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
@@ -76,7 +77,8 @@ export default async function BlogCategoryPage({
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured", {
       count: "exact",
     })
-    .eq("status", "published");
+    .eq("status", "published")
+    .lte("published_at", blogNowIso());
   // bs1 a: /blog/kategoria/editorial lists the ticked posts; every other
   // page lists its category, Editorial posts included.
   const { data, count } = await (category.value === "editorial"

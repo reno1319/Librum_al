@@ -55,12 +55,17 @@ const mockReturns = vi.fn();
 const mockLimit = vi.fn((_n: number) => undefined as unknown);
 const mockOrder = vi.fn((_column: string, _opts: { ascending: boolean }) => undefined as unknown);
 const mockEq = vi.fn((_column: string, _value: string | boolean) => undefined as unknown);
+const mockLte = vi.fn((_column: string, _value: string) => undefined as unknown);
 function makeChain() {
   const filters: Record<string, string | boolean> = {};
   const chain = {
     eq: (column: string, value: string | boolean) => {
       mockEq(column, value);
       filters[column] = value;
+      return chain;
+    },
+    lte: (column: string, value: string) => {
+      mockLte(column, value);
       return chain;
     },
     order: (column: string, opts: { ascending: boolean }) => {
@@ -161,6 +166,8 @@ describe("BlogIndexPage", () => {
   it("queries only status=published, ordered by published_at descending, bounded by the landing candidate limit", async () => {
     await BlogIndexPage();
     expect(mockEq).toHaveBeenCalledWith("status", "published");
+    // e3: only articles whose go-live time has passed (also for staff).
+    expect(mockLte).toHaveBeenCalledWith("published_at", expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
     expect(mockOrder).toHaveBeenCalledWith("published_at", { ascending: false });
     expect(mockLimit).toHaveBeenCalledWith(50);
   });

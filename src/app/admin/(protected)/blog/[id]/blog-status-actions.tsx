@@ -80,7 +80,7 @@ export function PublishButton({ action }: { action: (formData: FormData) => void
       action={action}
       label="Publish"
       pendingLabel="Publishing…"
-      confirmMessage="Publish this article? It will become visible on the public Blog once BLOG-1D ships."
+      confirmMessage="Publish this article now? It goes live on the blog right away."
       variant="primary"
     />
   );
@@ -92,7 +92,7 @@ export function UnpublishButton({ action }: { action: (formData: FormData) => vo
       action={action}
       label="Unpublish"
       pendingLabel="Unpublishing…"
-      confirmMessage="Unpublish this article? It will disappear from the public Blog once BLOG-1D ships, and return to Draft here."
+      confirmMessage="Unpublish this article? It disappears from the blog and goes back to Draft here."
       variant="outline"
     />
   );
@@ -106,6 +106,72 @@ export function DeleteDraftButton({ action }: { action: (formData: FormData) => 
       pendingLabel="Deleting…"
       confirmMessage="Delete this draft permanently? This can't be undone."
       variant="danger"
+    />
+  );
+}
+
+// e3 (Renato 2026-11-19): pick a date and time in Tirana time. The
+// server turns it into the real instant; the database refuses a time
+// under a minute away or over a year away.
+export function ScheduleForm({
+  action,
+  defaultDate,
+  defaultTime,
+  submitLabel,
+}: {
+  action: (formData: FormData) => void | Promise<void>;
+  defaultDate: string;
+  defaultTime: string;
+  submitLabel: string;
+}) {
+  return (
+    <form action={action} className="flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor="scheduleDate">
+          Date
+        </label>
+        <input
+          id="scheduleDate"
+          type="date"
+          name="scheduleDate"
+          required
+          defaultValue={defaultDate}
+          className="rounded-control border border-control bg-surface px-3 py-2"
+        />
+        <label className="sr-only" htmlFor="scheduleTime">
+          Time
+        </label>
+        <input
+          id="scheduleTime"
+          type="time"
+          name="scheduleTime"
+          required
+          step={60}
+          defaultValue={defaultTime}
+          className="rounded-control border border-control bg-surface px-3 py-2"
+        />
+        <span className="text-muted">Tirana time</span>
+      </div>
+      <div>
+        <SubmitButtonInner
+          label={submitLabel}
+          pendingLabel="Scheduling…"
+          confirmMessage="Schedule this article? It goes live on its own at that time."
+          variant="primary"
+        />
+      </div>
+    </form>
+  );
+}
+
+export function CancelScheduleButton({ action }: { action: (formData: FormData) => void | Promise<void> }) {
+  return (
+    <ConfirmSubmitButton
+      action={action}
+      label="Cancel schedule"
+      pendingLabel="Cancelling…"
+      confirmMessage="Cancel the schedule? The article goes back to Draft and does not go live."
+      variant="outline"
     />
   );
 }

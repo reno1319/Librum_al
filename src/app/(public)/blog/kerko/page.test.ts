@@ -43,6 +43,7 @@ const mockRpc = vi.fn();
 const mockReturns = vi.fn();
 const chain = {
   eq: vi.fn((): typeof chain => chain),
+  lte: vi.fn((): typeof chain => chain),
   in: vi.fn((): typeof chain => chain),
   returns: mockReturns,
 };
@@ -117,6 +118,8 @@ describe("BlogSearchPage", () => {
     });
     const page = await BlogSearchPage(props("botim"));
     expect(chain.eq).toHaveBeenCalledWith("status", "published");
+    // e3: never a scheduled article whose time is still ahead.
+    expect(chain.lte).toHaveBeenCalledWith("published_at", expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
     expect(chain.in).toHaveBeenCalledWith("id", ["b", "a"]);
     expect(mockSelect.mock.calls[0][0]).not.toContain("content_markdown");
     expect(mockSelect.mock.calls[0][0]).not.toContain("keywords");

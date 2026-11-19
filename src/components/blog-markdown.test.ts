@@ -35,3 +35,20 @@ describe("BlogMarkdown source safety", () => {
     expect(source).toContain('from "react-markdown"');
   });
 });
+
+// e2 (Renato 2026-11-19): an image's title is shown as its caption.
+describe("BlogMarkdown image captions", () => {
+  it("shows the caption under the picture, uncropped, and nothing when there is none", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { BlogMarkdown } = await import("./blog-markdown");
+    const html = renderToStaticMarkup(
+      createElement(BlogMarkdown, { markdown: '![Tryeza ime](https://x.test/a.jpg "Tryeza ime")\n\n![](https://x.test/b.jpg)' }),
+    );
+    expect(html).toContain('<img class="block h-auto w-full rounded-card" src="https://x.test/a.jpg" alt="Tryeza ime"/>');
+    expect(html).toContain('<span class="mt-2 block text-sm text-muted">Tryeza ime</span>');
+    expect(html).toContain('<img class="block h-auto w-full rounded-card" src="https://x.test/b.jpg" alt=""/>');
+    expect(html.match(/text-sm text-muted/g)?.length).toBe(1);
+    expect(html).not.toContain("<figure");
+  });
+});

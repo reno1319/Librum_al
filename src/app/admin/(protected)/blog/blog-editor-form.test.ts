@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BlogEditorForm, ContentMarkdownInput } from "./blog-editor-form";
+import { BlogEditorForm } from "./blog-editor-form";
+import { ContentMarkdownInput } from "./blog-content-editor";
 
 // QA H4: saving from Preview must still submit the article body.
-// Exactly one control named contentMarkdown exists in either mode, and
-// it carries the typed text.
+// e1 (2026-11-19): the textarea is always mounted (on a computer the
+// preview sits beside it), so exactly one control named contentMarkdown
+// exists in either mode and it carries the typed text. In Preview it is
+// only hidden (phones) and not `required`, so a hidden invalid field
+// can never silently block a save.
 
 function render(showPreview: boolean, contentMarkdown: string) {
   return renderToStaticMarkup(
@@ -18,20 +22,20 @@ function countNamed(html: string) {
 }
 
 describe("ContentMarkdownInput", () => {
-  it("in Preview, submits the body through a hidden input and shows the rendered preview", () => {
-    const html = render(true, "Teksti \"im\" & <b>më i mirë</b>");
+  it("in Preview, keeps the body in the (hidden on phones) textarea and shows the rendered preview", () => {
+    const html = render(true, "Teksti **im**");
     expect(countNamed(html)).toBe(1);
-    expect(html).toContain(
-      '<input type="hidden" name="contentMarkdown" value="Teksti &quot;im&quot; &amp; &lt;b&gt;më i mirë&lt;/b&gt;"/>',
-    );
-    expect(html).not.toContain("<textarea");
+    expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*class="hidden lg:block/);
+    expect(html).not.toMatch(/<textarea[^>]*required/);
+    expect(html).toContain("<strong");
   });
 
-  it("while editing, submits the body through the required textarea only", () => {
+  it("while editing, the textarea is visible and required; the preview shows beside it on a computer", () => {
     const html = render(false, "Body text");
     expect(countNamed(html)).toBe(1);
     expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*required/);
     expect(html).toContain(">Body text</textarea>");
+    expect(html).toMatch(/aria-label="Preview" class="hidden lg:block/);
     expect(html).not.toContain('type="hidden"');
   });
 });

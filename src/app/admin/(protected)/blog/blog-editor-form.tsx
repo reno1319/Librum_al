@@ -7,8 +7,8 @@ import type { BlogCategory } from "@/lib/types";
 import { resolveAutoSlug } from "@/lib/blog-slug";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
 import { BlogCoverField } from "@/components/blog-cover-field";
-import { BlogMarkdown } from "@/components/blog-markdown";
 import { Button } from "@/components/ui/button";
+import { BlogContentEditor } from "./blog-content-editor";
 import {
   CONTENT_MARKDOWN_MAX_LENGTH,
   EXCERPT_MAX_LENGTH,
@@ -57,12 +57,15 @@ export function BlogEditorForm({
   initialValues,
   slugReadOnly,
   submitLabel,
+  pinnedElsewhereTitle = null,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   staffUserId: string;
   initialValues?: BlogEditorInitialValues;
   slugReadOnly: boolean;
   submitLabel: string;
+  // e4: the title of the article pinned now, when it is not this one.
+  pinnedElsewhereTitle?: string | null;
 }) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [slug, setSlug] = useState(initialValues?.slug ?? "");
@@ -73,7 +76,6 @@ export function BlogEditorForm({
   const keywordCount = parseKeywords(keywords).length;
   const [seoTitle, setSeoTitle] = useState(initialValues?.seoTitle ?? "");
   const [seoDescription, setSeoDescription] = useState(initialValues?.seoDescription ?? "");
-  const [showPreview, setShowPreview] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleTitleChange(value: string) {
@@ -91,7 +93,11 @@ export function BlogEditorForm({
   const readingMinutes = calculateReadingTime(contentMarkdown);
 
   return (
-    <form ref={formRef} action={action} className="mt-6 flex flex-col gap-6">
+    <form
+      ref={formRef}
+      action={action}
+      className="mt-6 flex flex-col gap-6 lg:[&>*:not([data-wide])]:max-w-3xl"
+    >
       <label className="flex flex-col gap-1 text-sm">
         Title
         <input
@@ -202,23 +208,8 @@ export function BlogEditorForm({
 
       <BlogCoverField staffUserId={staffUserId} existingCoverUrl={initialValues?.coverImageUrl ?? undefined} />
 
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between text-sm">
-          <span>Content (Markdown)</span>
-          <button
-            type="button"
-            onClick={() => setShowPreview((v) => !v)}
-            className="text-primary underline underline-offset-2 hover:decoration-2"
-          >
-            {showPreview ? "Back to editing" : "Preview"}
-          </button>
-        </div>
-
-        <ContentMarkdownInput
-          showPreview={showPreview}
-          contentMarkdown={contentMarkdown}
-          onChange={setContentMarkdown}
-        />
+      <div data-wide className="flex flex-col gap-1">
+        <BlogContentEditor staffUserId={staffUserId} contentMarkdown={contentMarkdown} onChange={setContentMarkdown} />
         <span className="text-sm text-muted">
           {contentMarkdown.length.toLocaleString()}/{CONTENT_MARKDOWN_MAX_LENGTH.toLocaleString()} characters
           {" · "}
@@ -226,10 +217,19 @@ export function BlogEditorForm({
         </span>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" name="featured" defaultChecked={initialValues?.featured ?? false} />
-        Featured article
-      </label>
+      <div className="flex flex-col gap-0.5 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="featured" defaultChecked={initialValues?.featured ?? false} />
+          📌 Pin to the top of the blog
+        </label>
+        <span className="pl-6 text-muted">
+          {initialValues?.featured
+            ? "Pinned now. Only one article can be pinned; pinning another one moves the pin."
+            : pinnedElsewhereTitle
+              ? `Only one article can be pinned. Ticking this moves the pin from «${pinnedElsewhereTitle}».`
+              : "Only one article can be pinned. It shows at the top of the blog once it is live."}
+        </span>
+      </div>
 
       <label className="flex flex-col gap-1 text-sm">
         SEO title (optional)
@@ -263,46 +263,6 @@ export function BlogEditorForm({
 
       <SubmitButton label={submitLabel} />
     </form>
-  );
-}
-
-// QA H4: the textarea unmounts while Preview is shown, and an unmounted
-// field is not in FormData -- so saving from Preview used to submit no
-// content at all and fail "Content is required". In Preview the same
-// value now travels in a hidden input. A hidden input (not a hidden
-// `required` textarea) because browsers block a submit on an invalid
-// field they can't focus, with no message the editor can see; the
-// server's own validateBlogPostFields still rejects empty content.
-export function ContentMarkdownInput({
-  showPreview,
-  contentMarkdown,
-  onChange,
-}: {
-  showPreview: boolean;
-  contentMarkdown: string;
-  onChange: (value: string) => void;
-}) {
-  if (showPreview) {
-    return (
-      <>
-        <input type="hidden" name="contentMarkdown" value={contentMarkdown} />
-        <div className="rounded-card border border-border bg-surface px-4 py-3">
-          <BlogMarkdown markdown={contentMarkdown} />
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <textarea
-      name="contentMarkdown"
-      required
-      rows={16}
-      maxLength={CONTENT_MARKDOWN_MAX_LENGTH}
-      value={contentMarkdown}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-control border border-control bg-surface px-3 py-2 font-mono text-sm"
-    />
   );
 }
 
