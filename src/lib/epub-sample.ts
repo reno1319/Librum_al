@@ -3,6 +3,7 @@ import { posix } from "node:path";
 import { preflightZipEntries } from "@/lib/zip-preflight";
 import { EPUB_ZIP_PREFLIGHT_LIMITS } from "@/lib/epub-validation";
 import { resolveArchivePath } from "@/lib/epub-archive-paths";
+import { firstElementInner, markupTokens, tagAttrs } from "@/lib/markup-scan";
 
 // LIBRUM 2.0 PRODUCT-1: derives a genuine "Read sample" excerpt from a
 // book's own EPUB manuscript, on demand, entirely server-side. Chosen
@@ -140,24 +141,29 @@ const DROP_ENTIRELY_TAGS = new Set([
 // case-insensitive match to a real HTML tag, to be emitted as active
 // markup. See epub-sample.test.ts's "hostile markup" suite for the
 // cases this reasoning was checked against.
-const TOKEN_RE =
-  /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<\/([a-zA-Z][\w:.-]*)\s*>|<([a-zA-Z][\w:.-]*)((?:\s+[^<>]*?)?)\s*(\/?)>/g;
+// The tokens are those of
+//   /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|
+//    <\/([a-zA-Z][\w:.-]*)\s*>|<([a-zA-Z][\w:.-]*)((?:\s+[^<>]*?)?)\s*(\/?)>/g
+// (the comments below call it TOKEN_RE), found by markupTokens without the
+// expression's slow cases (src/lib/markup-scan.ts).
 
 type StackFrame = {
   tag: string;
   allowed: boolean;
   isDropped: boolean;
   // A closed child's rendered HTML/plain-text is appended to its
-  // parent's these two arrays -- so a DROP_ENTIRELY_TAGS subtree that's
+  // parent's these two strings -- so a DROP_ENTIRELY_TAGS subtree that's
   // still open when the document ends (unbalanced/malformed markup)
   // never propagates anywhere, and every completed top-level (root's
-  // direct child) element becomes exactly one chunk.
-  html: string[];
-  text: string[];
+  // direct child) element becomes exactly one chunk. Strings, not
+  // arrays joined at every level: a file nested thousands of levels deep
+  // would otherwise copy its text again at each level (reader speed r2).
+  html: string;
+  text: string;
 };
 
 function makeFrame(tag: string, allowed: boolean, isDropped: boolean): StackFrame {
-  return { tag, allowed, isDropped, html: [], text: [] };
+  return { tag, allowed, isDropped, html: "", text: "" };
 }
 
 // Splits one content document's <body> inner HTML into safe, complete,
@@ -170,8 +176,26 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
   const stack: StackFrame[] = [root];
   const chunks: { html: string; text: string }[] = [];
 
+  // Reader speed r2: how many dropped frames are open, and where each tag
+  // name is open on the stack, so neither check scans the whole stack
+  // (a file nested 40,000 levels deep took seconds).
+  let dropDepth = 0;
+  const openAt = new Map<string, number[]>();
   function isInsideDrop(): boolean {
-    return stack.some((f) => f.isDropped);
+    return dropDepth > 0;
+  }
+  function pushFrame(frame: StackFrame) {
+    const at = openAt.get(frame.tag);
+    if (at) at.push(stack.length);
+    else openAt.set(frame.tag, [stack.length]);
+    if (frame.isDropped) dropDepth += 1;
+    stack.push(frame);
+  }
+  function popFrame(): StackFrame {
+    const frame = stack.pop()!;
+    openAt.get(frame.tag)!.pop();
+    if (frame.isDropped) dropDepth -= 1;
+    return frame;
   }
 
   // Root-level content only ever needs flushing as its own chunk when
@@ -181,10 +205,10 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
   // any trailing stray text.
   function flushRootPending() {
     if (root.html.length === 0) return;
-    const text = root.text.join("").trim();
-    if (text) chunks.push({ html: root.html.join(""), text });
-    root.html = [];
-    root.text = [];
+    const text = root.text.trim();
+    if (text) chunks.push({ html: root.html, text });
+    root.html = "";
+    root.text = "";
   }
 
   // Text runs are whatever lies between the tokens TOKEN_RE matched. In
@@ -202,35 +226,34 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
   function appendText(raw: string) {
     if (!raw || isInsideDrop()) return;
     const frame = stack[stack.length - 1];
-    frame.html.push(raw.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
-    frame.text.push(raw);
+    frame.html += raw.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    frame.text += raw;
   }
 
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
   const capped = bodyHtml.length > MAX_DOCUMENT_CHARS ? bodyHtml.slice(0, MAX_DOCUMENT_CHARS) : bodyHtml;
-  TOKEN_RE.lastIndex = 0;
-  while ((match = TOKEN_RE.exec(capped))) {
+  for (const match of markupTokens(capped)) {
     appendText(capped.slice(lastIndex, match.index));
-    lastIndex = TOKEN_RE.lastIndex;
+    lastIndex = match.end;
 
-    const [, closeName, openName, , selfCloseMark] = match;
+    const { closeName, openName, selfMark: selfCloseMark } = match;
 
     if (closeName) {
       const name = closeName.toLowerCase();
       // Pop until (and including) the matching open frame, if any is
       // still on the stack -- tolerates a stray/mismatched close tag in
       // a malformed document without corrupting the whole parse.
-      const idx = stack.map((f) => f.tag).lastIndexOf(name);
+      const at = openAt.get(name);
+      const idx = at && at.length > 0 ? at[at.length - 1] : -1;
       if (idx === -1) continue;
 
       while (stack.length > idx) {
-        const finished = stack.pop()!;
+        const finished = popFrame();
         const parent = stack[stack.length - 1];
         if (finished.isDropped) continue;
 
-        const innerHtml = finished.html.join("");
-        const innerText = finished.text.join("");
+        const innerHtml = finished.html;
+        const innerText = finished.text;
         const rendered = finished.allowed
           ? `<${finished.tag}>${innerHtml}</${finished.tag}>`
           : innerHtml;
@@ -240,8 +263,8 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
           const text = innerText.trim();
           if (text) chunks.push({ html: rendered, text: innerText });
         } else {
-          parent.html.push(rendered);
-          parent.text.push(innerText);
+          parent.html += rendered;
+          parent.text += innerText;
         }
       }
       continue;
@@ -266,14 +289,14 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
       const localName = name.includes(":") ? name.slice(name.lastIndexOf(":") + 1) : name;
 
       if (isInsideDrop() || DROP_ENTIRELY_TAGS.has(name) || DROP_ENTIRELY_TAGS.has(localName)) {
-        if (!selfClosing) stack.push(makeFrame(name, false, true));
+        if (!selfClosing) pushFrame(makeFrame(name, false, true));
         continue;
       }
 
       if (VOID_TAGS.has(name)) {
         // <br>/<hr> never carry content -- emit immediately into the
         // current frame rather than pushing a stack entry for them.
-        stack[stack.length - 1].html.push(`<${name}>`);
+        stack[stack.length - 1].html += `<${name}>`;
         continue;
       }
 
@@ -283,7 +306,7 @@ function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string 
         continue;
       }
 
-      stack.push(makeFrame(name, ALLOWED_TAGS.has(name), false));
+      pushFrame(makeFrame(name, ALLOWED_TAGS.has(name), false));
       continue;
     }
 
@@ -315,14 +338,11 @@ function normalizeWhitespace(text: string): string {
 type ManifestItem = { href: string; mediaType: string; isNav: boolean };
 
 function parseManifest(opfXml: string): Map<string, ManifestItem> {
-  const manifestMatch = opfXml.match(/<manifest\b[^>]*>([\s\S]*?)<\/manifest>/i);
+  const manifestInner = firstElementInner(opfXml, "manifest");
   const items = new Map<string, ManifestItem>();
-  if (!manifestMatch) return items;
+  if (manifestInner === undefined) return items;
 
-  const itemRe = /<item\b([^>]*?)\/?>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = itemRe.exec(manifestMatch[1]))) {
-    const attrs = m[1];
+  for (const attrs of tagAttrs(manifestInner, "item")) {
     const id = attrs.match(/\bid\s*=\s*(["'])(.*?)\1/i)?.[2];
     const href = attrs.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
     const mediaType = attrs.match(/\bmedia-type\s*=\s*(["'])(.*?)\1/i)?.[2] ?? "";
@@ -339,14 +359,11 @@ function parseManifest(opfXml: string): Map<string, ManifestItem> {
 }
 
 function parseSpineIdrefs(opfXml: string): string[] {
-  const spineMatch = opfXml.match(/<spine\b[^>]*>([\s\S]*?)<\/spine>/i);
-  if (!spineMatch) return [];
+  const spineInner = firstElementInner(opfXml, "spine");
+  if (spineInner === undefined) return [];
 
   const idrefs: string[] = [];
-  const itemrefRe = /<itemref\b([^>]*?)\/?>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = itemrefRe.exec(spineMatch[1]))) {
-    const attrs = m[1];
+  for (const attrs of tagAttrs(spineInner, "itemref")) {
     const idref = attrs.match(/\bidref\s*=\s*(["'])(.*?)\1/i)?.[2];
     const linear = attrs.match(/\blinear\s*=\s*(["'])(.*?)\1/i)?.[2];
     if (!idref) continue;
@@ -485,8 +502,7 @@ async function readSpineChunks(bytes: Buffer): Promise<SpineChunksResult> {
       continue;
     }
 
-    const bodyMatch = docXml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
-    const bodyHtml = bodyMatch ? bodyMatch[1] : docXml;
+    const bodyHtml = firstElementInner(docXml, "body") ?? docXml;
 
     const chunks = sanitizeBodyIntoChunks(bodyHtml);
     if (chunks.length > 0) docChunks.push(chunks);
