@@ -80,7 +80,11 @@ describe("POLICY PAGES: /privatesia", () => {
     expect(text).toContain("autorët që ndiqni, kërkesat «Më njofto kur të dalë» për librat në parapublikim, vlerësimet,");
     expect(text).toContain("Për një libër në parapublikim, autori sheh vetëm sa lexues presin njoftimin, jo kush janë.");
     expect(text).toContain("Kërkesat «Më njofto»: derisa ta hiqni kërkesën ose ta fshini llogarinë.");
-    expect(text).toContain("por e ruajmë bashkë me shënimin që emaili u dërgua, derisa ta fshini llogarinë.");
+    // NOTIFY-CLEANUP (Renato 11-20, Q3 a): deleted 30 days later.
+    expect(text).toContain(
+      "e ruajmë bashkë me shënimin që emaili u dërgua edhe 30 ditë, pastaj e fshijmë. Nëse emaili nuk mund të dërgohet, kërkesën e fshijmë 30 ditë pasi del libri ose anulohet parapublikimi.",
+    );
+    expect(text).not.toContain("u dërgua, derisa ta fshini llogarinë");
   });
 
   // K8 + K10 (Renato 11-15): the place, bookmarks, highlights and notes.

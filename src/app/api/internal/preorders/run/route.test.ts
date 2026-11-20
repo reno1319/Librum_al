@@ -17,6 +17,11 @@ const mockEmails = vi.fn(async (_admin: unknown, _summary: unknown) => ({ releas
 vi.mock("@/lib/preorder-emails", () => ({
   sendPreorderJobEmails: (admin: unknown, summary: unknown) => mockEmails(admin, summary),
 }));
+const CLEANUP = { sent: 3, cancelled: 1, released: 0 };
+const mockCleanup = vi.fn(async (_admin: unknown) => CLEANUP);
+vi.mock("@/lib/preorder-notify-cleanup", () => ({
+  deleteOldNotifyRequests: (admin: unknown) => mockCleanup(admin),
+}));
 const mockCreateAdminClient = vi.fn(() => ({}));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
 
@@ -40,6 +45,7 @@ const SUMMARY = {
 beforeEach(() => {
   mockRun.mockReset().mockResolvedValue(SUMMARY);
   mockEmails.mockClear();
+  mockCleanup.mockClear();
   mockCreateAdminClient.mockClear();
   vi.stubEnv("CRON_SECRET", "test-cron-secret");
   vi.stubEnv("PREORDER_JOB_OFF", "");
@@ -80,6 +86,7 @@ describe("GET /api/internal/preorders/run", () => {
     expect(await res.json()).toEqual({ ok: true, off: true });
     expect(mockRun).not.toHaveBeenCalled();
     expect(mockEmails).not.toHaveBeenCalled();
+    expect(mockCleanup).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -91,6 +98,7 @@ describe("GET /api/internal/preorders/run", () => {
     vi.setSystemTime(new Date(now));
     const body = await (await GET(request())).json();
     expect(mockRun).toHaveBeenCalledTimes(runs ? 1 : 0);
+    expect(mockCleanup).toHaveBeenCalledTimes(runs ? 1 : 0);
     if (!runs) expect(body).toEqual({ ok: true, tooEarly: true });
   });
 
@@ -108,8 +116,24 @@ describe("GET /api/internal/preorders/run", () => {
       overdue: 0,
       failed: 0,
       readers: { released: 2, cancelled: 1 },
+      notifyCleanup: CLEANUP,
     });
+    expect(mockEmails.mock.invocationCallOrder[0]).toBeLessThan(mockCleanup.mock.invocationCallOrder[0]);
     expect(JSON.stringify(body)).not.toContain("b1");
+  });
+
+  it("audit r1 N2: a failed cleanup step gets its own error line; the run still answers ok", async () => {
+    const failed = { sent: null, cancelled: 0, released: 0 };
+    mockCleanup.mockResolvedValueOnce(failed as never);
+    const res = await GET(request());
+    expect(res.status).toBe(200);
+    expect((await res.json()).notifyCleanup).toEqual(failed);
+    expect(console.error).toHaveBeenCalledWith("[preorders] notify cleanup failed", { notifyCleanup: failed });
+  });
+
+  it("no cleanup error line when every step worked", async () => {
+    await GET(request());
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("a failed database step answers 500 but still sweeps the readers' emails", async () => {
@@ -117,6 +141,7 @@ describe("GET /api/internal/preorders/run", () => {
     const res = await GET(request());
     expect(res.status).toBe(500);
     expect(mockEmails).toHaveBeenCalledWith(expect.anything(), null);
+    expect(mockCleanup).toHaveBeenCalledTimes(1);
   });
 });
 

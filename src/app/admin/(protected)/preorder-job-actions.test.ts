@@ -27,6 +27,11 @@ vi.mock("@/lib/preorder-emails", () => ({
   sendPreorderJobEmails: (admin: unknown, summary: unknown) => mockJobEmails(admin, summary),
 }));
 
+const mockCleanup = vi.fn(async (_admin: unknown) => ({ sent: 0, cancelled: 0, released: 0 }));
+vi.mock("@/lib/preorder-notify-cleanup", () => ({
+  deleteOldNotifyRequests: (admin: unknown) => mockCleanup(admin),
+}));
+
 const { runPreorderJobAsOwner } = await import("./preorder-job-actions");
 
 async function target(): Promise<string> {
@@ -40,6 +45,7 @@ describe("runPreorderJobAsOwner", () => {
     mockRedirect.mockClear();
     afterTasks.length = 0;
     mockJobEmails.mockClear();
+    mockCleanup.mockClear();
     mockRpc.mockReset().mockResolvedValue({
       data: {
         today: "2026-11-06",
@@ -74,6 +80,15 @@ describe("runPreorderJobAsOwner", () => {
     const summary = mockJobEmails.mock.calls[0][1] as { releasedBookIds: string[]; slipped: unknown[] };
     expect(summary.releasedBookIds).toEqual(["b1"]);
     expect(summary.slipped).toEqual([{ bookId: "b2", releaseDate: "2026-12-06" }]);
+  });
+
+  it("NOTIFY-CLEANUP: deletes the finished «Më njofto» requests after the emails, even when they throw", async () => {
+    await target();
+    expect(mockCleanup).not.toHaveBeenCalled();
+    mockJobEmails.mockRejectedValueOnce(new Error("boom"));
+    await afterTasks[0]();
+    expect(mockCleanup).toHaveBeenCalledTimes(1);
+    expect(mockJobEmails.mock.invocationCallOrder[0]).toBeLessThan(mockCleanup.mock.invocationCallOrder[0]);
   });
 
   it("P5: a failed run still sweeps the readers' emails (summary null)", async () => {

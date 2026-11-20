@@ -49,6 +49,9 @@ export const metadata: Metadata = {
 // their one email, what the author sees (a count only) and how long the
 // requests are kept. PRIVACY_LAST_UPDATED moves to the day this text goes
 // live on Production (that release sets it).
+// NOTIFY-CLEANUP (Renato 11-20, Q3 a): a sent request is deleted 30
+// days after its email, one never emailed 30 days after the book came
+// out or the pre-order was cancelled (src/lib/preorder-notify-cleanup.ts).
 export default function PrivacyPage() {
   return (
     <main className="flex-1">
@@ -304,9 +307,11 @@ export default function PrivacyPage() {
                 <li>
                   <strong>Kërkesat «Më njofto»:</strong> derisa ta hiqni
                   kërkesën ose ta fshini llogarinë. Pasi dërgohet emaili,
-                  kërkesa nuk shfaqet më te Njoftimet e mia, por e ruajmë
-                  bashkë me shënimin që emaili u dërgua, derisa ta fshini
-                  llogarinë.
+                  kërkesa nuk shfaqet më te Njoftimet e mia; e ruajmë
+                  bashkë me shënimin që emaili u dërgua edhe 30 ditë,
+                  pastaj e fshijmë. Nëse emaili nuk mund të dërgohet,
+                  kërkesën e fshijmë 30 ditë pasi del libri ose anulohet
+                  parapublikimi.
                 </li>
                 <li>
                   <strong>Vendi ku keni mbetur, faqerojtësit, theksimet dhe shënimet:</strong>{" "}

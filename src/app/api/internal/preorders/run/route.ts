@@ -5,6 +5,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 import { preorderDayCounts, runPreorderDay } from "@/lib/preorder-job";
 import { sendPreorderJobEmails } from "@/lib/preorder-emails";
+import { deleteOldNotifyRequests } from "@/lib/preorder-notify-cleanup";
 import { preorderJobMayRun } from "@/lib/preorder-staff";
 import { alertIfCronFailed } from "@/lib/error-alerts";
 
@@ -72,13 +73,21 @@ async function runJob(request: Request): Promise<Response> {
   const admin = createAdminClient();
   const summary = await runPreorderDay(admin);
   const readers = await sendPreorderJobEmails(admin, summary);
+  // NOTIFY-CLEANUP: the finished «Më njofto» requests go after the
+  // emails, also when the database step failed. Never throws.
+  const notifyCleanup = await deleteOldNotifyRequests(admin);
+  // Audit r1 N2: a failed cleanup step (a null count) gets its own error
+  // line, so an error read sees it; the run itself still answers ok.
+  if (Object.values(notifyCleanup).some((count) => count === null)) {
+    console.error("[preorders] notify cleanup failed", { notifyCleanup });
+  }
   if (!summary) {
-    console.error("[preorders] run failed", { readers });
-    return NextResponse.json({ ok: false, readers }, { status: 500 });
+    console.error("[preorders] run failed", { readers, notifyCleanup });
+    return NextResponse.json({ ok: false, readers, notifyCleanup }, { status: 500 });
   }
   const counts = preorderDayCounts(summary);
-  console.log("[preorders] run complete", { today: summary.today, ...counts, readers });
-  return NextResponse.json({ ok: true, today: summary.today, ...counts, readers });
+  console.log("[preorders] run complete", { today: summary.today, ...counts, readers, notifyCleanup });
+  return NextResponse.json({ ok: true, today: summary.today, ...counts, readers, notifyCleanup });
 }
 
 // ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team
