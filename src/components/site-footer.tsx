@@ -2,6 +2,7 @@ import Link from "next/link";
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import { IconInstagram } from "@/components/icons";
 import { LibrumLogo } from "@/components/librum-logo";
+import { PageClass } from "@/components/home-palette";
 
 // SOCIAL (Renato soc3, 2026-11-18): Librum's real Instagram page, as an
 // icon under the reply promise, on every page. A plain link; nothing
@@ -25,7 +26,7 @@ export const FOOTER_GROUPS = {
     { href: "/rreth-nesh", label: "Rreth nesh" },
   ],
   Publikoni: [
-    { href: "/si-funksionon", label: "Si funksionon" },
+    { href: "/si-funksionon", label: "Vetëpubliko" },
     { href: "/fitimet", label: "Fitimet" },
   ],
   Mbështetje: [
@@ -53,7 +54,9 @@ const BOTO_ME_LK_HREF = "https://www.lamajkalemi.al";
 // inside a sentence, so it is underlined at rest.
 export function SiteFooter() {
   return (
-    <footer className="bg-primary-hover text-primary-foreground">
+    // HOMEPAGE-2 (Renato 2026-11-19, "Homepage only"): dark blue under the
+    // homepage, the usual dark green everywhere else.
+    <PageClass as="footer" home="bg-[#232f3e] text-primary-foreground" other="bg-primary-hover text-primary-foreground">
       <div className="page-container flex flex-col gap-8 py-8 md:flex-row md:justify-between">
         <div className="max-w-xs">
           {/* LOGO (Renato 11-18, lg1 a): same wordmark as the header; the
@@ -125,6 +128,6 @@ export function SiteFooter() {
           </a>
         </div>
       </div>
-    </footer>
+    </PageClass>
   );
 }

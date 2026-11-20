@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/(public)/auth/actions";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
 import { IconPerson } from "@/components/icons";
+import { ByPage, PageClass } from "@/components/home-palette";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
 import { FeedbackButton } from "@/components/feedback-button";
@@ -79,8 +80,9 @@ export function buildSiteHeaderNav(params: {
   // D2 (Renato 11-04): the "Kryefaqja" (Home) link is removed; the logo
   // already links home.
   const primaryLinks: NavItem[] = [
-    { href: "/rreth-nesh", label: "Rreth nesh" },
-    { href: "/si-funksionon", label: "Si funksionon" },
+    // HOMEPAGE-IS (Renato 2026-11-19): four links in this order; "Rreth
+    // nesh" lives in the footer only, "Si funksionon" is now "Vetëpubliko".
+    { href: "/si-funksionon", label: "Vetëpubliko" },
     { href: "/fitimet", label: "Fitimet" },
     { href: "/librari", label: "Libraria" },
     { href: "/blog", label: "Blog" },
@@ -117,6 +119,13 @@ const QUIET_LINK_ON_DARK_CLASSES =
   "focus-ring rounded-sm text-primary-foreground/85 underline underline-offset-4 transition-colors hover:text-primary-foreground hover:decoration-2";
 const BRASS_BUTTON_CLASSES =
   "focus-ring inline-flex items-center rounded-full bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
+// HOMEPAGE-2 (Renato 2026-11-19, "Homepage only"): on the homepage the
+// header is dark blue with a light link bar under it, and its two account
+// buttons match the homepage's own (40px tall, 4px corners, 18px text).
+const HOME_OUTLINE_CLASSES =
+  "focus-ring inline-flex h-10 min-w-[7.875rem] items-center justify-center rounded-[4px] border-2 border-[#4db5d6] px-6 text-lg font-medium text-[#4db5d6] transition-colors hover:bg-white/10";
+const HOME_GOLD_CLASSES =
+  "focus-ring inline-flex h-10 min-w-[7.875rem] items-center justify-center rounded-[4px] bg-[linear-gradient(90deg,#f7cd4b,#f1a33a)] px-6 text-lg font-medium text-[#232f3e] transition hover:brightness-105";
 
 export async function SiteHeader() {
   const supabase = await createClient();
@@ -148,13 +157,25 @@ export async function SiteHeader() {
   });
 
   return (
-    <header className="relative bg-primary text-primary-foreground">
+    <PageClass
+      as="header"
+      home="relative bg-[#232f3e] text-primary-foreground"
+      other="relative bg-primary text-primary-foreground"
+    >
+      {/* HOMEPAGE-2: on the homepage, two bars -- the dark one with the
+          logo and the account buttons, then a light one with the page
+          links (desktop only; phones keep the menu button). Every other
+          page keeps the one green bar with the links in it. */}
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
       {/* HEADER NAME: one row at every width now (below lg it only ever
           held the logo and the right-hand icons); on phones the name in
           the right group shrinks first, never the logo. */}
-      <div className="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-4 xl:gap-x-8">
+      <PageClass
+        as="div"
+        home="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:py-2.5 lg:gap-x-4 xl:gap-x-8"
+        other="page-container flex flex-nowrap items-center justify-between gap-x-4 py-3 sm:gap-x-8 lg:gap-x-4 xl:gap-x-8"
+      >
         <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-8 gap-y-2 lg:flex-nowrap lg:gap-x-4 xl:gap-x-8">
           {/* LOGO (Renato 11-18, lg1 a): the "librum." wordmark, the same
               height as the old serif "Librum" so the header row doesn't move.
@@ -173,13 +194,23 @@ export async function SiteHeader() {
               greeting) ran into the right-hand group, so that range uses
               slightly smaller text and gaps, and this group no longer
               shrinks: the name in the greeting is shortened instead. */}
-          <nav aria-label="Kryesore" className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
-            <NavLinks items={nav.primaryLinks} onDark />
-          </nav>
+          <ByPage
+            home={null}
+            other={
+              <nav aria-label="Kryesore" className="hidden flex-wrap items-center gap-x-6 gap-y-2 text-base font-medium lg:flex lg:flex-nowrap lg:gap-x-3 lg:text-[0.9375rem] lg:whitespace-nowrap xl:gap-x-6 xl:text-base">
+                <NavLinks items={nav.primaryLinks} onDark />
+              </nav>
+            }
+          />
         </div>
 
         <div className="flex min-w-0 items-center gap-3">
-          <nav aria-label="Llogaria" className="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap">
+          <PageClass
+            as="nav"
+            aria-label="Llogaria"
+            home="hidden items-center gap-2.5 text-base lg:flex lg:whitespace-nowrap"
+            other="hidden items-center gap-4 text-base lg:flex lg:whitespace-nowrap"
+          >
             {nav.recoveryLabel && (
               <span className="text-primary-foreground/80">{nav.recoveryLabel}</span>
             )}
@@ -197,13 +228,31 @@ export async function SiteHeader() {
                 navigation/account-only as UI-3 decided. */}
             {!user && (
               <>
-                <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
-                  Hyr
-                </Link>
+                <ByPage
+                  home={
+                    <Link href={nav.accountHref} className={HOME_OUTLINE_CLASSES}>
+                      Hyr
+                    </Link>
+                  }
+                  other={
+                    <Link href={nav.accountHref} className={OUTLINE_ON_DARK_CLASSES}>
+                      Hyr
+                    </Link>
+                  }
+                />
                 {/* FIX1 (X2): Author chosen, as on Earnings. */}
-                <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
-                  Regjistrohu
-                </Link>
+                <ByPage
+                  home={
+                    <Link href="/signup?role=author" className={HOME_GOLD_CLASSES}>
+                      Regjistrohu
+                    </Link>
+                  }
+                  other={
+                    <Link href="/signup?role=author" className={BRASS_BUTTON_CLASSES}>
+                      Regjistrohu
+                    </Link>
+                  }
+                />
               </>
             )}
             {nav.showLogout && (
@@ -213,7 +262,7 @@ export async function SiteHeader() {
                 </button>
               </form>
             )}
-          </nav>
+          </PageClass>
 
           {/* HEADER NAME (Renato 1a 2a 3a; r2 "Hello, " before it): the
               greeting with the first name and the person
@@ -260,9 +309,22 @@ export async function SiteHeader() {
             recoveryActive={recoveryActive}
           />
         </div>
-      </div>
+      </PageClass>
+      <ByPage
+        home={
+          <div className="hidden border-b border-[#d5d9d9] bg-[#eaeded] text-[#232f3e] lg:block">
+            <nav
+              aria-label="Kryesore"
+              className="page-container flex items-center gap-x-9 py-4 text-[0.9375rem] font-medium whitespace-nowrap"
+            >
+              <NavLinks items={nav.primaryLinks} lightBar />
+            </nav>
+          </div>
+        }
+        other={null}
+      />
       {/* K4 feedback b a: signed-in people only, never mid password reset. */}
       {user && !recoveryActive && <FeedbackButton />}
-    </header>
+    </PageClass>
   );
 }

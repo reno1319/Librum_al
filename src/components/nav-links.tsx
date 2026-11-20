@@ -27,10 +27,13 @@ export function NavLinks({
   items,
   className,
   onDark = false,
+  lightBar = false,
 }: {
   items: NavItem[];
   className?: string;
   onDark?: boolean;
+  /** HOMEPAGE-2: the light second header bar. */
+  lightBar?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -38,7 +41,11 @@ export function NavLinks({
     <>
       {items.map((item) => {
         const active = isActive(pathname, item.href);
-        const stateClassName = onDark
+        const stateClassName = lightBar
+          ? active
+            ? "font-bold text-[#232f3e] underline decoration-[#077398] decoration-[3px] underline-offset-[19px]"
+            : "text-[#232f3e] transition-colors hover:underline underline-offset-[19px]"
+          : onDark
           ? active
             ? "font-semibold text-primary-foreground underline decoration-accent decoration-2 underline-offset-8"
             : "text-primary-foreground/85 underline-offset-8 transition-colors hover:text-primary-foreground hover:underline"

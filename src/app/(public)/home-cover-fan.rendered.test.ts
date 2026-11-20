@@ -1,24 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// HOME-PICKS-1 (Renato 2026-10-25): the home hero is a fan of three
-// covers -- the staff picks for slots 1-3, each empty or no-longer-live
-// slot filled by the newest book not already shown -- with a Sponsored
-// tag on paid slots only. Zgjedhja e Librum is not on the home page any
-// more. HOME-ROWS-1 (Renato 2026-11-12, one row 1a-6a): "Botuar me
-// Librum" is one sliding row of the 15 newest books, fan books
-// included. Rendered against an in-memory books table that evaluates
-// the filters the page asks for (public_books' own row filter is not
-// modelled: the page asks for status = published itself).
+// HOMEPAGE-2 (Renato 2026-11-19): the "Ti je botuesi yt!" row shows a
+// fan of the five newest priced books with a cover (no free classics);
+// with fewer than three it shows the photograph instead. The staff picks
+// and the "Botuar me Librum" row are no longer on the home page.
+// Rendered against an in-memory books table that evaluates the filters
+// the page asks for.
 type Row = Record<string, unknown>;
 let rows: Row[] = [];
-let slots: { slot: number; book_id: string; sponsored: boolean }[] = [];
 
 function booksTable() {
   let result = [...rows];
   const builder: Record<string, unknown> = {
     select: () => builder,
-    eq: (col: string, value: unknown) => ((result = result.filter((r) => r[col] === value)), builder),
+    eq: (col: string, value: unknown) =>
+      ((result = result.filter((r) => (col === "is_adult" ? (r[col] ?? false) : r[col]) === value)), builder),
     not: (col: string) => ((result = result.filter((r) => r[col] != null)), builder),
     in: (col: string, values: unknown[]) => ((result = result.filter((r) => values.includes(r[col]))), builder),
     // K6: `.is("pd_work_id", null)` (the row leaves out the classics).
@@ -43,7 +40,11 @@ vi.mock("@/lib/supabase/server", () => ({
       storage: { from: () => ({ getPublicUrl: (p: string) => ({ data: { publicUrl: `https://cdn.example/${p}` } }) }) },
     }),
 }));
-vi.mock("@/lib/home-picks", () => ({ getPublicHomeSlots: () => Promise.resolve(slots) }));
+// author-page-kit (Wave, Photo) loads its display fonts at import.
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 
 const { default: Home } = await import("./page");
 
@@ -61,162 +62,45 @@ async function render() {
   return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
 }
 
-// Link names in document order, split into the hero fan and the row. The fan draws slot 2, slot 1 (middle), slot 3.
-async function fanAndShowcase() {
-  const html = await render();
-  const cut = html.indexOf(">Botuar me Librum</h2>");
-  const names = (part: string) => [...part.matchAll(/aria-label="Shikoni (Book \d\d në Librum[^"]*)"/g)].map((m) => m[1].replace(" në Librum", ""));
-  const row = (id: string) => {
-    const start = html.indexOf(`id="${id}"`);
-    if (start === -1) return [];
-    const part = html.slice(start, html.indexOf("</ul>", start));
-    return [...part.matchAll(/href="\/libra\/book-(\d\d)"/g)].map((m) => `Book ${m[1]}`);
-  };
-  return {
-    fan: names(cut === -1 ? html : html.slice(0, cut)),
-    newest: row("home-row-newest"),
-  };
-}
-
-const NEWEST_NINE = ["Book 09", "Book 08", "Book 07", "Book 06", "Book 05", "Book 04", "Book 03", "Book 02", "Book 01"];
+const fanCovers = (html: string) =>
+  [...html.matchAll(/<img[^>]*src="https:\/\/cdn\.example\/c\/(\d\d)\.png"/g)].map((m) => `Book ${m[1]}`);
 
 beforeEach(() => {
   rows = Array.from({ length: 9 }, (_, i) => book(i + 1));
-  slots = [];
-  vi.unstubAllEnvs();
 });
 
-describe("home cover fan", () => {
-  // BD15 P8: an 18+ book carries the 18+ tag (Q1 a). HOME-ROWS-1: the
-  // cards show no blurb.
-  it("BD15 P8: an 18+ book is tagged in the rows; no description is shown", async () => {
-    rows = Array.from({ length: 9 }, (_, i) => (i + 1 === 6 ? book(6, { is_adult: true }) : book(i + 1)));
+describe("home cover fan (HOMEPAGE-2)", () => {
+  it("shows the five newest books, newest first, as decorative images", async () => {
     const html = await render();
-    const newest = html.slice(html.indexOf('id="home-row-newest"'));
-    expect(newest.match(/aria-hidden="true">18\+<\/span>/g)?.length).toBe(1);
-    expect(html).not.toContain("About ");
-  });
-
-  it("no slots filled: the three newest (newest in the middle); the row = all newest, fan books included", async () => {
-    const { fan, newest } = await fanAndShowcase();
-    expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
-    expect(newest).toEqual(NEWEST_NINE);
-  });
-
-  // K6 (Q2 a): public-domain editions (the free classics) stay out of
-  // the "Botuar me Librum" row; the fan still falls back to every book.
-  it("K6: the row leaves out public-domain editions; the fan still uses them", async () => {
-    rows = Array.from({ length: 9 }, (_, i) => (i + 1 === 9 || i + 1 === 4 ? book(i + 1, { price_all: 0, pd_work_id: `work-${i + 1}` }) : book(i + 1)));
-    const { fan, newest } = await fanAndShowcase();
-    expect(newest).toEqual(["Book 08", "Book 07", "Book 06", "Book 05", "Book 03", "Book 02", "Book 01"]);
-    expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
-  });
-
-  it("the row holds at most the 15 newest books, newest first; no row heading, one Libraria link", async () => {
-    rows = Array.from({ length: 20 }, (_, i) => book(i + 1));
-    const html = await render();
-    const { newest } = await fanAndShowcase();
-    expect(newest).toEqual(Array.from({ length: 15 }, (_, i) => `Book ${String(20 - i).padStart(2, "0")}`));
-    expect(html).not.toContain("Të rejat");
-    expect(html).not.toContain("Më të shiturit");
-    expect(html).not.toContain("Shikoni të gjitha");
-    expect(html).toContain("Shikoni librat e botuar");
-  });
-
-  it("prices only while buying is on", async () => {
-    const rowsOf = (html: string) => html.slice(html.indexOf(">Botuar me Librum</h2>"));
-    expect(rowsOf(await render())).not.toContain("199 lekë");
-    vi.stubEnv("NEW_CHECKOUT_REGIME", "librum_ledger_v1");
-    vi.stubEnv("LEDGER_PAYMENT_PROVIDER", "pok");
-    expect(rowsOf(await render()).match(/199 lekë/g)?.length).toBe(9);
-  });
-
-  it("no live books: no Botuar me Librum section", async () => {
-    rows = [];
-    expect(await render()).not.toContain("Botuar me Librum");
-  });
-
-  it("three picks, older than the newest list: exactly the picks; the row keeps the newest", async () => {
-    slots = [
-      { slot: 1, book_id: "book-01", sponsored: false },
-      { slot: 2, book_id: "book-02", sponsored: false },
-      { slot: 3, book_id: "book-03", sponsored: false },
-    ];
-    const { fan, newest } = await fanAndShowcase();
-    expect(fan).toEqual(["Book 02", "Book 01", "Book 03"]);
-    expect(newest).toEqual(NEWEST_NINE);
-  });
-
-  it("an empty slot falls back to the newest book not already shown", async () => {
-    slots = [{ slot: 1, book_id: "book-09", sponsored: false }];
-    expect((await fanAndShowcase()).fan).toEqual(["Book 08", "Book 09", "Book 07"]);
+    expect(fanCovers(html)).toEqual(["Book 09", "Book 08", "Book 07", "Book 06", "Book 05"]);
+    expect(html.match(/<img[^>]*src="https:\/\/cdn\.example[^>]*alt=""/g)).toHaveLength(5);
+    // The hero art uses the photograph once; the fan replaces the second use.
+    expect(html.match(/\/images\/author-hero\.jpg/g)).toHaveLength(1);
   });
 
   it.each([
-    ["unpublished (draft: takedown, review and suspension too)", { status: "draft" }],
+    ["unpublished", { status: "draft" }],
     ["without a price", { price_all: null }],
     ["without a cover", { cover_path: null }],
-  ])("a pick %s falls back", async (_label, extra) => {
-    rows[0] = book(1, extra);
-    slots = [{ slot: 1, book_id: "book-01", sponsored: true }];
-    const { fan } = await fanAndShowcase();
-    expect(fan).toEqual(["Book 08", "Book 09", "Book 07"]);
-    expect(fan.join()).not.toContain("sponsorizuar");
+    ["a free classic", { pd_work_id: "work-9" }],
+    ["for adults (18+, hp2 a)", { is_adult: true }],
+  ])("leaves out a book %s", async (_label, extra) => {
+    rows[8] = book(9, extra);
+    expect(fanCovers(await render())).toEqual(["Book 08", "Book 07", "Book 06", "Book 05", "Book 04"]);
   });
 
-  it("Sponsored shows only on a paid slot's cover, and the link says so", async () => {
-    slots = [
-      { slot: 1, book_id: "book-01", sponsored: true },
-      { slot: 3, book_id: "book-03", sponsored: false },
-    ];
-    const html = await render();
-    expect((await fanAndShowcase()).fan).toEqual(["Book 09", "Book 01 (sponsorizuar)", "Book 03"]);
-    expect(html.match(/>Sponsorizuar</g)).toHaveLength(1);
-  });
-
-  it("Zgjedhja e Librum is not on the home page any more", async () => {
-    rows[0] = book(1, { librum_choice_at: "2026-10-18T09:00:00Z" });
-    const { fan, newest } = await fanAndShowcase();
-    // Book 01 (the oldest) gets no special place for being Librum's
-    // choice: not in the fan, and last in the newest-first row.
-    expect(fan).not.toContain("Book 01");
-    expect(newest).toEqual(NEWEST_NINE);
-  });
-
-  it("fewer than three books in all: the photograph, no fan; the row shows them", async () => {
+  it("fewer than three books: the photograph, no fan", async () => {
     rows = [book(1), book(2)];
     const html = await render();
-    expect(html).toContain("/images/author-hero.jpg");
-    expect(html).not.toContain('aria-label="Libra të zgjedhur"');
-    expect((await fanAndShowcase()).newest).toEqual(["Book 02", "Book 01"]);
+    expect(fanCovers(html)).toEqual([]);
+    expect(html.match(/\/images\/author-hero\.jpg/g)).toHaveLength(2);
   });
 
-  it("only four books: the row shows all four", async () => {
-    rows = Array.from({ length: 4 }, (_, i) => book(i + 1));
-    const { fan, newest } = await fanAndShowcase();
-    expect(fan).toEqual(["Book 03", "Book 04", "Book 02"]);
-    expect(newest).toEqual(["Book 04", "Book 03", "Book 02", "Book 01"]);
-  });
-
-  it("desktop sizing (option b): with the fan the hero splits 50/50 from xl and the covers fill the column; the photograph keeps 55/45", async () => {
+  it("no book row, staff picks or blurbs on the home page", async () => {
     const html = await render();
-    expect(html).toContain("lg:grid-cols-[55fr_45fr]");
-    expect(html).toContain("xl:grid-cols-[1fr_1fr]");
-    expect(html.match(/lg:w-\[42%\] lg:max-w-\[240px\]/g)).toHaveLength(1);
-    expect(html.match(/lg:w-\[33%\] lg:max-w-\[190px\]/g)).toHaveLength(2);
-    rows = [book(1), book(2)];
-    const photo = await render();
-    expect(photo).toContain("lg:grid-cols-[55fr_45fr]");
-    expect(photo).not.toContain("xl:grid-cols-[1fr_1fr]");
-  });
-
-  it("the middle cover loads first; every cover is a real cover image with an empty alt", async () => {
-    const html = await render();
-    const fan = html.slice(0, html.indexOf(">Botuar me Librum</h2>"));
-    expect(fan.match(/<img[^>]*src="https:\/\/cdn\.example\/c\/\d\d\.png"[^>]*alt=""/g)).toHaveLength(3);
-    // The one high-priority cover image is the middle one (slot 1, the newest here).
-    const high = fan.match(/<img[^>]*fetchPriority="high"[^>]*>/gi) ?? [];
-    expect(high).toHaveLength(1);
-    expect(high[0]).toContain('src="https://cdn.example/c/09.png"');
+    expect(html).not.toContain("Botuar me Librum");
+    expect(html).not.toContain("Sponsorizuar");
+    expect(html).not.toContain("About ");
+    expect(html).toContain("Ti je botuesi yt!");
   });
 });
