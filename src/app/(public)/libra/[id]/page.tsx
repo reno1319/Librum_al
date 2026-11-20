@@ -34,6 +34,7 @@ import { BookShelf } from "@/components/book-shelf";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { downloadCountText, parseDownloadCount } from "@/lib/reader-feedback";
 import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
+import { initialReviewStars, parseRateStars } from "@/lib/rate-prompt";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
 import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
@@ -336,6 +337,8 @@ export default async function BookDetailPage({
     canceled?: string;
     // BD16 P4: the "Më njofto" result (on / off / error), words only.
     notify?: string;
+    // K8 rate prompt: the stars chosen in the reader (1..5, words only).
+    yje?: string;
   }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public book detail page (V3 §3)
@@ -355,7 +358,9 @@ export default async function BookDetailPage({
     checkout_expired: checkoutExpired,
     canceled,
     notify: rawNotify,
+    yje: rawRateStars,
   } = await searchParams;
+  const rateStars = parseRateStars(rawRateStars);
   const error = pageErrorMessage(rawError);
 
   const supabase = await createClient();
@@ -494,7 +499,7 @@ export default async function BookDetailPage({
 
   const [
     { data: reviews },
-    { data: myReviewRow },
+    { data: myReviewRow, error: myReviewError },
     { data: contributors },
     { data: seriesRow },
     { data: seriesEntriesData },
@@ -523,7 +528,7 @@ export default async function BookDetailPage({
           .eq("book_id", id)
           .eq("reader_id", user.id)
           .maybeSingle<MyReview>()
-      : Promise.resolve({ data: null }),
+      : Promise.resolve({ data: null, error: null }),
     supabase
       .from("book_contributors")
       .select("*")
@@ -904,6 +909,9 @@ export default async function BookDetailPage({
       triggerClassName={PRIMARY_ACTION_CLASSES}
       coverUrl={coverUrl}
       confirmFirst={downloadNote === DOWNLOAD_CANCEL_WARNING}
+      // K8 rate prompt (Renato 11-20): an owner (never the author) with no
+      // review of this book in any status, and only if that was read.
+      ratePrompt={purchaseState === "owned" && !myReviewError && myReview === null}
     />
   );
   // P1 (Renato 11-10): pages and reading time come from the same count.
@@ -1659,7 +1667,7 @@ export default async function BookDetailPage({
               <select
                 name="rating"
                 required
-                defaultValue={myReview?.rating ?? ""}
+                defaultValue={initialReviewStars(myReview?.rating, rateStars)}
                 className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
               >
                 <option value="" disabled>

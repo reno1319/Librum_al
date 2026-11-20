@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Alert } from "@/components/ui/alert";
 import { buttonClasses } from "@/components/ui/button";
 import { LibraryBookCard } from "@/components/library-book-card";
+import { showRatePrompt } from "@/lib/rate-prompt";
 import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
@@ -93,6 +94,14 @@ export default async function LibraryPage({
     ((placeRows ?? []) as { book_id: string; progress: number | string }[]).map((r) => [r.book_id, Number(r.progress)] as const),
   );
 
+  // K8 rate prompt (Renato 11-20, k8q3 a): the reader's own reviews, in
+  // any status (own-row read). A book with one gets no bar in the reader.
+  // Audit r1 L1: and the reader's own books (an author never gets it).
+  const [ownReviews, ownBooks] = await Promise.all([
+    supabase.from("reviews").select("book_id").eq("reader_id", user.id),
+    supabase.from("books").select("id").eq("author_id", user.id),
+  ]);
+
   // The Library grid: every currently-owned book, as a flat list --
   // never grouped by bundle/transaction (that grouping lives entirely
   // at /account/purchases now). A refunded or lost-disputed purchase's
@@ -158,6 +167,7 @@ export default async function LibraryPage({
                 downloadable={ownedByBookId.get(book.id) ?? false}
                 downloadNote={buyerDownloadNote(downloadStates.get(book.id))}
                 progress={progressByBookId.get(book.id) ?? null}
+                ratePrompt={showRatePrompt(book.id, ownReviews, ownBooks)}
               />
             );
           })}

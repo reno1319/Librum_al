@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { buttonClasses } from "@/components/ui/button";
 import { BookReader, type ReaderData, type ReaderEndAction } from "@/components/book-reader";
 import { OPEN_CANCEL_CONFIRM, positionStorageKey } from "@/lib/owned-reader";
+import { reviewFormHref } from "@/lib/rate-prompt";
 
 // PREVIEW-READER-1: "Lexoni një pjesë" opens the page-turning reader as a
 // popup over the book page (Renato 9 Nov: popup, not its own page). The
@@ -32,6 +33,7 @@ export function BookSampleReader({
   endLink = null,
   triggerClassName,
   confirmFirst = false,
+  ratePrompt = false,
 }: {
   bookId: string;
   bookTitle: string;
@@ -41,6 +43,10 @@ export function BookSampleReader({
   // Buyer reader (11-15, 1a): mode "owned" while the 14-day cancel
   // window is open: ask once before the first open.
   confirmFirst?: boolean;
+  // K8 rate prompt (Renato 11-20): mode "owned" for a reader with no
+  // review of this book yet; the page decides. A star closes the reader
+  // and opens the book page's review form with those stars chosen.
+  ratePrompt?: boolean;
   coverUrl?: string | null;
   // The end page's main button: scroll to an element on this page (the
   // price card) or follow a link.
@@ -206,6 +212,11 @@ export function BookSampleReader({
             devices={mode === "full"}
             positionKey={mode === "owned" ? positionStorageKey(bookId) : null}
             marksBookId={mode === "owned" ? bookId : null}
+            ratePrompt={
+              mode === "owned" && ratePrompt
+                ? { bookId, onRate: (stars) => close(() => window.location.assign(reviewFormHref(bookId, stars))) }
+                : null
+            }
           />
         ) : (
           <div className="flex h-full flex-col">

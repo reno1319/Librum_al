@@ -73,6 +73,10 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   "app/(public)/libra/[id]/page.tsx": ["books", "reviews"],
   "app/(public)/libra/[id]/actions.ts": ["books"],
   "app/(public)/paketa/[id]/page.tsx": ["bundles"],
+  // K8 rate prompt (11-20): the reader's own reviews (book ids only), so
+  // the reader shows "Libri mbaroi. Të pëlqeu?" only without one, and the
+  // reader's own books (ids only), so an author never gets it.
+  "app/(public)/library/page.tsx": ["books", "reviews"],
   // DEL: the final deletion (the daily job) reads the account's own
   // books with the service-role client, filtered by the account's id.
   "lib/account-deletion.ts": ["books"],
