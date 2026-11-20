@@ -9,6 +9,7 @@ vi.mock("@/lib/email", async (importOriginal) => ({
 import {
   ERROR_EMAIL_MIN_INTERVAL_MS,
   ERROR_EMAILS_PER_DAY,
+  alertIfCronFailed,
   cleanPath,
   redactErrorMessage,
   reportServerError,
@@ -159,5 +160,51 @@ describe("cleanPath", () => {
     const out = cleanPath(`/${"a/".repeat(200)}`);
     expect(out.length).toBe(201);
     expect(out.endsWith("…")).toBe(true);
+  });
+});
+
+// ALERTS-2: nightly job failures (they answer 5xx instead of throwing).
+describe("alertIfCronFailed", () => {
+  const PATH = "/api/internal/account-deletions/run";
+
+  it("emails a 500 or 503 with only the job path and status, and returns the response unchanged", async () => {
+    for (const status of [500, 503]) {
+      resetErrorAlertThrottle();
+      sendEmail.mockClear();
+      const response = new Response(JSON.stringify({ ok: false, secretish: "do-not-email" }), { status });
+      expect(await alertIfCronFailed(PATH, response, T0)).toBe(response);
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [to, subject, html] = sendEmail.mock.calls[0]!;
+      expect(to).toBe("support@librum.al");
+      expect(subject).toBe(`Site error: cron ${PATH}`);
+      expect(html).toContain(`GET ${PATH}<`);
+      expect(html).toContain("CronJobFailed");
+      expect(html).toContain(`Nightly job answered HTTP ${status}`);
+      expect(html).not.toContain("do-not-email");
+    }
+  });
+
+  it.each([200, 401, 404])("does not email a %i", async (status) => {
+    const response = new Response(null, { status });
+    expect(await alertIfCronFailed(PATH, response, T0)).toBe(response);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not email while maintenance mode is on (every job answers 503 on purpose)", async () => {
+    vi.stubEnv("ALL_CUTOVER_MAINTENANCE_MODE", "active");
+    await alertIfCronFailed(PATH, new Response(null, { status: 503 }), T0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not email outside Production", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    await alertIfCronFailed(PATH, new Response(null, { status: 500 }), T0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("shares the cap with every other server error", async () => {
+    await reportServerError(new Error("page"), REQUEST, CONTEXT, T0);
+    await alertIfCronFailed(PATH, new Response(null, { status: 500 }), T0 + 1000);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 });

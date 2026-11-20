@@ -1,4 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+// ALERTS-2: GET hands its response to the failure email; pass-through here.
+const alertIfCronFailed = vi.hoisted(() => vi.fn(async (_path: string, response: Response) => response));
+vi.mock("@/lib/error-alerts", () => ({ alertIfCronFailed }));
 import { readFileSync } from "fs";
 import path from "path";
 
@@ -588,5 +591,22 @@ describe("maintenance-mode gate", () => {
     const response = await POST(authedRequest("POST", { mode: "dry-run" }));
     expect(response.status).not.toBe(503);
     expect(mockCreateAdminClient).toHaveBeenCalled();
+  });
+});
+
+describe("ALERTS-2 failure email wiring", () => {
+  it("passes the GET response to alertIfCronFailed with this job's path", async () => {
+    alertIfCronFailed.mockClear();
+    const saved = process.env.CRON_SECRET;
+    delete process.env.CRON_SECRET;
+    try {
+      const response = await GET(new Request("http://localhost/api/internal/payouts/run"));
+      expect(response.status).toBe(503);
+      expect(alertIfCronFailed).toHaveBeenCalledTimes(1);
+      expect(alertIfCronFailed).toHaveBeenCalledWith("/api/internal/payouts/run", response);
+    } finally {
+      if (saved === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = saved;
+    }
   });
 });

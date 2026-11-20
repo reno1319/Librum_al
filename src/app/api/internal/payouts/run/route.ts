@@ -10,6 +10,7 @@ import {
 } from "@/lib/payout-scheduler";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { maintenanceHttpResponse } from "@/lib/maintenance-response";
+import { alertIfCronFailed } from "@/lib/error-alerts";
 
 // LEDGER-1E-D-D: the internal application scheduler route for the
 // payout-scheduler DB foundation (migration 053, already live in
@@ -213,7 +214,7 @@ async function handleReserveMode(targetMonth: string): Promise<Response> {
 // PAYOUT_SCHEDULER_ENABLED is explicitly set to "true" somewhere (not
 // in this task), this is unconditionally the disabled no-op branch of
 // handleReserveMode.
-export async function GET(request: Request): Promise<Response> {
+async function runJob(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
 
@@ -266,4 +267,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
+}
+
+// ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team
+// (src/lib/error-alerts.ts alertIfCronFailed); the response is unchanged.
+export async function GET(request: Request): Promise<Response> {
+  return alertIfCronFailed("/api/internal/payouts/run", await runJob(request));
 }

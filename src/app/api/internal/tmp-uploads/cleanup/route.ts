@@ -10,6 +10,7 @@ import {
   TMP_CLEANUP_OFF_ENV,
   type TmpCleanupStorage,
 } from "@/lib/tmp-upload-cleanup";
+import { alertIfCronFailed } from "@/lib/error-alerts";
 
 // BD5 (W9): the daily clean-up of abandoned temporary uploads, called
 // by the Vercel cron in vercel.json (GET, "Authorization: Bearer
@@ -46,7 +47,7 @@ function authenticate(request: Request): Response | null {
   return null;
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function runJob(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
 
@@ -73,4 +74,10 @@ export async function GET(request: Request): Promise<Response> {
   }
   console.log("[tmp-cleanup] run complete", summary);
   return NextResponse.json(summary);
+}
+
+// ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team
+// (src/lib/error-alerts.ts alertIfCronFailed); the response is unchanged.
+export async function GET(request: Request): Promise<Response> {
+  return alertIfCronFailed("/api/internal/tmp-uploads/cleanup", await runJob(request));
 }
