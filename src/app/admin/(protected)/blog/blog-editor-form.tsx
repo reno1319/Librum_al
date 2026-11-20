@@ -2,8 +2,6 @@
 
 import { useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { BLOG_POST_CATEGORIES } from "@/lib/blog-categories";
-import type { BlogCategory } from "@/lib/types";
 import { resolveAutoSlug } from "@/lib/blog-slug";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
 import { BlogCoverField } from "@/components/blog-cover-field";
@@ -25,7 +23,7 @@ export type BlogEditorInitialValues = {
   title: string;
   slug: string;
   excerpt: string;
-  category: BlogCategory;
+  category: string;
   featured: boolean;
   isEditorial: boolean;
   keywords: string[];
@@ -58,6 +56,7 @@ export function BlogEditorForm({
   slugReadOnly,
   submitLabel,
   pinnedElsewhereTitle = null,
+  categories,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   staffUserId: string;
@@ -66,6 +65,9 @@ export function BlogEditorForm({
   submitLabel: string;
   // e4: the title of the article pinned now, when it is not this one.
   pinnedElsewhereTitle?: string | null;
+  // Patch B: the categories a post can be filed under, in their set
+  // order (blog_categories, Editorial left out).
+  categories: readonly { value: string; label: string }[];
 }) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [slug, setSlug] = useState(initialValues?.slug ?? "");
@@ -143,12 +145,12 @@ export function BlogEditorForm({
           {/* A new article starts on this blank choice (audit F2);
               `required` blocks the save in the browser and the server
               rejects "" too (validateBlogPostFields -> isBlogCategory).
-              bs1: only the five real categories; Editorial is the
-              tick below, on top of one of them. */}
+              bs1: only real categories; Editorial is the tick
+              below, on top of one of them. */}
           <option value="" disabled>
             Zgjidhni kategorinë
           </option>
-          {BLOG_POST_CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>

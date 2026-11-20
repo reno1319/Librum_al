@@ -1,5 +1,4 @@
-import { isBlogCategory } from "@/lib/blog-categories";
-import type { BlogCategory } from "@/lib/types";
+import { CATEGORY_URL_SLUG_MAX, CATEGORY_URL_SLUG_PATTERN, EDITORIAL_VALUE } from "@/lib/blog-categories";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 // LIBRUM 2.0 BLOG-1C: mirrors migration 047's own CHECK constraints and
@@ -55,7 +54,7 @@ export type ValidatedBlogPostFields = {
   slug: string;
   excerpt: string;
   contentMarkdown: string;
-  category: BlogCategory;
+  category: string;
   featured: boolean;
   isEditorial: boolean;
   keywords: string[];
@@ -101,7 +100,14 @@ export function validateBlogPostFields(input: BlogPostFieldInput): BlogValidatio
     };
   }
 
-  if (!isBlogCategory(input.category)) {
+  // Patch B: categories live in blog_categories, so this only checks the
+  // shape; create/update_blog_post() check the row exists (and the
+  // foreign key backs that up).
+  if (
+    input.category === EDITORIAL_VALUE ||
+    input.category.length > CATEGORY_URL_SLUG_MAX ||
+    !CATEGORY_URL_SLUG_PATTERN.test(input.category)
+  ) {
     return { ok: false, error: "Please choose a valid category." };
   }
 
@@ -157,6 +163,10 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
   // Postgres unique_violation -- only reachable on the slug column here
   // (the only UNIQUE constraint blog_posts has), surfaced by either
   // create_blog_post() or update_blog_post().
+  // foreign_key_violation: the category was deleted while the form was
+  // open (blog_posts_category_fkey).
+  if (error.code === "23503") return "Please choose a valid category.";
+
   if (error.code === "23505") {
     if ((error.message ?? "").includes("blog_posts_one_pin_idx")) {
       return "Another article was pinned at the same moment. Please try again.";

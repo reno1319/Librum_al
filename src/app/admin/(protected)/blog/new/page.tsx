@@ -6,6 +6,8 @@ import { createBlogPostAction } from "../actions";
 import type { Metadata } from "next";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { createClient } from "@/lib/supabase/server";
+import { blogPostCategories } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 
 export const metadata: Metadata = {
   title: "New article",
@@ -53,6 +55,7 @@ export default async function NewBlogPostPage({
         slugReadOnly={false}
         submitLabel="Save draft"
         pinnedElsewhereTitle={pinned?.title ?? null}
+        categories={blogPostCategories(await getBlogCategories())}
       />
     </main>
   );

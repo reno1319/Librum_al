@@ -4,6 +4,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BlogEditorForm } from "./blog-editor-form";
 import { ContentMarkdownInput } from "./blog-content-editor";
 
+// Patch B: the page passes the categories from blog_categories, in
+// their set order, Editorial left out.
+const TEST_CATEGORIES = [
+  { value: "zeja", label: "Zeja e Shkrimit" },
+  { value: "tregu", label: "Tregu i Librit & Botimet" },
+  { value: "perkthime", label: "Përkthime" },
+  { value: "kultura", label: "Kulturë & Njohuri" },
+  { value: "reflektime", label: "Reflektime & Frymëzim" },
+  { value: "vleresime", label: "Vlerësimet & Rekomandimet" },
+];
+
 // QA H4: saving from Preview must still submit the article body.
 // e1 (2026-11-19): the textarea is always mounted (on a computer the
 // preview sits beside it), so exactly one control named contentMarkdown
@@ -51,6 +62,7 @@ describe("BlogEditorForm category select", () => {
         initialValues,
         slugReadOnly: false,
         submitLabel: "Save",
+        categories: TEST_CATEGORIES,
       }),
     );
   }
@@ -85,11 +97,11 @@ describe("BlogEditorForm category select", () => {
     expect(select).not.toMatch(/<option value="" disabled="" selected="">/);
   });
 
-  it("bs1: only the five real categories are offered; Editorial is not an option", () => {
+  it("patch B: exactly the categories passed in, in that order; Editorial is not an option", () => {
     const select = selectHtml(renderForm());
-    for (const v of ["zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
-      expect(select).toContain(`<option value="${v}">`);
-    }
+    const values = [...select.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
+    expect(values).toEqual(["zeja", "tregu", "perkthime", "kultura", "reflektime", "vleresime"]);
+    expect(select).toContain('<option value="perkthime">Përkthime</option>');
     expect(select).not.toContain('value="editorial"');
   });
 

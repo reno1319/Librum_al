@@ -91,6 +91,12 @@ insert into auth.users (id, email, raw_user_meta_data) values
 insert into public.staff_members (user_id, role) values
   ('e1040000-0000-4000-8000-000000000001', 'editor');
 
+-- Migration 20261119180000 (categories table) replaced this
+-- migration's CHECK with a foreign key: its rollback file first puts the
+-- five-value CHECK back, so every part below still tests 104 itself.
+-- (107's own suite tests the later migration.)
+\i supabase/tests/107_blog_categories_manage.rollback.sql
+
 -- ============================================================
 -- Part 1: final schema shape.
 -- ============================================================

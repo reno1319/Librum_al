@@ -123,7 +123,7 @@ describe("createBlogPostAction", () => {
   });
 
   it("rejects an invalid category before calling create_blog_post", async () => {
-    const formData = validFormData({ category: "not-a-real-category" });
+    const formData = validFormData({ category: "Not a category" });
 
     await expect(createBlogPostAction(formData)).rejects.toBeInstanceOf(RedirectSignal);
     expect(currentMockSupabase._spies.rpc).not.toHaveBeenCalled();

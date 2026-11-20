@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BLOG_SEARCH_RESULT_LIMIT, parseBlogSearchQuery } from "@/lib/blog-search";
 import type { BlogLandingCandidate } from "@/lib/blog-landing-logic";
 import { BlogArticleCard } from "@/components/blog-article-card";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import { BlogSearchBox } from "@/components/blog-search-box";
 
 // Blog search results (bs5/bs6, Renato 2026-11-17): /blog/kerko?q=...
@@ -26,6 +27,7 @@ export default async function BlogSearchPage({
 
   let posts: BlogLandingCandidate[] = [];
   const supabase = await createClient();
+  const categories = await getBlogCategories();
   if (term) {
     // Public/RLS-backed client only. The function returns ids in its own
     // order (newest first); the rows are read back through the normal
@@ -84,6 +86,7 @@ export default async function BlogSearchPage({
               {posts.map((post) => (
                 <BlogArticleCard
                   key={post.id}
+                  categories={categories}
                   compactOnMobile
                   post={{
                     slug: post.slug,

@@ -89,10 +89,12 @@ insert into auth.users (id, email, raw_user_meta_data) values
 insert into public.staff_members (user_id, role) values
   ('e1020000-0000-4000-8000-000000000001', 'editor');
 
--- Migration 20261117230000 (Editorial tick, keywords, search) changed
--- this schema again: its own rollback file first puts the database back
+-- Migrations 20261117230000 (Editorial tick, keywords, search) and
+-- 20261119180000 (categories table) changed
+-- this schema again: their rollback files, newest first, put the database back
 -- on this migration's final state, so every part below still tests 102
 -- itself. (104's own suite tests the later migration.)
+\i supabase/tests/107_blog_categories_manage.rollback.sql
 \i supabase/tests/104_blog_editorial_keywords.rollback.sql
 
 -- ============================================================
