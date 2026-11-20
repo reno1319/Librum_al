@@ -1,5 +1,6 @@
 import { escapeEmailHtml, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/contact";
+import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 
 // ALERTS-1 (Renato 10-27, 4b): email the team when the live site hits a
 // server error -- a page, Route Handler, Server Action or Proxy that
@@ -144,4 +145,25 @@ export async function reportServerError(error: unknown, request: RequestInfo, co
   } catch (caught) {
     console.error("reportServerError failed", { error: caught instanceof Error ? caught.name : "unknown" });
   }
+}
+
+// ALERTS-2: what the owner's test link (/admin/test-error-email) throws.
+export const TEST_ERROR_MESSAGE = "Test error from the owner's test link (ALERTS-2). Nothing is broken.";
+
+// ALERTS-2 (Renato 11-20, a): the nightly jobs (vercel.json crons) catch
+// their own failures and answer 500 or 503 instead of throwing, so
+// onRequestError never sees them. Each job's GET passes its response
+// here: a 5xx is emailed through reportServerError above, with the same
+// Production-only gate and the same cap. Only the job's route path and
+// the status code go in the email, never the response body. Skipped
+// while maintenance mode is on, since every job then answers 503 on
+// purpose. A thrown error is not handled here: it already reaches
+// onRequestError. Returns the response unchanged.
+export async function alertIfCronFailed(routePath: string, response: Response, now = Date.now()): Promise<Response> {
+  if (response.status >= 500 && !resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    const failure = new Error(`Nightly job answered HTTP ${response.status}`);
+    failure.name = "CronJobFailed";
+    await reportServerError(failure, { path: routePath, method: "GET" }, { routePath, routeType: "cron" }, now);
+  }
+  return response;
 }

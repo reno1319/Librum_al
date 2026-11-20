@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { maintenanceHttpResponse } from "@/lib/maintenance-response";
 import { runDueAccountDeletions } from "@/lib/account-deletion";
+import { alertIfCronFailed } from "@/lib/error-alerts";
 
 // DEL (Renato 11-18): the daily real deletion of accounts whose 30 days
 // to change their mind are over, called by the Vercel cron in
@@ -40,7 +41,7 @@ function authenticate(request: Request): Response | null {
   return null;
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function runJob(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
 
@@ -54,4 +55,10 @@ export async function GET(request: Request): Promise<Response> {
   }
   console.log("[account-deletions] run complete", run.counts);
   return NextResponse.json(run);
+}
+
+// ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team
+// (src/lib/error-alerts.ts alertIfCronFailed); the response is unchanged.
+export async function GET(request: Request): Promise<Response> {
+  return alertIfCronFailed("/api/internal/account-deletions/run", await runJob(request));
 }
