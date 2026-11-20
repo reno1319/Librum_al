@@ -170,13 +170,13 @@ function HeroSection({ cta }: { cta: HomepageCta | null }) {
         </defs>
         <image href={HERO_IMAGE_SRC} x="-120" y="0" width="900" height="560" preserveAspectRatio="xMidYMid slice" clipPath="url(#hero-quote)" />
       </svg>
-      <div className="page-container relative pt-14 pb-12 lg:pt-32 lg:pb-16">
+      <div className="page-container relative pt-14 pb-6 lg:pt-32 lg:pb-8">
         <h1 className="font-serif text-[2.5rem] font-bold leading-[1.2] text-[#232f3e] sm:text-5xl lg:text-[3.375rem]">
           Mirë se erdhët
           <br />
           në Librum
         </h1>
-        <p className="mt-12 max-w-5xl text-xl font-medium leading-relaxed text-[#232f3e] lg:mt-28 lg:text-[1.5rem]">
+        <p className="mt-6 max-w-5xl text-xl font-medium leading-relaxed text-[#232f3e] lg:mt-14 lg:text-[1.5rem]">
           Platforma e parë e vetëbotimit shqip.
           <br />
           Shkruaj. Vetëpubliko. Fito
@@ -250,10 +250,10 @@ function BrushBrace({ flip = false }: { flip?: boolean }) {
 
 function BraceQuote() {
   return (
-    <div className="page-container pt-12 md:pt-20">
-      <div className="mx-auto flex max-w-[66rem] items-center gap-4 sm:gap-10">
+    <div className="page-container pt-8 md:pt-12">
+      <div className="mx-auto flex max-w-[66rem] items-center gap-3 sm:gap-10">
         <BrushBrace />
-        <p className="mx-auto max-w-[50rem] flex-1 text-center font-serif text-2xl leading-[1.2] text-[#232f3e] sm:text-[2.25rem]">
+        <p className="mx-auto max-w-[50rem] flex-1 text-center font-serif text-xl leading-[1.2] text-[#232f3e] sm:text-[2.25rem]">
           Vetëpublikoni me lehtësi dhe pa asnjë kosto fillestare. Librum ju ofron mjete falas për të botuar
           dorëshkrimin tuaj.
         </p>
@@ -269,11 +269,11 @@ const ROW_LEAD = "mt-4 text-xl font-medium leading-normal text-[#232f3e] md:text
 // "Ti je botuesi yt!": fanned covers left, words right.
 function PublisherRow({ covers, cta }: { covers: Cover[]; cta: HomepageCta | null }) {
   const five = covers.slice(0, 5);
-  const sizes = ["h-28 sm:h-52", "h-32 sm:h-60", "h-40 sm:h-[20rem]", "h-32 sm:h-60", "h-28 sm:h-52"];
+  const sizes = ["h-28 lg:h-36 xl:h-44", "h-32 lg:h-44 xl:h-52", "h-40 lg:h-56 xl:h-[17rem]", "h-32 lg:h-44 xl:h-52", "h-28 lg:h-36 xl:h-44"];
   return (
     <div className={ROW}>
       {five.length >= 3 ? (
-        <div aria-hidden="true" className="flex items-center justify-center -space-x-4 sm:-space-x-9 md:pr-6">
+        <div aria-hidden="true" className="flex items-center justify-center -space-x-4 lg:-space-x-7 xl:-space-x-9">
           {five.map((c, i) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -353,7 +353,7 @@ function GenresSection() {
         <h2 className={SECTION_HEADING}>Vetëpublikoni lloje të ndryshme librash</h2>
         <ul className="mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-x-8 gap-y-8 text-left sm:grid-cols-3 lg:grid-cols-4 lg:gap-y-10">
           {BOOK_TYPES.map((type) => (
-            <li key={type} className="text-base text-[#0f1111]">
+            <li key={type} className="text-center text-base text-[#0f1111]">
               {type}
             </li>
           ))}
@@ -394,7 +394,7 @@ function LearnSection() {
 function ClosingBand({ cta }: { cta: HomepageCta }) {
   return (
     <section className="overflow-hidden bg-[#eaeded]">
-      <div className="page-container relative flex flex-col items-center justify-center gap-5 py-10 text-center md:flex-row md:gap-16 md:py-0 md:text-left">
+      <div className="page-container relative flex flex-col items-center justify-center gap-5 py-10 text-center md:flex-row md:gap-10 md:py-0 md:text-left xl:min-h-[10rem]">
         <div className="md:py-12">
           <h2 className="font-serif text-2xl font-normal text-[#232f3e] lg:whitespace-nowrap">
             A jeni gati për të vetëbotuar librin tuaj?
@@ -416,7 +416,7 @@ function ClosingFigure() {
     <svg
       aria-hidden="true"
       viewBox="0 0 200 160"
-      className="hidden h-[10rem] w-auto shrink-0 self-end md:block"
+      className="absolute right-0 bottom-0 hidden h-[10rem] w-auto xl:block"
       fill="none"
       stroke="#0f1111"
       strokeWidth="3"
