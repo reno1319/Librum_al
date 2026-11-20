@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// ALERTS-2: GET hands its response to the failure email; pass-through here.
+const alertIfCronFailed = vi.hoisted(() => vi.fn(async (_path: string, response: Response) => response));
+vi.mock("@/lib/error-alerts", () => ({ alertIfCronFailed }));
 import { readFileSync } from "node:fs";
 
 // BD5: the cron route. createAdminClient() is mocked so every test stays
@@ -124,8 +127,25 @@ describe("GET /api/internal/tmp-uploads/cleanup", () => {
 
   it("is a GET-only route guarded before any Supabase client is built (source)", () => {
     const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
-    const get = source.slice(source.indexOf("export async function GET"));
+    const get = source.slice(source.indexOf("async function runJob"));
     expect(get.indexOf("authenticate(request)")).toBeLessThan(get.indexOf("createAdminClient()"));
     expect(get.indexOf("TMP_CLEANUP_OFF_ENV")).toBeLessThan(get.indexOf("createAdminClient()"));
+  });
+});
+
+describe("ALERTS-2 failure email wiring", () => {
+  it("passes the GET response to alertIfCronFailed with this job's path", async () => {
+    alertIfCronFailed.mockClear();
+    const saved = process.env.CRON_SECRET;
+    delete process.env.CRON_SECRET;
+    try {
+      const response = await GET(new Request("http://localhost/api/internal/tmp-uploads/cleanup"));
+      expect(response.status).toBe(503);
+      expect(alertIfCronFailed).toHaveBeenCalledTimes(1);
+      expect(alertIfCronFailed).toHaveBeenCalledWith("/api/internal/tmp-uploads/cleanup", response);
+    } finally {
+      if (saved === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = saved;
+    }
   });
 });

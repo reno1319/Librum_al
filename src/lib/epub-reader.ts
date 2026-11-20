@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { preflightZipEntries } from "@/lib/zip-preflight";
 import { EPUB_ZIP_PREFLIGHT_LIMITS } from "@/lib/epub-validation";
 import { resolveArchivePath } from "@/lib/epub-archive-paths";
+import { allElementInners, coverMetaContent, firstElementInner, firstMatchAtTag, navLandmarksInner, sentenceEnds, tagAttrs } from "@/lib/markup-scan";
 import {
   IMAGE_TOKEN_PREFIX,
   IMAGE_TOKEN_SUFFIX,
@@ -108,7 +109,6 @@ const CUT_AFTER_CLOSE = new Set([
 ]);
 // A sentence end: . ! ? … (repeats allowed), then closing quotes or
 // brackets, then a space or the end of the text run.
-const SENTENCE_END_RE = /[.!?…]+[»”’"')\]]*(?=\s|$)/g;
 
 // Picture indexes whose tokens are in a piece of cleaned html.
 function imagesIn(html: string): number[] {
@@ -198,8 +198,8 @@ export function trimInsideBlock(html: string, start: number, end: number, charBu
   let best = Number.POSITIVE_INFINITY;
   for (const [i, run] of runs.entries()) {
     if (run.at + run.text.length < limitAt) continue;
-    for (const s of blankRuns[i].matchAll(SENTENCE_END_RE)) {
-      const at = run.at + s.index! + s[0].length;
+    for (const end of sentenceEnds(blankRuns[i])) {
+      const at = run.at + end;
       if (at >= limitAt) {
         best = Math.min(best, at);
         break;
@@ -319,7 +319,7 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   }
 
   const container = await readText(zip, "META-INF/container.xml");
-  const rootfile = container?.match(/<rootfile\b[^>]*\bfull-path\s*=\s*(["'])(.*?)\1/i)?.[2];
+  const rootfile = container ? firstMatchAtTag(container, /<rootfile\b/gi, /<rootfile\b[^>]*\bfull-path\s*=\s*(["'])(.*?)\1/iy)?.[2] : undefined;
   if (!rootfile) return { available: false };
   const opfRes = resolveArchivePath("", rootfile.trim().replace(/^\/+/, ""));
   if (!opfRes.safe) return { available: false };
@@ -330,18 +330,18 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   // Manifest.
   const manifest = new Map<string, ManifestItem>();
   const byPath = new Map<string, ManifestItem>();
-  const manifestXml = opf.match(/<manifest\b[^>]*>([\s\S]*?)<\/manifest>/i)?.[1] ?? "";
-  for (const m of manifestXml.matchAll(/<item\b([^>]*?)\/?>/gi)) {
-    const id = attr(m[1], "id");
-    const href = attr(m[1], "href");
+  const manifestXml = firstElementInner(opf, "manifest") ?? "";
+  for (const itemAttrs of tagAttrs(manifestXml, "item")) {
+    const id = attr(itemAttrs, "id");
+    const href = attr(itemAttrs, "href");
     if (!id || !href) continue;
     const res = resolveArchivePath(opfDir, stripFragment(href));
     const item: ManifestItem = {
       id,
       href,
       path: res.safe ? res.path : null,
-      mediaType: (attr(m[1], "media-type") ?? "").toLowerCase(),
-      properties: (attr(m[1], "properties") ?? "").toLowerCase(),
+      mediaType: (attr(itemAttrs, "media-type") ?? "").toLowerCase(),
+      properties: (attr(itemAttrs, "properties") ?? "").toLowerCase(),
     };
     manifest.set(id, item);
     if (item.path) byPath.set(item.path, item);
@@ -351,19 +351,19 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
 
   // The cover picture is shown by the reader itself as page 1.
   const coverPaths = new Set<string>();
-  const coverMetaId = opf.match(/<meta\b[^>]*\bname\s*=\s*["']cover["'][^>]*\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+  const coverMetaId = coverMetaContent(opf);
   for (const item of manifest.values()) {
     if (!item.path) continue;
     if (/\bcover-image\b/.test(item.properties) || item.id === coverMetaId) coverPaths.add(item.path);
   }
 
   // Spine.
-  const spineXml = opf.match(/<spine\b[^>]*>([\s\S]*?)<\/spine>/i)?.[1] ?? "";
+  const spineXml = firstElementInner(opf, "spine") ?? "";
   const spine: ManifestItem[] = [];
   const seen = new Set<string>();
-  for (const m of spineXml.matchAll(/<itemref\b([^>]*?)\/?>/gi)) {
-    if ((attr(m[1], "linear") ?? "").toLowerCase() === "no") continue;
-    const item = manifest.get(attr(m[1], "idref") ?? "");
+  for (const refAttrs of tagAttrs(spineXml, "itemref")) {
+    if ((attr(refAttrs, "linear") ?? "").toLowerCase() === "no") continue;
+    const item = manifest.get(attr(refAttrs, "idref") ?? "");
     if (!item?.path || /\bnav\b/.test(item.properties)) continue;
     if (item.mediaType && !CONTENT_TYPES.has(item.mediaType)) continue;
     if (seen.has(item.path)) continue;
@@ -379,21 +379,21 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   const nav = [...manifest.values()].find((i) => /\bnav\b/.test(i.properties) && i.path);
   if (nav?.path) {
     const navXml = (await readText(zip, nav.path)) ?? "";
-    const landmarks = navXml.match(/<nav\b[^>]*epub:type\s*=\s*["'][^"']*\blandmarks\b[^"']*["'][^>]*>([\s\S]*?)<\/nav>/i)?.[1] ?? "";
-    for (const a of landmarks.matchAll(/<a\b([^>]*)>/gi)) {
-      if (/\bbodymatter\b/i.test(attr(a[1], "epub:type") ?? "")) {
-        const res = resolveArchivePath(posix.dirname(nav.path), stripFragment(attr(a[1], "href") ?? ""));
+    const landmarks = navLandmarksInner(navXml) ?? "";
+    for (const linkAttrs of tagAttrs(landmarks, "a", true)) {
+      if (/\bbodymatter\b/i.test(attr(linkAttrs, "epub:type") ?? "")) {
+        const res = resolveArchivePath(posix.dirname(nav.path), stripFragment(attr(linkAttrs, "href") ?? ""));
         if (res.safe) bodyStart = res.path;
         break;
       }
     }
   }
   if (!bodyStart) {
-    const guide = opf.match(/<guide\b[^>]*>([\s\S]*?)<\/guide>/i)?.[1] ?? "";
-    for (const r of guide.matchAll(/<reference\b([^>]*?)\/?>/gi)) {
-      const type = (attr(r[1], "type") ?? "").toLowerCase();
+    const guide = firstElementInner(opf, "guide") ?? "";
+    for (const refAttrs of tagAttrs(guide, "reference")) {
+      const type = (attr(refAttrs, "type") ?? "").toLowerCase();
       if (type === "text" || type === "bodymatter") {
-        const res = resolveArchivePath(opfDir, stripFragment(attr(r[1], "href") ?? ""));
+        const res = resolveArchivePath(opfDir, stripFragment(attr(refAttrs, "href") ?? ""));
         if (res.safe) bodyStart = res.path;
         break;
       }
@@ -414,18 +414,18 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     const xml = await readText(zip, path);
     if (xml === null) continue;
     const docDir = posix.dirname(path);
-    const head = xml.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
-    for (const link of head.matchAll(/<link\b([^>]*?)\/?>/gi)) {
-      if (!/stylesheet/i.test(attr(link[1], "rel") ?? "")) continue;
-      const res = resolveArchivePath(docDir, stripFragment(attr(link[1], "href") ?? ""));
+    const head = firstElementInner(xml, "head") ?? "";
+    for (const linkAttrs of tagAttrs(head, "link")) {
+      if (!/stylesheet/i.test(attr(linkAttrs, "rel") ?? "")) continue;
+      const res = resolveArchivePath(docDir, stripFragment(attr(linkAttrs, "href") ?? ""));
       if (!res.safe || cssRead.has(res.path)) continue;
       cssRead.add(res.path);
       const css = await readText(zip, res.path);
       if (css) parseCssClassRules(css, classRules);
     }
-    for (const style of head.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) parseCssClassRules(style[1], classRules);
+    for (const css of allElementInners(head, "style")) parseCssClassRules(css, classRules);
 
-    const body = xml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? xml;
+    const body = firstElementInner(xml, "body") ?? xml;
     const chunks = sanitizeReaderBody(body, {
       classRules,
       headingCounter,

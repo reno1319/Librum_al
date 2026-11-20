@@ -8,7 +8,7 @@ const { authorGreetingName, authorRecipient } = await import("./author-recipient
 describe("authorGreetingName", () => {
   const emailUser = { email: "ana@example.com", app_metadata: { provider: "email" }, user_metadata: {} };
   const googleUser = (meta: Record<string, unknown>) => ({
-    email: "arben.h92@gmail.com",
+    email: "arben.test@example.test",
     app_metadata: { provider: "google" },
     user_metadata: meta,
   });
@@ -28,9 +28,9 @@ describe("authorGreetingName", () => {
   });
 
   it("Google with the automatic name: Google's full_name, then name, then none", () => {
-    expect(authorGreetingName(googleUser({ full_name: "Arben Hoxha", name: "A H" }), "arben.h92")).toBe("Arben Hoxha");
-    expect(authorGreetingName(googleUser({ name: "Arben H" }), "arben.h92")).toBe("Arben H");
-    expect(authorGreetingName(googleUser({}), "arben.h92")).toBeNull();
+    expect(authorGreetingName(googleUser({ full_name: "Arben Hoxha", name: "A H" }), "arben.test")).toBe("Arben Hoxha");
+    expect(authorGreetingName(googleUser({ name: "Arben H" }), "arben.test")).toBe("Arben H");
+    expect(authorGreetingName(googleUser({}), "arben.test")).toBeNull();
     expect(authorGreetingName(googleUser({ full_name: 5 }), null)).toBeNull();
   });
 

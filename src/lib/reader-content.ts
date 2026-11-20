@@ -17,6 +17,8 @@
 // Same tokenizer approach (and the same reasons) as epub-sample.ts:
 // well-formed XHTML, a small stack, no parsing dependency.
 
+import { cssRules, markupTokens } from "@/lib/markup-scan";
+
 export const READER_TAGS = new Set([
   "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "div", "span",
   "em", "strong", "i", "b", "u", "s", "br", "hr", "ul", "ol", "li", "small", "sup", "sub",
@@ -63,6 +65,16 @@ export const IMAGE_TOKEN_SUFFIX = "\u0000";
 export const MAX_READER_DOCUMENT_CHARS = 2_000_000;
 const MAX_CSS_CHARS = 400_000;
 const MAX_CSS_RULES = 5_000;
+// Most open containers the cleaner keeps at once. Real books stay well
+// under 20 levels. Without a limit, every closing level re-copies all the
+// html inside it, so a broken EPUB with thousands of never-closed <div>s
+// took seconds (or minutes) on every reader open. Past the limit an
+// opening tag is flattened: its text stays, in the deepest container,
+// and its own matching close tag is skipped. Paragraphs and headings are
+// the exception (one level only, never one inside another), so a broken
+// book's text keeps its paragraphs and its Contents.
+export const MAX_READER_DEPTH = 64;
+const KEEP_PAST_DEPTH_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6"]);
 
 // ------------------------------------------------------------
 // CSS: only a few layout facts are read, never passed through
@@ -100,14 +112,13 @@ export function declarationClasses(decls: string): ReaderClass[] {
 // `.cls`, `p.cls`, `div.a.b` -> classes; anything more complex is ignored.
 export function parseCssClassRules(css: string, into: Map<string, Set<ReaderClass>> = new Map()) {
   const text = css.slice(0, MAX_CSS_CHARS).replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "");
-  const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
-  let m: RegExpExecArray | null;
   let count = 0;
-  while ((m = ruleRe.exec(text)) && count < MAX_CSS_RULES) {
+  for (const [selectors, body] of cssRules(text)) {
+    if (count >= MAX_CSS_RULES) break;
     count += 1;
-    const classes = declarationClasses(m[2]);
+    const classes = declarationClasses(body);
     if (classes.length === 0) continue;
-    for (const raw of m[1].split(",")) {
+    for (const raw of selectors.split(",")) {
       const sel = raw.trim();
       const simple = sel.match(/^[a-z0-9]*((?:\.[\w-]+)+)$/i);
       if (!simple) continue;
@@ -125,9 +136,6 @@ export function parseCssClassRules(css: string, into: Map<string, Set<ReaderClas
 // ------------------------------------------------------------
 // Body sanitizer
 // ------------------------------------------------------------
-
-const TOKEN_RE =
-  /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<\/([a-zA-Z][\w:.-]*)\s*>|<([a-zA-Z][\w:.-]*)((?:\s+[^<>]*?)?)\s*(\/?)>/g;
 
 function readAttr(attrs: string, name: string): string | null {
   const re = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
@@ -185,17 +193,24 @@ type Frame = {
   html: string[];
   text: string[];
   images: number[];
-  // Only for a container whose blocks are tracked (SC1): boundaries
-  // within this frame's own inner html, plus the running inner length
-  // and the text/images since the last boundary.
+  // Only for a container whose blocks are tracked (SC1). All tracked
+  // frames of one top-level chunk share one `parts` list, and each part
+  // is written once, already in the chunk's own coordinates: `base` is
+  // where this frame's inner html starts in the chunk, `length` its inner
+  // length so far, `closeAll` the close tags of this frame and every
+  // tracked frame around it, and `firstPart` where its own parts begin.
   parts: ReaderPart[] | null;
   length: number;
-  pendingText: string[];
-  pendingImages: number[];
+  base: number;
+  closeAll: string;
+  firstPart: number;
+  // Tags flattened past MAX_READER_DEPTH while this frame was the deepest
+  // one, by name, so their close tags are skipped. They go away with it.
+  skipped: Map<string, number> | null;
 };
 
-function frame(tag: string, allowed: boolean, dropped: boolean, classes = "", id = "", tracked = false): Frame {
-  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [], parts: tracked ? [] : null, length: 0, pendingText: [], pendingImages: [] };
+function frame(tag: string, allowed: boolean, dropped: boolean, classes = "", id = ""): Frame {
+  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [], parts: null, length: 0, base: 0, closeAll: "", firstPart: 0, skipped: null };
 }
 
 // The cleaned wrapper of a closed frame, as its open and close strings.
@@ -232,7 +247,12 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
   const root = frame("#root", false, false);
   const stack: Frame[] = [root];
   const chunks: ReaderChunk[] = [];
-  const inDrop = () => stack.some((f) => f.dropped);
+  // How many dropped frames are open, so this check does not scan the stack.
+  let dropDepth = 0;
+  const inDrop = () => dropDepth > 0;
+  // Loose text/images in tracked frames since the last part boundary.
+  let pendingText: string[] = [];
+  let pendingImages: number[] = [];
 
   function flushRoot() {
     if (root.html.length === 0) return;
@@ -248,15 +268,32 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
   // Every write into a frame's inner html goes through here, so a
   // tracked frame always knows its inner length and what came since its
   // last boundary.
-  function put(f: Frame, html: string, text: string, images: number[]) {
+  function put(f: Frame, html: string, text: string, images: number[], loose = true) {
     f.html.push(html);
     f.text.push(text);
     f.images.push(...images);
     if (f.parts) {
       f.length += html.length;
-      f.pendingText.push(text);
-      f.pendingImages.push(...images);
+      if (loose) {
+        pendingText.push(text);
+        pendingImages.push(...images);
+      }
     }
+  }
+
+  // A boundary at the current end of tracked frame `f`: the part takes
+  // its own text/images plus everything loose since the last boundary.
+  function addPart(f: Frame, text: string, images: number[], heading: boolean) {
+    const before = pendingText.join("");
+    f.parts!.push({
+      end: f.base + f.length,
+      close: f.closeAll,
+      text: before + text,
+      images: [...pendingImages, ...images],
+      heading: heading && !before.trim(),
+    });
+    pendingText = [];
+    pendingImages = [];
   }
 
   function appendText(raw: string) {
@@ -265,8 +302,8 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     put(stack[stack.length - 1], t, t, []);
   }
 
-  // `childParts`: the closed child's own boundaries, already in the
-  // coordinates of `rendered` (its wrapper included).
+  // `childParts`: a closed tracked child's parts (already in the shared
+  // list, in chunk coordinates).
   function emit(rendered: string, text: string, images: number[], block = false, heading = false, childParts: ReaderPart[] | null = null) {
     const parent = stack[stack.length - 1];
     if (parent === root) {
@@ -280,57 +317,47 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       put(parent, rendered, text, images);
       return;
     }
-    const start = parent.length;
-    const before = parent.pendingText.join("");
-    const beforeImages = parent.pendingImages;
-    put(parent, rendered, text, images);
-    parent.pendingText = [];
-    parent.pendingImages = [];
-    const own = childParts ?? [{ end: rendered.length, close: "", text, images, heading }];
-    own.forEach((p, i) => {
-      parent.parts!.push({
-        end: start + p.end,
-        close: p.close,
-        // Loose text before this block belongs to its first part.
-        text: i === 0 ? before + p.text : p.text,
-        images: i === 0 ? [...beforeImages, ...p.images] : p.images,
-        heading: p.heading && (i > 0 || !before.trim()),
-      });
-    });
+    put(parent, rendered, text, images, false);
+    if (!childParts) addPart(parent, text, images, heading);
   }
 
   // Closes every frame above stack[idx - 1], innermost first.
   function closeFrom(idx: number) {
     while (stack.length > idx) {
       const done = stack.pop()!;
-      if (done.dropped) continue;
+      if (done.dropped) {
+        dropDepth -= 1;
+        continue;
+      }
       const inner = done.html.join("");
       const [open, close] = wrapper(done);
       const rendered = `${open}${inner}${close}`;
-      let parts: ReaderPart[] | null = null;
       if (done.parts) {
         // Loose content after the last block is the last part.
-        const tail = done.pendingText.join("");
-        if (tail.trim() || done.pendingImages.length > 0 || done.parts.length === 0) {
-          done.parts.push({ end: done.length, close: "", text: tail, images: done.pendingImages, heading: false });
-        }
-        parts = done.parts.map((p) => ({ ...p, end: open.length + p.end, close: p.close + close }));
+        const own = done.parts.length - done.firstPart;
+        if (pendingText.join("").trim() || pendingImages.length > 0 || own === 0) addPart(done, "", [], false);
+        pendingText = [];
+        pendingImages = [];
       }
-      emit(rendered, done.text.join(""), done.images, BLOCK_TAGS.has(done.tag), HEADING_TAGS.has(done.tag), parts);
+      emit(rendered, done.text.join(""), done.images, BLOCK_TAGS.has(done.tag), HEADING_TAGS.has(done.tag), done.parts);
     }
   }
 
   const capped = bodyHtml.length > MAX_READER_DOCUMENT_CHARS ? bodyHtml.slice(0, MAX_READER_DOCUMENT_CHARS) : bodyHtml;
-  const re = new RegExp(TOKEN_RE.source, "g");
   let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(capped))) {
+  for (const m of markupTokens(capped)) {
     appendText(capped.slice(last, m.index));
-    last = re.lastIndex;
-    const [, closeName, openName, attrs = "", selfMark] = m;
+    last = m.end;
+    const { closeName, openName, attrs = "", selfMark } = m;
 
     if (closeName) {
       const name = closeName.toLowerCase();
+      const top = stack[stack.length - 1];
+      const flattened = top.skipped?.get(name) ?? 0;
+      if (flattened > 0) {
+        top.skipped!.set(name, flattened - 1);
+        continue;
+      }
       const idx = stack.map((f) => f.tag).lastIndexOf(name);
       if (idx <= 0) continue;
       closeFrom(idx);
@@ -342,8 +369,25 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     const local = name.includes(":") ? name.slice(name.lastIndexOf(":") + 1) : name;
     const selfClosing = selfMark === "/" || VOID_TAGS.has(name);
 
-    if (inDrop() || DROP_ENTIRELY_TAGS.has(name) || DROP_ENTIRELY_TAGS.has(local)) {
-      if (!selfClosing) stack.push(frame(name, false, true));
+    const dropTag = DROP_ENTIRELY_TAGS.has(name) || DROP_ENTIRELY_TAGS.has(local);
+    // Past the depth limit, flatten. A tag that must drop its contents is
+    // still pushed when nothing around it drops already, so its text can
+    // never leak; inside it everything is dropped anyway. A paragraph or
+    // heading is still pushed when it is not inside another one. So the
+    // stack grows past the limit by at most two frames.
+    const top = stack[stack.length - 1];
+    const keepBlock = KEEP_PAST_DEPTH_TAGS.has(name) && !KEEP_PAST_DEPTH_TAGS.has(top.tag);
+    if (!selfClosing && stack.length > MAX_READER_DEPTH && (inDrop() || (!dropTag && !keepBlock))) {
+      top.skipped ??= new Map();
+      top.skipped.set(name, (top.skipped.get(name) ?? 0) + 1);
+      continue;
+    }
+
+    if (inDrop() || dropTag) {
+      if (!selfClosing) {
+        stack.push(frame(name, false, true));
+        dropDepth += 1;
+      }
       continue;
     }
 
@@ -371,8 +415,16 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
       ctx.headingCounter.next += 1;
     }
     const parent = stack[stack.length - 1];
-    const tracked = SPLIT_TAGS.has(name) && (parent === root || parent.parts !== null);
-    stack.push(frame(name, allowed, false, classes, id, tracked));
+    const f = frame(name, allowed, false, classes, id);
+    if (SPLIT_TAGS.has(name) && (parent === root || parent.parts !== null)) {
+      const [open, close] = wrapper(f);
+      const outer = parent === root ? null : parent;
+      f.parts = outer ? outer.parts : [];
+      f.firstPart = f.parts!.length;
+      f.base = (outer ? outer.base + outer.length : 0) + open.length;
+      f.closeAll = close + (outer ? outer.closeAll : "");
+    }
+    stack.push(f);
   }
   appendText(capped.slice(last));
   // Tags still open at the end of the document (e.g. `<p>hello` with no

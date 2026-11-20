@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import sharp from "sharp";
 import { buildReaderContent, countWords, FRONT_MATTER_FREE_MAX_WORDS, SAMPLE_MAX_WORDS, trimInsideBlock } from "./epub-reader";
-import { parseCssClassRules, sanitizeReaderBody, READER_CLASSES, READER_TAGS } from "./reader-content";
+import { MAX_READER_DEPTH, parseCssClassRules, sanitizeReaderBody, READER_CLASSES, READER_TAGS } from "./reader-content";
 
 // PREVIEW-READER-1: the readers' sample and the author's full preview.
 
@@ -212,6 +212,68 @@ describe("reader cleaner: tags left open at the end", () => {
   it("text in an unclosed tag stays escaped", () => {
     const out = clean("<p>hi <img src=x onerror=alert(1)//");
     expect(out).toBe("<p>hi &lt;img src=x onerror=alert(1)//</p>");
+  });
+});
+
+describe("reader cleaner: very deep nesting", () => {
+  const deepest = (html: string) => {
+    let depth = 0;
+    let max = 0;
+    for (const m of html.matchAll(/<(\/?)(?:em|div|p|span|h2)\b[^>]*>/g)) {
+      depth += m[1] ? -1 : 1;
+      max = Math.max(max, depth);
+    }
+    return max;
+  };
+  const para = "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>";
+
+  it("nesting up to the limit is kept exactly", () => {
+    const d = MAX_READER_DEPTH;
+    expect(clean("<p>" + "<em>".repeat(d - 1) + "x" + "</em>".repeat(d - 1) + "</p>")).toBe(
+      "<p>" + "<em>".repeat(d - 1) + "x" + "</em>".repeat(d - 1) + "</p>",
+    );
+  });
+
+  it("past the limit, extra wrappers are flattened and all text stays", () => {
+    // The <p> is one level, so 63 <em>s fit and the other 11 are flattened.
+    const d = MAX_READER_DEPTH + 10;
+    const kept = MAX_READER_DEPTH - 1;
+    const out = clean("<p>" + "<em>x".repeat(d) + "</em>".repeat(d) + "after</p><p>next <em>y</em></p>");
+    expect(out).toBe("<p>" + "<em>x".repeat(kept) + "x".repeat(d - kept) + "</em>".repeat(kept) + "after</p><p>next <em>y</em></p>");
+  });
+
+  it("past the limit, paragraphs and headings stay separate", () => {
+    const deep = "<div>".repeat(MAX_READER_DEPTH + 5);
+    const out = clean(deep + "<h2>Title</h2><p>one <em>a</em></p><p>two</p>");
+    expect(out).toContain('<h2 id="lb-h-1">Title</h2><p>one a</p><p>two</p>');
+  });
+
+  it("a script or svg past the limit still drops its content", () => {
+    const deep = "<div>".repeat(MAX_READER_DEPTH + 5);
+    const out = clean(deep + "<p>a</p><script>bad()</script><svg><svg><text>b</text></svg></svg><p>c</p>");
+    expect(out).not.toContain("bad");
+    expect(out).not.toMatch(/>b</);
+    expect(out).toContain("<p>a</p>");
+    expect(out).toContain("<p>c</p>");
+  });
+
+  it("a broken book with thousands of never-closed <div>s is fast and keeps every paragraph", () => {
+    const n = 6000;
+    const started = performance.now();
+    const out = clean(`<div class="x">${para}`.repeat(n));
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(out.match(/<p>Lorem ipsum/g)?.length).toBe(n);
+    expect(deepest(out)).toBeLessThanOrEqual(MAX_READER_DEPTH + 1);
+  });
+
+  it("thousands of nested sections are fast and keep every heading", () => {
+    const n = 20000;
+    const started = performance.now();
+    const out = clean("<section><h2>T</h2><p>t</p>".repeat(n) + "</section>".repeat(n) + "<p>end</p>");
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(out.match(/>T</g)?.length).toBe(n);
+    expect(out.endsWith("<p>end</p>")).toBe(true);
+    expect(deepest(out)).toBeLessThanOrEqual(MAX_READER_DEPTH + 1);
   });
 });
 

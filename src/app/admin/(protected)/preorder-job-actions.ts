@@ -9,6 +9,7 @@ import { redirectForMaintenance } from "@/lib/maintenance-response";
 import { after } from "next/server";
 import { preorderDayCounts, runPreorderDay } from "@/lib/preorder-job";
 import { sendPreorderJobEmails } from "@/lib/preorder-emails";
+import { deleteOldNotifyRequests } from "@/lib/preorder-notify-cleanup";
 import {
   PREORDER_RUN_FAILED_MESSAGE,
   PREORDER_RUN_OWNER_ONLY_MESSAGE,
@@ -50,6 +51,8 @@ export async function runPreorderJobAsOwner() {
       } catch (sendError) {
         console.error("runPreorderJobAsOwner: the pre-order emails failed", { error: sendError });
       }
+      // NOTIFY-CLEANUP: like the cron route, after the emails. Never throws.
+      await deleteOldNotifyRequests(admin);
     });
   } catch (scheduleError) {
     console.error("runPreorderJobAsOwner: the pre-order emails could not be scheduled", { error: scheduleError });

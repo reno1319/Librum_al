@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { DEFAULT_EPUB_LANGUAGE } from "@/lib/epub-generator";
 import { EPUB_ZIP_PREFLIGHT_LIMITS } from "@/lib/epub-validation";
+import { literalBlock, removeSelfClosingTags, replaceLiteralBlock } from "@/lib/markup-scan";
 import { preflightZipEntries } from "@/lib/zip-preflight";
 
 // W7 (Renato 10-31: W7 a, 1a, 2a; then 1a 2a 3a 4b 5a): the book's cover
@@ -152,11 +153,14 @@ div.cover img { max-width: 100%; max-height: 100%; }
 
 // Removes what an earlier run wrote, so the swap can repeat.
 function stripPreviousCover(opf: string): string {
-  return opf
-    .replace(new RegExp(`<item id="${COVER_IMAGE_ID}"[^>]*/>\\n?`, "g"), "")
-    .replace(new RegExp(`<item id="${COVER_PAGE_ID}"[^>]*/>\\n?`, "g"), "")
-    .replace(new RegExp(`<itemref idref="${COVER_PAGE_ID}"[^>]*/>\\n?`, "g"), "")
-    .replace(new RegExp(`<meta name="cover" content="${COVER_IMAGE_ID}"/>\\n?`, "g"), "");
+  // Reader speed r2: removeSelfClosingTags gives what
+  // .replace(new RegExp(`<item id="${COVER_IMAGE_ID}"[^>]*/>\\n?`, "g"), "")
+  // (and the same for the other two) gave, without re-scanning the rest
+  // of the file from every copy that has no `>`.
+  let out = removeSelfClosingTags(opf, `<item id="${COVER_IMAGE_ID}"`);
+  out = removeSelfClosingTags(out, `<item id="${COVER_PAGE_ID}"`);
+  out = removeSelfClosingTags(out, `<itemref idref="${COVER_PAGE_ID}"`);
+  return out.replace(new RegExp(`<meta name="cover" content="${COVER_IMAGE_ID}"/>\\n?`, "g"), "");
 }
 
 export async function embedCoverInLibrumEpub(
@@ -175,20 +179,14 @@ export async function embedCoverInLibrumEpub(
 
   const title = input.title?.trim();
   if (title) {
-    opf = opf.replace(/<dc:title>[\s\S]*?<\/dc:title>/, () => `<dc:title>${escapeXml(title)}</dc:title>`);
+    opf = replaceLiteralBlock(opf, "<dc:title>", "</dc:title>", `<dc:title>${escapeXml(title)}</dc:title>`);
   }
   const authorName = input.authorName?.trim();
   if (authorName) {
-    opf = opf.replace(
-      /<dc:creator>[\s\S]*?<\/dc:creator>/,
-      () => `<dc:creator>${escapeXml(authorName)}</dc:creator>`,
-    );
+    opf = replaceLiteralBlock(opf, "<dc:creator>", "</dc:creator>", `<dc:creator>${escapeXml(authorName)}</dc:creator>`);
   }
   const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  opf = opf.replace(
-    /<meta property="dcterms:modified">[\s\S]*?<\/meta>/,
-    () => `<meta property="dcterms:modified">${modifiedAt}</meta>`,
-  );
+  opf = replaceLiteralBlock(opf, '<meta property="dcterms:modified">', "</meta>", `<meta property="dcterms:modified">${modifiedAt}</meta>`);
 
   opf = opf
     // EPUB 2 readers and older Kindle conversion look for this; EPUB 3
@@ -205,8 +203,8 @@ export async function embedCoverInLibrumEpub(
 
   // The title text already in the OPF is escaped XML, so it is reused
   // as-is for the cover page.
-  const titleXml = opf.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1] ?? "";
-  const language = opf.match(/<dc:language>([\s\S]*?)<\/dc:language>/)?.[1]?.trim() || DEFAULT_EPUB_LANGUAGE;
+  const titleXml = literalBlock(opf, "<dc:title>", "</dc:title>")?.inner ?? "";
+  const language = literalBlock(opf, "<dc:language>", "</dc:language>")?.inner.trim() || DEFAULT_EPUB_LANGUAGE;
 
   zip.file(OPF_ENTRY, opf);
   zip.file(EBOOK_COVER_IMAGE_ENTRY, input.coverJpeg);
@@ -244,33 +242,27 @@ export async function restampLibrumEpubMetadata(
 
   const title = input.title?.trim();
   const authorName = input.authorName?.trim();
-  const currentTitle = opf.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1];
-  const currentCreator = opf.match(/<dc:creator>([\s\S]*?)<\/dc:creator>/)?.[1];
+  const currentTitle = literalBlock(opf, "<dc:title>", "</dc:title>")?.inner;
+  const currentCreator = literalBlock(opf, "<dc:creator>", "</dc:creator>")?.inner;
   const titleChanges = Boolean(title) && currentTitle !== undefined && currentTitle !== escapeXml(title!);
   const creatorChanges =
     Boolean(authorName) && currentCreator !== undefined && currentCreator !== escapeXml(authorName!);
   if (!titleChanges && !creatorChanges) return { ok: true, changed: false };
 
   if (titleChanges) {
-    opf = opf.replace(/<dc:title>[\s\S]*?<\/dc:title>/, () => `<dc:title>${escapeXml(title!)}</dc:title>`);
+    opf = replaceLiteralBlock(opf, "<dc:title>", "</dc:title>", `<dc:title>${escapeXml(title!)}</dc:title>`);
   }
   if (creatorChanges) {
-    opf = opf.replace(
-      /<dc:creator>[\s\S]*?<\/dc:creator>/,
-      () => `<dc:creator>${escapeXml(authorName!)}</dc:creator>`,
-    );
+    opf = replaceLiteralBlock(opf, "<dc:creator>", "</dc:creator>", `<dc:creator>${escapeXml(authorName!)}</dc:creator>`);
   }
   const modifiedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  opf = opf.replace(
-    /<meta property="dcterms:modified">[\s\S]*?<\/meta>/,
-    () => `<meta property="dcterms:modified">${modifiedAt}</meta>`,
-  );
+  opf = replaceLiteralBlock(opf, '<meta property="dcterms:modified">', "</meta>", `<meta property="dcterms:modified">${modifiedAt}</meta>`);
   zip.file(OPF_ENTRY, opf);
 
   // The cover page W7 wrote shows the title too (its <title> and alt).
   if (titleChanges && opf.includes(`<item id="${COVER_PAGE_ID}" `) && zip.file(EBOOK_COVER_PAGE_ENTRY)) {
-    const titleXml = opf.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1] ?? "";
-    const language = opf.match(/<dc:language>([\s\S]*?)<\/dc:language>/)?.[1]?.trim() || DEFAULT_EPUB_LANGUAGE;
+    const titleXml = literalBlock(opf, "<dc:title>", "</dc:title>")?.inner ?? "";
+    const language = literalBlock(opf, "<dc:language>", "</dc:language>")?.inner.trim() || DEFAULT_EPUB_LANGUAGE;
     zip.file(EBOOK_COVER_PAGE_ENTRY, renderCoverPageXhtml(titleXml, language));
   }
 
