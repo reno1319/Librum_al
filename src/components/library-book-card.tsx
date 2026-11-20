@@ -25,6 +25,7 @@ export function LibraryBookCard({
   downloadable,
   downloadNote = null,
   progress = null,
+  ratePrompt = false,
 }: {
   bookId: string;
   title: string;
@@ -42,6 +43,9 @@ export function LibraryBookCard({
   // online reader, on any device (0..1); null = not started. Pictures r1:
   // the bar and "N% e lexuar" only, no highlight count.
   progress?: number | null;
+  // K8 rate prompt (Renato 11-20): true when the reader has no review of
+  // this book yet (the Library page decides).
+  ratePrompt?: boolean;
 }) {
   return (
     <li className="flex flex-col gap-1.5">
@@ -107,6 +111,7 @@ export function LibraryBookCard({
             label="Lexo"
             coverUrl={coverUrl}
             confirmFirst={downloadNote === DOWNLOAD_CANCEL_WARNING}
+            ratePrompt={ratePrompt}
             triggerClassName="focus-ring min-h-9 rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
           />
           <a

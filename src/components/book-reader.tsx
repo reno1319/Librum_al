@@ -24,6 +24,7 @@ import {
   type HighlightColor,
   type LocalPlace,
 } from "@/lib/reader-anchors";
+import { RATE_PROMPT_LATER, RATE_PROMPT_TEXT, rateBarVisible, readRateDismissed, writeRateDismissed } from "@/lib/rate-prompt";
 import { buildTextIndex, locate, offsetAtPoint, paintHighlights, rangeFor, type TextIndex } from "@/lib/reader-text-index";
 import {
   ChangedVersionNotice,
@@ -235,6 +236,7 @@ export function BookReader({
   devices = false,
   positionKey = null,
   marksBookId = null,
+  ratePrompt = null,
 }: {
   data: ReaderData;
   coverUrl: string | null;
@@ -248,12 +250,19 @@ export function BookReader({
   // K8 + K10: the owned book whose bookmarks, highlights and place sync
   // (null: the free sample and the author's preview have none).
   marksBookId?: string | null;
+  // K8 rate prompt (Renato 11-20): owned books only, and only when the
+  // reader has no review of this book; null = no bar. onRate gets 1..5.
+  ratePrompt?: { bookId: string; onRate: (stars: number) => void } | null;
 }) {
   // Only ever rendered in the browser (after the sample has loaded).
   const [settings, setSettings] = useState<Settings>(() => (typeof window === "undefined" ? DEFAULT_SETTINGS : readSettings()));
   const [layout, setLayout] = useState<Layout | null>(null);
   const [viewIndex, setViewIndex] = useState(0);
   const [panel, setPanel] = useState<"none" | "toc" | "aa">("none");
+  // K8 rate prompt (k8q3 a): "Jo tani" hides the bar for this book in this browser.
+  const [rateLater, setRateLater] = useState(() =>
+    ratePrompt && typeof window !== "undefined" ? readRateDismissed(ratePrompt.bookId) : false,
+  );
   const [device, setDevice] = useState<ReaderDevice | null>(devices ? "phone" : null);
   const [fit, setFit] = useState(1);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -879,6 +888,20 @@ export function BookReader({
       : null;
   const atSampleEnd = view.kind === "content" && layout?.sampleEndView === view.k && data.mode === "full";
 
+  // K8 rate prompt (k8f a, 11-20): shown in the bottom strip, in place of
+  // the slider, so it never covers the book's last lines.
+  const showRateBar =
+    ratePrompt !== null &&
+    rateBarVisible({
+      enabled: true,
+      later: rateLater,
+      mode: data.mode,
+      onContent: view.kind === "content",
+      view: view.kind === "content" ? view.k : -1,
+      lastView: layout ? layout.contentViews - 1 : null,
+      busy: toast !== null || barOpen || noteFor !== null,
+    });
+
   const stage = (
     <div className="relative h-full w-full overflow-hidden" style={{ background: page.page }}>
       <iframe
@@ -1249,7 +1272,10 @@ export function BookReader({
 
       {/* Bottom: slider + "Faqe x nga y · %" */}
       <div className="shrink-0 border-t px-4 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-0.5 sm:px-8" style={{ background: chrome.bar, borderColor: chrome.border }}>
+        {/* k8f a: on the last page the rate prompt takes the slider's place;
+            the slider stays in the layout (invisible) so nothing moves. */}
         <div className="relative mx-auto max-w-3xl">
+          <div className={showRateBar ? "invisible" : undefined}>
           <input
             type="range"
             min={0}
@@ -1275,6 +1301,17 @@ export function BookReader({
           <p className="-mt-1.5 text-center text-xs tabular-nums" style={{ color: chrome.muted }}>
             Faqe {pageLabel} nga {totalPages} · {percent}%
           </p>
+          </div>
+          {showRateBar && ratePrompt && (
+            <RatePromptBar
+              color={chrome.text}
+              onRate={ratePrompt.onRate}
+              onLater={() => {
+                writeRateDismissed(ratePrompt.bookId);
+                setRateLater(true);
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -1394,6 +1431,52 @@ function EndPage({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// K8 rate prompt (Renato 11-20, k8q1 b; k8f a after audit r1 M1): on the
+// last page it takes the slider's place in the bottom strip, so it never
+// covers the book's text. Stars are 44 px tall (40 px wide on a phone,
+// 36 px under 360 px, with 11 px words, Renato 11-20); a star opens the
+// review form.
+export function RatePromptBar({
+  onRate,
+  onLater,
+  color,
+}: {
+  onRate: (stars: number) => void;
+  onLater: () => void;
+  color: string;
+}) {
+  // Fills the slider's box (absolute); the slider stays there, invisible,
+  // so the strip and the page above never change size.
+  return (
+    <div
+      role="group"
+      aria-label={RATE_PROMPT_TEXT}
+      className="absolute inset-0 z-10 flex items-center justify-center gap-1.5 max-[359px]:-inset-x-2 max-[359px]:gap-1 sm:gap-4"
+      style={{ color }}
+    >
+      <span className="w-[5.5rem] text-xs leading-tight max-[359px]:w-[4.25rem] max-[359px]:text-[11px] sm:w-auto sm:text-sm">{RATE_PROMPT_TEXT}</span>
+      <span className="flex">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onRate(n)}
+            aria-label={n === 1 ? "1 yll" : `${n} yje`}
+            className="focus-ring flex h-11 w-10 items-center justify-center rounded-full text-[#c0841a] hover:bg-black/5 max-[359px]:w-9 sm:w-11"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+              <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" />
+            </svg>
+          </button>
+        ))}
+      </span>
+      <button type="button" onClick={onLater} className="focus-ring min-h-11 whitespace-nowrap px-1 text-xs underline underline-offset-2 max-[359px]:text-[11px] sm:text-sm">
+        {RATE_PROMPT_LATER}
+      </button>
     </div>
   );
 }
