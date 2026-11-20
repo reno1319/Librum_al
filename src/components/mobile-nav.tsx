@@ -76,6 +76,8 @@ export function MobileNav({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  // HOMEPAGE-2: the menu panel matches the dark blue homepage header.
+  const isHome = pathname === "/";
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const [installOffer, setInstallOffer] = useState<InstallPromptEvent | null>(null);
@@ -141,7 +143,7 @@ export function MobileNav({
       {open && (
         <div
           id={panelId}
-          className="absolute inset-x-0 top-full z-20 border-t border-primary-foreground/15 bg-primary px-4 py-4 shadow-md sm:px-6"
+          className={`absolute inset-x-0 top-full z-20 border-t border-primary-foreground/15 px-4 py-4 shadow-md sm:px-6 ${isHome ? "bg-[#232f3e]" : "bg-primary"}`}
         >
           {recoveryActive ? (
             <div className="flex flex-col">

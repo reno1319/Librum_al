@@ -26,8 +26,7 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   ],
   ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={resolveOriginalAuthor(book) ? null : (book.pen?.id ?? null)}"]],
   ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book)}"]],
-  // HOME-PICKS-1: the newest list and the fan's picks share toCover.
-  ["app/(public)/page.tsx", ["author: resolveBookByline(b),"]],
+  // HOMEPAGE-2 (2026-11-19): the homepage shows covers only, no names.
   [
     "app/(public)/libra/[id]/page.tsx",
     ["const bookByline = resolveBookByline(book);", "authorName={bookByline}", "{bookByline}"],
@@ -54,7 +53,6 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 
   it("every byline query embeds the pen name view, never the account's public name", () => {
     for (const file of [
-      "app/(public)/page.tsx",
       "app/api/books/[id]/sample/route.ts",
       "app/(public)/librari/page.tsx",
       "app/(public)/library/page.tsx",
@@ -136,11 +134,11 @@ describe("BD3 patch 4: the original author", () => {
   });
 
   it("every explicit book select that feeds a byline reads original_author", () => {
-    expect(readSrc("app/(public)/page.tsx")).toContain("price_all, original_author, is_adult, pen:public_pen_names(id, name)");
+    // HOMEPAGE-2: the homepage reads only id and cover_path (no byline).
+    expect(readSrc("app/(public)/page.tsx")).toContain('const COVER_SELECT = "id, cover_path";');
     expect(readSrc("app/api/books/[id]/sample/route.ts")).toContain("status, original_author, pen:public_pen_names");
     const choice = readSrc("app/admin/(protected)/librum-choice/page.tsx");
     expect(choice).toContain('"id, title, cover_path, original_author, pen:public_pen_names(id, name)"');
-    expect(choice).toContain('"id, title, cover_path, price_all, original_author, pen:public_pen_names(id, name)"');
     expect(readSrc("lib/librum-download-pages.ts")).toContain("original_author, published_at");
   });
 

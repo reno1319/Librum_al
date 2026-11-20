@@ -86,11 +86,12 @@ describe("BD2: the public money pages", () => {
     );
   });
 
-  it("the home page source uses the shared sentences and no fee constant", () => {
+  it("the home page source takes its percentage from the shared constant and has no fee constant", () => {
+    // HOMEPAGE-2 (Renato 2026-11-19): the new homepage's one money line
+    // is "deri në 70%", built from STANDARD_ROYALTY_PERCENT.
     const home = read("src/app/(public)/page.tsx");
-    expect(home).toContain("{ROYALTY_RULE_SENTENCE}");
-    expect(home).toContain("{ROYALTY_HEADLINE_CAPTION}");
-    expect(home).toContain("`${authorShare}% për autorin, nga ${STANDARD_ROYALTY_FROM_ALL} lekë`");
+    expect(home).toContain("deri në ${STANDARD_ROYALTY_PERCENT}%");
+    expect(home).not.toMatch(/\b(70|75|80)%/);
     expect(home).not.toContain("PLATFORM_FEE_PERCENT");
     expect(home).not.toMatch(NOT_LAUNCHED);
     expect(home).not.toMatch(/tarifë platforme/);
