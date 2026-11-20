@@ -13,6 +13,7 @@ import {
 import { ENDNOTES_HEADING, extractNotes, renderNotes, takeHeadingNotes } from "@/lib/docx-notes";
 import { findMissingLetters, fixBrokenLetters } from "@/lib/docx-letters";
 import { chapterFilename } from "@/lib/epub-generator";
+import { markupTokens } from "@/lib/markup-scan";
 import { findOutsideMentions, outsideMentionMessages } from "@/lib/outside-mentions";
 
 // LIBRUM 2.0 PRODUCT-5: DOCX -> a small, safe, deterministic internal
@@ -234,11 +235,53 @@ async function hasFootnotesOrEndnotes(zip: JSZip): Promise<boolean> {
 // References deleted with Track Changes (w:del, or the old place of a
 // move, w:moveFrom) are not in the book, so they never count (audit r2
 // F5); a self-closing w:del only marks a deleted paragraph end.
-const DELETED_XML_RE = /<w:(del|moveFrom)\b[^>]*\/>|<w:(del|moveFrom)\b(?:[^>]*[^>/])?>[\s\S]*?<\/w:\2>/g;
+//
+// Reader speed r2: the same result as
+//   xml.replace(/<w:(del|moveFrom)\b[^>]*\/>|<w:(del|moveFrom)\b(?:[^>]*[^>/])?>[\s\S]*?<\/w:\2>/g, "")
+// without searching to the end of the file again from every start that
+// has no closing tag (0.3 MB of them took 3 s, even in a valid file).
+// Both forms end at the first `>` after the name: a `/` before it makes
+// the self-closing form, anything else the paired one, which then runs
+// to the first matching close tag. Once a close tag is missing after one
+// start, it is missing after every later start of that name too.
+export function removeDeletedXml(xml: string): string {
+  const open = /<w:(del|moveFrom)\b/g;
+  const noClose = new Set<string>();
+  let out = "";
+  let kept = 0;
+  let gtFrom = Infinity;
+  let gtAt = -1;
+  let o: RegExpExecArray | null;
+  while ((o = open.exec(xml))) {
+    const nameEnd = o.index + o[0].length;
+    if (nameEnd < gtFrom || (gtAt !== -1 && gtAt < nameEnd)) {
+      gtFrom = nameEnd;
+      gtAt = xml.indexOf(">", nameEnd);
+    }
+    const gt = gtAt;
+    if (gt === -1) break;
+    let end = -1;
+    if (xml.charCodeAt(gt - 1) === 0x2f /* / */) {
+      end = gt + 1;
+    } else if (!noClose.has(o[1])) {
+      const close = xml.indexOf(`</w:${o[1]}>`, gt + 1);
+      if (close === -1) noClose.add(o[1]);
+      else end = close + o[1].length + 5;
+    }
+    if (end === -1) {
+      open.lastIndex = o.index + 1;
+      continue;
+    }
+    out += xml.slice(kept, o.index);
+    kept = end;
+    open.lastIndex = end;
+  }
+  return out + xml.slice(kept);
+}
 async function referencedNoteKeys(zip: JSZip): Promise<Set<string>> {
   const keys = new Set<string>();
   try {
-    const xml = ((await zip.file("word/document.xml")?.async("string")) ?? "").replace(DELETED_XML_RE, "");
+    const xml = removeDeletedXml((await zip.file("word/document.xml")?.async("string")) ?? "");
     for (const m of xml.matchAll(/<w:(footnote|endnote)Reference\b[^>]*?\bw:id="(-?\d+)"/g)) {
       keys.add(`${m[1] === "footnote" ? "f" : "e"}${m[2]}`);
     }
@@ -395,8 +438,12 @@ const DROP_ENTIRELY_TAGS = new Set([
   "template", "noscript", "head", "title", "meta", "link", "base",
 ]);
 
-const TOKEN_RE =
-  /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<\/([a-zA-Z][\w:.-]*)\s*>|<([a-zA-Z][\w:.-]*)((?:\s+[^<>]*?)?)\s*(\/?)>/g;
+// The tokens are those of
+//   /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|
+//    <\/([a-zA-Z][\w:.-]*)\s*>|<([a-zA-Z][\w:.-]*)((?:\s+[^<>]*?)?)\s*(\/?)>/g
+// (the comments below call it TOKEN_RE), found by markupTokens without
+// the expression's slow cases (src/lib/markup-scan.ts): a link address
+// holding a long run of spaces took seconds.
 
 function escapeAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -442,12 +489,10 @@ export function sanitizeFragment(
   }
 
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  TOKEN_RE.lastIndex = 0;
-  while ((match = TOKEN_RE.exec(capped))) {
+  for (const match of markupTokens(capped)) {
     appendText(capped.slice(lastIndex, match.index));
-    lastIndex = TOKEN_RE.lastIndex;
-    const [, closeName, openName, rawAttrs, selfCloseMark] = match;
+    lastIndex = match.end;
+    const { closeName, openName, attrs: rawAttrs, selfMark: selfCloseMark } = match;
 
     if (closeName) {
       const name = closeName.toLowerCase();

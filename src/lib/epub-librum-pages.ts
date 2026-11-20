@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { RightsBasis } from "@/lib/types";
 import { resolveTranslatorLine, resolveTranslatorNames, TRANSLATED_BY } from "@/lib/book-byline";
+import { blankCommentsAndCdata, firstMatchAtTag, tagMatches } from "@/lib/markup-scan";
 
 // BD3 + BD4 + BD4b (Renato 1 Nov 2026: 1a 2a 3a 4a 5a, wording "ok"):
 // every downloaded book gets one Librum page at the front (the
@@ -224,10 +225,36 @@ export function purchaseCode(purchaseId: string): string {
 // Comments and CDATA blanked out with spaces of the same length, so
 // every match below sees markup only and its offsets still point into
 // the real file (audit r1, MEDIUM: a "</manifest>" inside a comment).
+// An unclosed comment or CDATA: the file is not what it seems (null).
+// Reader speed r2: blankCommentsAndCdata gives the same answer as the
+// expression used here before without re-searching the rest of the
+// file from every unclosed `<!--`.
 function maskComments(xml: string): string | null {
-  const masked = xml.replace(/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => " ".repeat(m.length));
-  // An unclosed comment or CDATA: the file is not what it seems.
-  return /<!--|<!\[CDATA\[/.test(masked) ? null : masked;
+  return blankCommentsAndCdata(xml);
+}
+
+// Same answer as /rendition:layout[^<]*pre-paginated/i.test(xml): each
+// "rendition:layout" must be followed by "pre-paginated" before the next
+// `<`. Inside one run without `<`, the first copy sees the most text, so
+// only it is checked.
+function hasPrePaginatedLayout(xml: string): boolean {
+  const layout = /rendition:layout/gi;
+  const paginated = /pre-paginated/gi;
+  let next = -2;
+  let l: RegExpExecArray | null;
+  while ((l = layout.exec(xml))) {
+    const from = l.index + l[0].length;
+    const lt = xml.indexOf("<", from);
+    const runEnd = lt === -1 ? xml.length : lt;
+    if (next !== -1 && next < from) {
+      paginated.lastIndex = from;
+      next = paginated.exec(xml)?.index ?? -1;
+    }
+    if (next === -1) return false;
+    if (next + 13 <= runEnd) return true;
+    layout.lastIndex = runEnd;
+  }
+  return false;
 }
 
 // A whole-word "cover" or "kopertin…" (also "coverpage", "cover-image",
@@ -239,7 +266,7 @@ const COVER_WORD_RE = /(?:^|[^a-z])(?:book|front)?(?:cover(?:page|image|img)?|ko
 // EPUB 2's <guide><reference type="cover" href="…"/>: Calibre names its
 // cover page "titlepage.xhtml" and marks it only here (audit r2, N2).
 function guideCoverHref(maskedOpf: string): string | null {
-  for (const ref of maskedOpf.match(/<([a-zA-Z0-9]+:)?reference\b[^>]*>/gi) ?? []) {
+  for (const ref of tagMatches(maskedOpf, /<([a-zA-Z0-9]+:)?reference\b/gi)) {
     if (!/\btype\s*=\s*["']cover["']/i.test(ref)) continue;
     const href = ref.match(/\bhref\s*=\s*["']([^"'#]*)/i)?.[1];
     if (href) return href;
@@ -258,17 +285,42 @@ function uniqueName(zip: JSZip, dir: string, base: string): string {
   return name;
 }
 
+// The ids are read once (a file holding thousands of "librum-front-N"
+// ids made the old one-search-per-try loop slow). Same answer as testing
+// /\bid\s*=\s*["']ID["']/ for each try: every `id=` start is read, even
+// one inside another value (r2, audit F2), and a try (never holding a
+// quote) matches there exactly when it is the text up to the next quote.
 function uniqueId(opf: string, base: string): string {
+  const taken = new Set<string>();
+  const start = /\bid\s*=\s*["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = start.exec(opf))) {
+    const v = m.index + m[0].length;
+    let q = v;
+    while (q < opf.length && opf[q] !== '"' && opf[q] !== "'") q += 1;
+    if (q < opf.length) taken.add(opf.slice(v, q));
+    start.lastIndex = m.index + 1;
+  }
   let id = base;
-  for (let n = 2; new RegExp(`\\bid\\s*=\\s*["']${id}["']`).test(opf); n++) id = `${base}-${n}`;
+  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
   return id;
 }
 
 function injectionLanded(opf: string, ids: string[]): boolean {
   const m = maskComments(opf);
   if (m === null) return false;
-  const manifest = m.match(/<([a-zA-Z0-9]+:)?manifest\b[^>]*>([\s\S]*?)<\/([a-zA-Z0-9]+:)?manifest\s*>/i);
-  const spine = m.match(/<([a-zA-Z0-9]+:)?spine\b[^>]*>([\s\S]*?)<\/([a-zA-Z0-9]+:)?spine\s*>/i);
+  const manifest = firstMatchAtTag(
+    m,
+    /<([a-zA-Z0-9]+:)?manifest\b/gi,
+    /<([a-zA-Z0-9]+:)?manifest\b[^>]*>([\s\S]*?)<\/([a-zA-Z0-9]+:)?manifest\s*>/iy,
+    /<\/([a-zA-Z0-9]+:)?manifest\s*>/gi,
+  );
+  const spine = firstMatchAtTag(
+    m,
+    /<([a-zA-Z0-9]+:)?spine\b/gi,
+    /<([a-zA-Z0-9]+:)?spine\b[^>]*>([\s\S]*?)<\/([a-zA-Z0-9]+:)?spine\s*>/iy,
+    /<\/([a-zA-Z0-9]+:)?spine\s*>/gi,
+  );
   if (!manifest || !spine) return false;
   return ids.every((id) => {
     const inManifest = manifest[2].split(`<${manifest[1] ?? ""}item id="${id}" `).length - 1;
@@ -301,9 +353,9 @@ export async function addLibrumPages(
 
     // A fixed-layout book (every page a picture) has no place for a
     // reflowable text page; it is served as stored.
-    if (/rendition:layout[^<]*pre-paginated/i.test(m)) return unsupported();
+    if (hasPrePaginatedLayout(m)) return unsupported();
 
-    const pkg = m.match(/<([a-zA-Z0-9]+:)?package\b[^>]*\bversion\s*=\s*["']([0-9.]+)["']/i);
+    const pkg = firstMatchAtTag(m, /<([a-zA-Z0-9]+:)?package\b/gi, /<([a-zA-Z0-9]+:)?package\b[^>]*\bversion\s*=\s*["']([0-9.]+)["']/iy);
     if (!pkg) return unsupported();
     const epub2 = pkg[2].startsWith("2");
 
@@ -329,10 +381,18 @@ export async function addLibrumPages(
     const spineStart = spineOpen.index! + spineOpen[0].length;
     const spineInner = m.slice(spineStart, spineClose.index!);
     let frontAt = spineStart;
-    const firstRef = spineInner.match(/<([a-zA-Z0-9]+:)?itemref\b[^>]*?\bidref\s*=\s*["']([^"']+)["'][^>]*?\/?>/i);
+    const firstRef = firstMatchAtTag(
+      spineInner,
+      /<([a-zA-Z0-9]+:)?itemref\b/gi,
+      /<([a-zA-Z0-9]+:)?itemref\b[^>]*?\bidref\s*=\s*["']([^"']+)["'][^>]*?\/?>/iy,
+    );
     if (firstRef) {
       const idref = firstRef[2];
-      const item = m.match(new RegExp(`<([a-zA-Z0-9]+:)?item\\b[^>]*\\bid\\s*=\\s*["']${idref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`, "i"));
+      const item = firstMatchAtTag(
+        m,
+        /<([a-zA-Z0-9]+:)?item\b/gi,
+        new RegExp(`<([a-zA-Z0-9]+:)?item\\b[^>]*\\bid\\s*=\\s*["']${idref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`, "iy"),
+      );
       const attr = (name: string) => item?.[0].match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i"))?.[1] ?? "";
       const guideCover = guideCoverHref(m);
       const looksLikeCover =
@@ -369,3 +429,6 @@ export async function addLibrumPages(
     return { added: false, bytes, failureStage: "unexpected_exception" };
   }
 }
+
+// Exported for tests only.
+export const __internal = { maskComments, hasPrePaginatedLayout, uniqueId };
