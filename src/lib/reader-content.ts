@@ -63,6 +63,16 @@ export const IMAGE_TOKEN_SUFFIX = "\u0000";
 export const MAX_READER_DOCUMENT_CHARS = 2_000_000;
 const MAX_CSS_CHARS = 400_000;
 const MAX_CSS_RULES = 5_000;
+// Most open containers the cleaner keeps at once. Real books stay well
+// under 20 levels. Without a limit, every closing level re-copies all the
+// html inside it, so a broken EPUB with thousands of never-closed <div>s
+// took seconds (or minutes) on every reader open. Past the limit an
+// opening tag is flattened: its text stays, in the deepest container,
+// and its own matching close tag is skipped. Paragraphs and headings are
+// the exception (one level only, never one inside another), so a broken
+// book's text keeps its paragraphs and its Contents.
+export const MAX_READER_DEPTH = 64;
+const KEEP_PAST_DEPTH_TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6"]);
 
 // ------------------------------------------------------------
 // CSS: only a few layout facts are read, never passed through
@@ -192,10 +202,13 @@ type Frame = {
   length: number;
   pendingText: string[];
   pendingImages: number[];
+  // Tags flattened past MAX_READER_DEPTH while this frame was the deepest
+  // one, by name, so their close tags are skipped. They go away with it.
+  skipped: Map<string, number> | null;
 };
 
 function frame(tag: string, allowed: boolean, dropped: boolean, classes = "", id = "", tracked = false): Frame {
-  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [], parts: tracked ? [] : null, length: 0, pendingText: [], pendingImages: [] };
+  return { tag, allowed, dropped, classes, id, html: [], text: [], images: [], parts: tracked ? [] : null, length: 0, pendingText: [], pendingImages: [], skipped: null };
 }
 
 // The cleaned wrapper of a closed frame, as its open and close strings.
@@ -232,7 +245,9 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
   const root = frame("#root", false, false);
   const stack: Frame[] = [root];
   const chunks: ReaderChunk[] = [];
-  const inDrop = () => stack.some((f) => f.dropped);
+  // How many dropped frames are open, so this check does not scan the stack.
+  let dropDepth = 0;
+  const inDrop = () => dropDepth > 0;
 
   function flushRoot() {
     if (root.html.length === 0) return;
@@ -303,7 +318,10 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
   function closeFrom(idx: number) {
     while (stack.length > idx) {
       const done = stack.pop()!;
-      if (done.dropped) continue;
+      if (done.dropped) {
+        dropDepth -= 1;
+        continue;
+      }
       const inner = done.html.join("");
       const [open, close] = wrapper(done);
       const rendered = `${open}${inner}${close}`;
@@ -331,6 +349,12 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
 
     if (closeName) {
       const name = closeName.toLowerCase();
+      const top = stack[stack.length - 1];
+      const flattened = top.skipped?.get(name) ?? 0;
+      if (flattened > 0) {
+        top.skipped!.set(name, flattened - 1);
+        continue;
+      }
       const idx = stack.map((f) => f.tag).lastIndexOf(name);
       if (idx <= 0) continue;
       closeFrom(idx);
@@ -342,8 +366,25 @@ export function sanitizeReaderBody(bodyHtml: string, ctx: ReaderSanitizeContext)
     const local = name.includes(":") ? name.slice(name.lastIndexOf(":") + 1) : name;
     const selfClosing = selfMark === "/" || VOID_TAGS.has(name);
 
-    if (inDrop() || DROP_ENTIRELY_TAGS.has(name) || DROP_ENTIRELY_TAGS.has(local)) {
-      if (!selfClosing) stack.push(frame(name, false, true));
+    const dropTag = DROP_ENTIRELY_TAGS.has(name) || DROP_ENTIRELY_TAGS.has(local);
+    // Past the depth limit, flatten. A tag that must drop its contents is
+    // still pushed when nothing around it drops already, so its text can
+    // never leak; inside it everything is dropped anyway. A paragraph or
+    // heading is still pushed when it is not inside another one. So the
+    // stack grows past the limit by at most two frames.
+    const top = stack[stack.length - 1];
+    const keepBlock = KEEP_PAST_DEPTH_TAGS.has(name) && !KEEP_PAST_DEPTH_TAGS.has(top.tag);
+    if (!selfClosing && stack.length > MAX_READER_DEPTH && (inDrop() || (!dropTag && !keepBlock))) {
+      top.skipped ??= new Map();
+      top.skipped.set(name, (top.skipped.get(name) ?? 0) + 1);
+      continue;
+    }
+
+    if (inDrop() || dropTag) {
+      if (!selfClosing) {
+        stack.push(frame(name, false, true));
+        dropDepth += 1;
+      }
       continue;
     }
 
