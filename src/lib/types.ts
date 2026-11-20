@@ -37,18 +37,15 @@ export type BookStatus = "draft" | "published" | "preorder";
 // boundary).
 export type BlogPostStatus = "draft" | "published";
 
-// Exactly the five post categories (the blog_posts CHECK constraint,
-// migration 20261117230000_blog_editorial_keywords.sql) --
-// src/lib/blog-categories.ts is the single place these are paired with
-// a display label; this type alone is what the DB and every RPC
-// parameter are typed against.
-export type BlogCategory = "zeja" | "tregu" | "kultura" | "reflektime" | "vleresime";
+// Blog categories patch B (2026-11-19): categories live in the
+// blog_categories table (staff can add, rename, reorder and delete
+// them), so a post's category is any stored category value. "editorial"
+// is a section row in that table but never a post's category (bs1:
+// Editorial is the is_editorial tick on top of a real category).
+export type BlogCategory = string;
 
-// The six /blog sections: the five categories plus Editorial (bs1,
-// Renato 2026-11-17). Editorial is not a category any more: it is the
-// is_editorial tick on top of one of the five, and an Editorial post
-// shows in both its own category and the Editorial section.
-export type BlogSection = "editorial" | BlogCategory;
+// A /blog section: any blog_categories row, Editorial included.
+export type BlogSection = string;
 
 export type BlogPost = {
   id: string;
@@ -371,6 +368,7 @@ export type Permission =
   // grant for either permission to act through instead).
   | "blog.view"
   | "blog.manage"
+  | "blog.categories"
   // BOOK-PEN-NAME-RIGHTS-CHOICE-1: pick or clear the bookstore's
   // "Librum's choice" book (owner and admin only).
   | "catalog.feature"

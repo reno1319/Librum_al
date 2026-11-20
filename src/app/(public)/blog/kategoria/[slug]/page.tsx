@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +11,7 @@ import {
   isPostInSection,
   type BlogCategoryInfo,
 } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import {
   blogCategoryPageCount,
   blogCategoryPageRange,
@@ -43,7 +45,7 @@ export async function generateMetadata({
   searchParams: Promise<{ faqe?: string | string[] }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const category = getBlogCategoryByUrlSlug(slug);
+  const category = getBlogCategoryByUrlSlug(await getBlogCategories(), slug);
   const page = parseBlogPageParam((await searchParams).faqe);
   if (!category || page === null) return {};
 
@@ -65,7 +67,8 @@ export default async function BlogCategoryPage({
   searchParams: Promise<{ faqe?: string | string[] }>;
 }) {
   const { slug } = await params;
-  const category = getBlogCategoryByUrlSlug(slug);
+  const categories = await getBlogCategories();
+  const category = getBlogCategoryByUrlSlug(categories, slug);
   const page = parseBlogPageParam((await searchParams).faqe);
   if (!category || page === null) notFound();
 
@@ -76,7 +79,8 @@ export default async function BlogCategoryPage({
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured", {
       count: "exact",
     })
-    .eq("status", "published");
+    .eq("status", "published")
+    .lte("published_at", blogNowIso());
   // bs1 a: /blog/kategoria/editorial lists the ticked posts; every other
   // page lists its category, Editorial posts included.
   const { data, count } = await (category.value === "editorial"
@@ -121,7 +125,7 @@ export default async function BlogCategoryPage({
         <BlogSearchBox />
 
         <div className="mt-5">
-          <BlogCategoryButtons active={category.value} />
+          <BlogCategoryButtons active={category.value} categories={categories} />
         </div>
 
         {posts.length > 0 ? (
@@ -129,6 +133,7 @@ export default async function BlogCategoryPage({
             {posts.map((post) => (
               <BlogArticleCard
                 key={post.id}
+                categories={categories}
                 compactOnMobile
                 post={{
                   slug: post.slug,

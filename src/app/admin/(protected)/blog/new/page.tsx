@@ -5,6 +5,9 @@ import { BlogEditorForm } from "../blog-editor-form";
 import { createBlogPostAction } from "../actions";
 import type { Metadata } from "next";
 import { pageErrorMessage } from "@/lib/page-messages";
+import { createClient } from "@/lib/supabase/server";
+import { blogPostCategories } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 
 export const metadata: Metadata = {
   title: "New article",
@@ -21,8 +24,17 @@ export default async function NewBlogPostPage({
   const { error: rawError } = await searchParams;
   const error = pageErrorMessage(rawError);
 
+  // e4: the article pinned now, if any.
+  const supabase = await createClient();
+  const { data: pinned } = await supabase
+    .from("blog_posts")
+    .select("title")
+    .eq("featured", true)
+    .maybeSingle<{ title: string }>();
+
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6 lg:max-w-6xl">
+      <div className="lg:max-w-3xl">
       <Link href="/admin/blog" className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
         &larr; Back to Blog
       </Link>
@@ -35,12 +47,15 @@ export default async function NewBlogPostPage({
           {error}
         </p>
       )}
+      </div>
 
       <BlogEditorForm
         action={createBlogPostAction}
         staffUserId={userId}
         slugReadOnly={false}
         submitLabel="Save draft"
+        pinnedElsewhereTitle={pinned?.title ?? null}
+        categories={blogPostCategories(await getBlogCategories())}
       />
     </main>
   );

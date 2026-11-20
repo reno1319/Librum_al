@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { blogPublishState } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
-import { BLOG_CATEGORY_LABELS } from "@/lib/blog-categories";
+import { getBlogCategory } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
 import { BlogMarkdown } from "@/components/blog-markdown";
-import type { BlogCategory, BlogPostStatus } from "@/lib/types";
+import type { BlogPostStatus } from "@/lib/types";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -18,7 +20,7 @@ type PreviewBlogPost = {
   excerpt: string;
   content_markdown: string;
   cover_image_path: string | null;
-  category: BlogCategory;
+  category: string;
   is_editorial: boolean;
   status: BlogPostStatus;
   published_at: string | null;
@@ -53,6 +55,9 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
     : null;
   const readingMinutes = calculateReadingTime(post.content_markdown);
 
+  // e3: a scheduled article is published with its time still ahead.
+  const state = blogPublishState(post);
+
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
       <Link href={`/admin/blog/${post.id}/edit`} className="text-sm text-muted underline underline-offset-2 hover:decoration-2">
@@ -60,13 +65,18 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
       </Link>
 
       <p className="mt-4 rounded-card bg-primary/10 px-3 py-2 text-xs text-primary">
-        Staff preview -- {post.status === "published" ? "this article is live" : "this is a draft, not visible to the public"}
+        Staff preview --{" "}
+        {state === "published"
+          ? "this article is live"
+          : state === "scheduled"
+            ? "this article is scheduled, not visible to the public yet"
+            : "this is a draft, not visible to the public"}
         . Approximates the future public article layout (BLOG-1D).
       </p>
 
       <article className="mt-6">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">
-          {BLOG_CATEGORY_LABELS[post.category]}
+          {getBlogCategory(await getBlogCategories(), post.category)?.label ?? post.category}
           {post.is_editorial && " · Editorial"}
         </p>
         <h1 className="mt-1 font-serif text-3xl font-semibold text-foreground md:text-4xl">{post.title}</h1>

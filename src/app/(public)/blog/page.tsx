@@ -1,14 +1,11 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
-import {
-  BLOG_CATEGORIES,
-  BLOG_CATEGORY_EMPTY_LINE,
-  blogCategoryHref,
-  getBlogCategory,
-} from "@/lib/blog-categories";
+import { BLOG_CATEGORY_EMPTY_LINE, blogCategoryHref, getBlogCategory } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import {
   BLOG_CATEGORY_SECTION_LIMIT,
   BLOG_LANDING_CANDIDATE_LIMIT,
@@ -73,6 +70,7 @@ function toCardPost(post: BlogLandingCandidate, coverUrl: string | null): BlogAr
 
 export default async function BlogIndexPage() {
   const supabase = await createClient();
+  const categories = await getBlogCategories();
 
   // ONE bounded query serves the whole page -- featured, latest, and
   // every category section are all derived in memory from this same
@@ -86,6 +84,7 @@ export default async function BlogIndexPage() {
     .from("blog_posts")
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .order("published_at", { ascending: false })
     .limit(BLOG_LANDING_CANDIDATE_LIMIT)
     .returns<BlogLandingRow[]>();
@@ -103,19 +102,22 @@ export default async function BlogIndexPage() {
   // re-checks status and category on whatever comes back.
   // bs1 a: the Editorial band reads the is_editorial tick; every
   // other band reads category, so an Editorial post shows in both.
+  // Patch B: one band per blog_categories row, in its set order. The
+  // table is capped at 50 rows by create_blog_category().
   const bandResults = await Promise.all(
-    BLOG_CATEGORIES.map((c) => {
+    categories.map((c) => {
       const q = supabase
         .from("blog_posts")
         .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
-        .eq("status", "published");
+        .eq("status", "published")
+        .lte("published_at", blogNowIso());
       return (c.value === "editorial" ? q.eq("is_editorial", true) : q.eq("category", c.value))
         .order("published_at", { ascending: false })
         .limit(BLOG_CATEGORY_SECTION_LIMIT)
         .returns<BlogLandingRow[]>();
     }),
   );
-  const categorySections = BLOG_CATEGORIES.map((c, i) => ({
+  const categorySections = categories.map((c, i) => ({
     category: c,
     posts: selectCategoryPosts(bandResults[i].data ?? [], c.value),
   }));
@@ -128,7 +130,7 @@ export default async function BlogIndexPage() {
 
   // An Editorial lead keeps the Editorial colour line it had before bs1.
   const featuredInfo = featured
-    ? getBlogCategory(featured.is_editorial ? "editorial" : featured.category)
+    ? getBlogCategory(categories, featured.is_editorial ? "editorial" : featured.category)
     : undefined;
   const featuredCover = featured ? coverUrlFor(featured.cover_image_path) : null;
 
@@ -151,7 +153,7 @@ export default async function BlogIndexPage() {
         </div>
 
         <div className="mt-5">
-          <BlogCategoryButtons active={null} />
+          <BlogCategoryButtons active={null} categories={categories} />
         </div>
       </div>
 
@@ -188,7 +190,7 @@ export default async function BlogIndexPage() {
                     <div className="aspect-[3/2] w-full rounded-card bg-border" />
                   )}
                   <div>
-                    <BlogCategoryLabel category={featured.category} isEditorial={featured.is_editorial} />
+                    <BlogCategoryLabel category={featured.category} isEditorial={featured.is_editorial} categories={categories} />
                     <p className="mt-3 font-serif text-2xl leading-tight text-foreground group-hover:underline md:text-3xl">
                       {featured.title}
                     </p>
@@ -210,6 +212,7 @@ export default async function BlogIndexPage() {
                   {latest.map((post) => (
                     <BlogArticleCard
                       key={post.id}
+                      categories={categories}
                       compactOnMobile
                       post={toCardPost(post, coverUrlFor(post.cover_image_path))}
                     />
@@ -255,6 +258,7 @@ export default async function BlogIndexPage() {
                     {posts.map((post) => (
                       <BlogArticleCard
                         key={post.id}
+                        categories={categories}
                         compactOnMobile
                         post={toCardPost(post, coverUrlFor(post.cover_image_path))}
                       />

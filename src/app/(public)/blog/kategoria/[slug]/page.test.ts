@@ -53,6 +53,7 @@ vi.mock("next/navigation", () => ({ notFound: mockNotFound }));
 const mockReturns = vi.fn();
 const chain = {
   eq: vi.fn((): typeof chain => chain),
+  lte: vi.fn((): typeof chain => chain),
   order: vi.fn((): typeof chain => chain),
   range: vi.fn((): typeof chain => chain),
   returns: mockReturns,
@@ -64,6 +65,12 @@ const mockCreateClient = vi.fn(() =>
   Promise.resolve({ from: mockFrom, storage: { from: () => ({ getPublicUrl: mockGetPublicUrl }) } }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// Patch B: the categories come from blog_categories; these tests use the
+// six rows the migration inserts.
+vi.mock("@/lib/blog-categories-server", async () => {
+  const { SEEDED_BLOG_CATEGORIES } = await import("@/lib/blog-categories.fixture");
+  return { getBlogCategories: async () => SEEDED_BLOG_CATEGORIES };
+});
 
 const { default: BlogCategoryPage, generateMetadata } = await import("./page");
 
@@ -117,6 +124,8 @@ describe("BlogCategoryPage", () => {
     expect(mockSelect.mock.calls[0][1]).toEqual({ count: "exact" });
     expect(mockSelect.mock.calls[0][0]).not.toContain("content_markdown");
     expect(chain.eq).toHaveBeenCalledWith("status", "published");
+    // e3: never a scheduled article whose time is still ahead.
+    expect(chain.lte).toHaveBeenCalledWith("published_at", expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
     expect(chain.eq).toHaveBeenCalledWith("category", "zeja");
     expect(chain.order).toHaveBeenCalledWith("published_at", { ascending: false });
     expect(chain.range).toHaveBeenCalledWith(0, 11);

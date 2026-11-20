@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
@@ -7,12 +8,12 @@ import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
 import { blogCategoryHref, getBlogCategory } from "@/lib/blog-categories";
+import { getBlogCategories } from "@/lib/blog-categories-server";
 import { BLOG_RELATED_POSTS_LIMIT, selectRelatedPosts, type BlogLandingCandidate } from "@/lib/blog-landing-logic";
 import { BlogMarkdown } from "@/components/blog-markdown";
 import { BlogArticleCard, NgaLibrumTag, type BlogArticleCardPost } from "@/components/blog-article-card";
 import { BlogCta } from "@/components/blog-category-nav";
 import { ShareButtons } from "@/components/share-buttons";
-import type { BlogCategory } from "@/lib/types";
 
 type PublicBlogPostDetail = {
   id: string;
@@ -21,7 +22,7 @@ type PublicBlogPostDetail = {
   excerpt: string;
   content_markdown: string;
   cover_image_path: string | null;
-  category: BlogCategory;
+  category: string;
   is_editorial: boolean;
   seo_title: string | null;
   seo_description: string | null;
@@ -51,6 +52,7 @@ const getPublishedBlogPostBySlug = cache(async (slug: string) => {
     )
     .eq("slug", slug)
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .maybeSingle<PublicBlogPostDetail>();
   return data;
 });
@@ -166,6 +168,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
     .from("blog_posts")
     .select("id, slug, title, excerpt, category, is_editorial, cover_image_path, published_at, status, featured")
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .eq("category", post.category)
     .neq("id", post.id)
     .order("published_at", { ascending: false })
@@ -181,7 +184,8 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   // category page and has no byline. The bottom button follows the
   // category (blog6). bs1: an Editorial post is the tick on top of a
   // real category, so it shows the tag AND its category link.
-  const categoryInfo = getBlogCategory(post.category);
+  const categories = await getBlogCategories();
+  const categoryInfo = getBlogCategory(categories, post.category);
   const isEditorial = post.is_editorial === true;
   const origin = resolveSiteOrigin();
   const url = `${origin}/blog/${post.slug}`;
@@ -253,7 +257,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
           <h2 className="text-xs font-medium uppercase tracking-wide text-muted">Lexime të ngjashme</h2>
           <div className="mt-4 grid grid-cols-1 gap-8 sm:grid-cols-3">
             {related.map((candidate) => (
-              <BlogArticleCard key={candidate.id} post={relatedCardPost(candidate)} />
+              <BlogArticleCard key={candidate.id} post={relatedCardPost(candidate)} categories={categories} />
             ))}
           </div>
         </section>

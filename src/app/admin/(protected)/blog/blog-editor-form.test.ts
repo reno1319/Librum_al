@@ -1,11 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BlogEditorForm, ContentMarkdownInput } from "./blog-editor-form";
+import { BlogEditorForm } from "./blog-editor-form";
+import { ContentMarkdownInput } from "./blog-content-editor";
+
+// Patch B: the page passes the categories from blog_categories, in
+// their set order, Editorial left out.
+const TEST_CATEGORIES = [
+  { value: "zeja", label: "Zeja e Shkrimit" },
+  { value: "tregu", label: "Tregu i Librit & Botimet" },
+  { value: "perkthime", label: "Përkthime" },
+  { value: "kultura", label: "Kulturë & Njohuri" },
+  { value: "reflektime", label: "Reflektime & Frymëzim" },
+  { value: "vleresime", label: "Vlerësimet & Rekomandimet" },
+];
 
 // QA H4: saving from Preview must still submit the article body.
-// Exactly one control named contentMarkdown exists in either mode, and
-// it carries the typed text.
+// e1 (2026-11-19): the textarea is always mounted (on a computer the
+// preview sits beside it), so exactly one control named contentMarkdown
+// exists in either mode and it carries the typed text. In Preview it is
+// only hidden (phones) and not `required`, so a hidden invalid field
+// can never silently block a save.
 
 function render(showPreview: boolean, contentMarkdown: string) {
   return renderToStaticMarkup(
@@ -18,20 +33,20 @@ function countNamed(html: string) {
 }
 
 describe("ContentMarkdownInput", () => {
-  it("in Preview, submits the body through a hidden input and shows the rendered preview", () => {
-    const html = render(true, "Teksti \"im\" & <b>më i mirë</b>");
+  it("in Preview, keeps the body in the (hidden on phones) textarea and shows the rendered preview", () => {
+    const html = render(true, "Teksti **im**");
     expect(countNamed(html)).toBe(1);
-    expect(html).toContain(
-      '<input type="hidden" name="contentMarkdown" value="Teksti &quot;im&quot; &amp; &lt;b&gt;më i mirë&lt;/b&gt;"/>',
-    );
-    expect(html).not.toContain("<textarea");
+    expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*class="hidden lg:block/);
+    expect(html).not.toMatch(/<textarea[^>]*required/);
+    expect(html).toContain("<strong");
   });
 
-  it("while editing, submits the body through the required textarea only", () => {
+  it("while editing, the textarea is visible and required; the preview shows beside it on a computer", () => {
     const html = render(false, "Body text");
     expect(countNamed(html)).toBe(1);
     expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*required/);
     expect(html).toContain(">Body text</textarea>");
+    expect(html).toMatch(/aria-label="Preview" class="hidden lg:block/);
     expect(html).not.toContain('type="hidden"');
   });
 });
@@ -47,6 +62,7 @@ describe("BlogEditorForm category select", () => {
         initialValues,
         slugReadOnly: false,
         submitLabel: "Save",
+        categories: TEST_CATEGORIES,
       }),
     );
   }
@@ -81,11 +97,11 @@ describe("BlogEditorForm category select", () => {
     expect(select).not.toMatch(/<option value="" disabled="" selected="">/);
   });
 
-  it("bs1: only the five real categories are offered; Editorial is not an option", () => {
+  it("patch B: exactly the categories passed in, in that order; Editorial is not an option", () => {
     const select = selectHtml(renderForm());
-    for (const v of ["zeja", "tregu", "kultura", "reflektime", "vleresime"]) {
-      expect(select).toContain(`<option value="${v}">`);
-    }
+    const values = [...select.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
+    expect(values).toEqual(["zeja", "tregu", "perkthime", "kultura", "reflektime", "vleresime"]);
+    expect(select).toContain('<option value="perkthime">Përkthime</option>');
     expect(select).not.toContain('value="editorial"');
   });
 

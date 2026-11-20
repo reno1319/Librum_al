@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { blogNowIso } from "@/lib/blog-schedule";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 import { authorPagePath } from "@/lib/pen-names";
@@ -56,6 +57,7 @@ async function blogSitemapEntries(origin: string): Promise<MetadataRoute.Sitemap
     .from("blog_posts")
     .select("slug, updated_at")
     .eq("status", "published")
+    .lte("published_at", blogNowIso())
     .returns<{ slug: string; updated_at: string }[]>();
 
   return (data ?? []).map((post) => ({

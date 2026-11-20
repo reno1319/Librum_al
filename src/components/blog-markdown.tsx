@@ -34,8 +34,16 @@ const COMPONENTS: Components = {
   ),
   hr: (props) => <hr className="my-8 border-border" {...props} />,
   strong: (props) => <strong className="font-semibold" {...props} />,
-  // eslint-disable-next-line @next/next/no-img-element -- Markdown source URLs are arbitrary strings, not statically known at build time, so next/image's own required width/height/loader contract doesn't apply here.
-  img: (props) => <img className="mt-4 aspect-[3/2] w-full rounded-card object-cover" {...props} alt={props.alt ?? ""} />,
+  // e2 (Renato 2026-11-19): an image's Markdown title is its caption,
+  // shown under the picture. Spans, not <figure>, because Markdown puts
+  // an image inside a <p>. The whole picture is shown (no cropping).
+  img: ({ node: _node, title, alt, ...props }) => (
+    <span className="mt-4 block">
+      {/* eslint-disable-next-line @next/next/no-img-element -- Markdown source URLs are arbitrary strings, not statically known at build time, so next/image's own required width/height/loader contract doesn't apply here. */}
+      <img className="block h-auto w-full rounded-card" {...props} alt={alt ?? ""} />
+      {title ? <span className="mt-2 block text-sm text-muted">{title}</span> : null}
+    </span>
+  ),
 };
 
 export function BlogMarkdown({ markdown }: { markdown: string }) {

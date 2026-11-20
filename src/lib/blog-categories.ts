@@ -1,138 +1,113 @@
-import type { BlogCategory, BlogSection } from "./types";
+import { BLOG_CATEGORY_COLOURS, type BlogCategoryColour } from "./blog-category-colours";
 
-// Blog categories (Renato 2026-11-17): the single source of truth for
-// the six fixed categories. The admin <select>, the public /blog
-// bands, the category buttons, the /blog/kategoria/[slug] pages and the
-// post page all read this one list, so they can never drift. Matches
-// the blog_posts category CHECK and create/update_blog_post() in
-// migration 20261117180000_blog_categories.sql exactly; no category
-// admin CRUD exists, so this list is intentionally not persisted
-// anywhere editable.
+// Blog categories. Patch B (Renato 2026-11-19): the list lives in the
+// blog_categories table (migration 20261119180000_blog_categories_manage.sql)
+// and owner/admin staff add, rename, reorder and delete categories at
+// /admin/blog/categories. Server pages load it once per request with
+// getBlogCategories() (blog-categories-server.ts) and pass it to the
+// pure helpers below, so the admin <select>, the /blog bands, the
+// category buttons, the category pages and the post page all read the
+// same rows.
 //
-// value      the stored, ASCII-only database value (never shown).
-// label      the full Albanian name: section headings, card labels,
-//            admin select and list.
-// shortLabel the name on the category buttons (blog9: short names).
-// urlSlug    the /blog/kategoria/<urlSlug> path segment.
-// tint/ink   the category's own colour (soft band background / darker
-//            text colour); every ink passes 6.4:1 on its tint and on
-//            the cream page background.
-// cta        the bottom button on its posts and category page (blog6):
-//            "publish" for the two author categories, "browse" for the
-//            reader ones.
+// value      the stored, ASCII database value (never shown). Fixed.
+// label      the full Albanian name: headings, card labels, admin.
+// shortLabel the name on the category buttons.
+// urlSlug    the /blog/kategoria/<urlSlug> path segment. Fixed (b4 a).
+// colour     one of 8 tested pairs (b3 a); "gold" is Editorial's own.
+// cta        the bottom button on its posts and category page (b7 a).
 //
-// Editorial (bs1, Renato 2026-11-17): the first entry is a SECTION, not
-// a category. Posts are filed under one of the other five and Editorial
-// is a tick on top (blog_posts.is_editorial). BLOG_CATEGORIES is the six
-// sections (buttons, /blog bands, category pages); BLOG_POST_CATEGORIES
-// is the five a post can be filed under (admin select, validation).
+// Editorial (bs1): the "editorial" row is a SECTION, not a category.
+// Posts are filed under one of the others and Editorial is a tick on
+// top (blog_posts.is_editorial). It is always first, can be renamed but
+// not deleted, and keeps gold (b2 b).
 export type BlogCategoryInfo = {
-  value: BlogSection;
+  value: string;
   label: string;
   shortLabel: string;
   urlSlug: string;
   description: string;
+  colour: BlogCategoryColour;
   tint: string;
   ink: string;
   cta: "publish" | "browse";
 };
 
-export const BLOG_CATEGORIES: readonly BlogCategoryInfo[] = [
-  {
-    value: "editorial",
-    label: "Editorial",
-    shortLabel: "Editorial",
-    urlSlug: "editorial",
-    description: "Zëri editorial i Librum: opinione dhe analiza nga redaksia.",
-    tint: "#fbf3dc",
-    ink: "#6b5512",
-    cta: "browse",
-  },
-  {
-    value: "zeja",
-    label: "Zeja e Shkrimit",
-    shortLabel: "Zeja e Shkrimit",
-    urlSlug: "zeja-e-shkrimit",
-    description: "Teknika dhe udhëzues për prozën, poezinë, personazhet dhe dialogun.",
-    tint: "#eef3ef",
-    ink: "#24513f",
-    cta: "publish",
-  },
-  {
-    value: "tregu",
-    label: "Tregu i Librit & Botimet",
-    shortLabel: "Botimet",
-    urlSlug: "tregu-i-librit-dhe-botimet",
-    description: "Botimi profesional, vetë-botimi, tregu i e-librave dhe marketingu letrar.",
-    tint: "#e9eff4",
-    ink: "#24496a",
-    cta: "publish",
-  },
-  {
-    value: "kultura",
-    label: "Kulturë & Njohuri",
-    shortLabel: "Kulturë",
-    urlSlug: "kulture-dhe-njohuri",
-    description: "Histori e letërsisë, gjuha shqipe, profile shkrimtarësh dhe qytete librash.",
-    tint: "#f6ebe5",
-    ink: "#7a3626",
-    cta: "browse",
-  },
-  {
-    value: "reflektime",
-    label: "Reflektime & Frymëzim",
-    shortLabel: "Reflektime",
-    urlSlug: "reflektime-dhe-frymezim",
-    description: "Intervista, ese mbi leximin dhe histori nga udhëtimi krijues.",
-    tint: "#efecf6",
-    ink: "#4d3f78",
-    cta: "browse",
-  },
-  {
-    value: "vleresime",
-    label: "Vlerësimet & Rekomandimet",
-    shortLabel: "Vlerësime",
-    urlSlug: "vleresimet-dhe-rekomandimet",
-    description: "Vlerësime librash, lista leximi dhe sugjerime sipas zhanrit.",
-    tint: "#f1efe0",
-    ink: "#565414",
-    cta: "browse",
-  },
-];
+export type BlogCategoryRow = {
+  value: string;
+  label: string;
+  short_label: string;
+  url_slug: string;
+  description: string;
+  colour: string;
+  cta: string;
+  sort_order: number;
+};
 
-export const BLOG_POST_CATEGORIES: readonly (BlogCategoryInfo & { value: BlogCategory })[] =
-  BLOG_CATEGORIES.filter((c): c is BlogCategoryInfo & { value: BlogCategory } => c.value !== "editorial");
+export const BLOG_CATEGORY_COLUMNS = "value, label, short_label, url_slug, description, colour, cta, sort_order";
 
-export const BLOG_CATEGORY_LABELS: Record<BlogSection, string> = Object.fromEntries(
-  BLOG_CATEGORIES.map((c) => [c.value, c.label]),
-) as Record<BlogSection, string>;
+export const EDITORIAL_VALUE = "editorial";
 
-// True only for the five post categories: "editorial" is a tick, never
-// a stored category.
-export function isBlogCategory(value: string): value is BlogCategory {
-  return BLOG_POST_CATEGORIES.some((c) => c.value === value);
+// Rows as read from the table -> the display list: Editorial first,
+// then sort_order (ties by value, so the order is always stable). A row
+// with an unknown colour or cta (cannot happen under the table's
+// CHECKs) falls back to green / browse rather than breaking the page.
+export function toBlogCategories(rows: readonly BlogCategoryRow[]): BlogCategoryInfo[] {
+  return [...rows]
+    .sort(
+      (a, b) =>
+        Number(b.value === EDITORIAL_VALUE) - Number(a.value === EDITORIAL_VALUE) ||
+        a.sort_order - b.sort_order ||
+        (a.value < b.value ? -1 : a.value > b.value ? 1 : 0),
+    )
+    .map((r) => {
+      const colour = (r.colour in BLOG_CATEGORY_COLOURS ? r.colour : "green") as BlogCategoryColour;
+      const pair = BLOG_CATEGORY_COLOURS[colour];
+      return {
+        value: r.value,
+        label: r.label,
+        shortLabel: r.short_label,
+        urlSlug: r.url_slug,
+        description: r.description,
+        colour,
+        tint: pair.tint,
+        ink: pair.ink,
+        cta: r.cta === "publish" ? "publish" : "browse",
+      };
+    });
+}
+
+// The categories a post can be filed under (admin select, validation).
+export function blogPostCategories(list: readonly BlogCategoryInfo[]): BlogCategoryInfo[] {
+  return list.filter((c) => c.value !== EDITORIAL_VALUE);
+}
+
+export function isBlogCategory(list: readonly BlogCategoryInfo[], value: string): boolean {
+  return value !== EDITORIAL_VALUE && list.some((c) => c.value === value);
 }
 
 // Does a post belong in this section? Editorial = the tick; every other
 // section = the post's own category (bs1 a: an Editorial post is in both).
 export function isPostInSection(
   post: { category: string; is_editorial: boolean },
-  section: BlogSection,
+  section: string,
 ): boolean {
-  return section === "editorial" ? post.is_editorial === true : post.category === section;
+  return section === EDITORIAL_VALUE ? post.is_editorial === true : post.category === section;
 }
 
-// Undefined for a value outside the six (e.g. a row not yet moved by
-// the migration): callers render no label rather than crash.
-export function getBlogCategory(value: string): BlogCategoryInfo | undefined {
-  return BLOG_CATEGORIES.find((c) => c.value === value);
+// Undefined for a value not in the list: callers render no label
+// rather than crash.
+export function getBlogCategory(list: readonly BlogCategoryInfo[], value: string): BlogCategoryInfo | undefined {
+  return list.find((c) => c.value === value);
 }
 
-export function getBlogCategoryByUrlSlug(urlSlug: string): BlogCategoryInfo | undefined {
-  return BLOG_CATEGORIES.find((c) => c.urlSlug === urlSlug);
+export function getBlogCategoryByUrlSlug(
+  list: readonly BlogCategoryInfo[],
+  urlSlug: string,
+): BlogCategoryInfo | undefined {
+  return list.find((c) => c.urlSlug === urlSlug);
 }
 
-export function blogCategoryHref(category: BlogCategoryInfo): string {
+export function blogCategoryHref(category: Pick<BlogCategoryInfo, "urlSlug">): string {
   return `/blog/kategoria/${category.urlSlug}`;
 }
 
@@ -144,3 +119,25 @@ export const BLOG_CTA = {
 
 // blog8: an empty category keeps its band and page with this one line.
 export const BLOG_CATEGORY_EMPTY_LINE = "Artikujt e parë po vijnë së shpejti.";
+
+// ---- Admin form rules (mirrored by the SQL RPCs) ----
+export const CATEGORY_LABEL_MAX = 60;
+export const CATEGORY_SHORT_LABEL_MAX = 24;
+export const CATEGORY_DESCRIPTION_MAX = 200;
+export const CATEGORY_URL_SLUG_MAX = 60;
+export const CATEGORY_URL_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+// b4 a: the address is suggested from the name and fixed once the
+// category exists. "&" -> "dhe", accents dropped (ë -> e, ç -> c),
+// everything else to a-z0-9 joined by single "-".
+export function suggestCategoryAddress(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/&/g, " dhe ")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, CATEGORY_URL_SLUG_MAX)
+    .replace(/-+$/g, "");
+}
