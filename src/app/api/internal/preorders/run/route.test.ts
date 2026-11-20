@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// ALERTS-2: GET hands its response to the failure email; pass-through here.
+const alertIfCronFailed = vi.hoisted(() => vi.fn(async (_path: string, response: Response) => response));
+vi.mock("@/lib/error-alerts", () => ({ alertIfCronFailed }));
 
 // BD16 P5: the pre-order cron route. The job step and the emails are
 // mocked; this proves the guards (secret, maintenance, off switch, the
@@ -139,5 +142,22 @@ describe("GET /api/internal/preorders/run", () => {
     expect(res.status).toBe(500);
     expect(mockEmails).toHaveBeenCalledWith(expect.anything(), null);
     expect(mockCleanup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ALERTS-2 failure email wiring", () => {
+  it("passes the GET response to alertIfCronFailed with this job's path", async () => {
+    alertIfCronFailed.mockClear();
+    const saved = process.env.CRON_SECRET;
+    delete process.env.CRON_SECRET;
+    try {
+      const response = await GET(new Request("http://localhost/api/internal/preorders/run"));
+      expect(response.status).toBe(503);
+      expect(alertIfCronFailed).toHaveBeenCalledTimes(1);
+      expect(alertIfCronFailed).toHaveBeenCalledWith("/api/internal/preorders/run", response);
+    } finally {
+      if (saved === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = saved;
+    }
   });
 });

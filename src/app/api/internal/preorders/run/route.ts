@@ -7,6 +7,7 @@ import { preorderDayCounts, runPreorderDay } from "@/lib/preorder-job";
 import { sendPreorderJobEmails } from "@/lib/preorder-emails";
 import { deleteOldNotifyRequests } from "@/lib/preorder-notify-cleanup";
 import { preorderJobMayRun } from "@/lib/preorder-staff";
+import { alertIfCronFailed } from "@/lib/error-alerts";
 
 // BD16 P5 (PLAN-BD16-r1 §3.5): the daily pre-order job, called by the
 // two Vercel cron entries in vercel.json (06:00 and 07:00 UTC; the
@@ -50,7 +51,7 @@ function authenticate(request: Request): Response | null {
   return null;
 }
 
-export async function GET(request: Request): Promise<Response> {
+async function runJob(request: Request): Promise<Response> {
   const authFailure = authenticate(request);
   if (authFailure) return authFailure;
 
@@ -87,4 +88,10 @@ export async function GET(request: Request): Promise<Response> {
   const counts = preorderDayCounts(summary);
   console.log("[preorders] run complete", { today: summary.today, ...counts, readers, notifyCleanup });
   return NextResponse.json({ ok: true, today: summary.today, ...counts, readers, notifyCleanup });
+}
+
+// ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team
+// (src/lib/error-alerts.ts alertIfCronFailed); the response is unchanged.
+export async function GET(request: Request): Promise<Response> {
+  return alertIfCronFailed("/api/internal/preorders/run", await runJob(request));
 }
