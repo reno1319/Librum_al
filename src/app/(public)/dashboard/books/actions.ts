@@ -19,7 +19,13 @@ import {
 import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEbook } from "@/lib/ebook-cover-sync";
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
 import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
-import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
+import {
+  EPUB_PICTURES_TOO_LARGE_MESSAGE,
+  EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE,
+  EPUB_TEXT_TOO_LARGE_MESSAGE,
+  validateEpubStructure,
+  type EpubValidationResult,
+} from "@/lib/epub-validation";
 import { recordManuscriptWords } from "@/lib/page-estimate";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -292,6 +298,12 @@ function epubValidationErrorMessage(
     case "too_large_uncompressed":
     case "entry_too_large":
       return "EPUB-i është shumë i madh ose ka shumë skedarë.";
+    case "text_too_large":
+      return EPUB_TEXT_TOO_LARGE_MESSAGE;
+    case "pictures_too_large":
+      return EPUB_PICTURES_TOO_LARGE_MESSAGE;
+    case "reader_output_too_large":
+      return EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE;
     case "encrypted_or_drm":
       return "Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.";
     default:

@@ -11,7 +11,13 @@ import {
   UNKNOWN_AUTHOR_NAME,
   UNTITLED_MANUSCRIPT_TITLE,
 } from "@/lib/epub-generator";
-import { validateEpubStructure } from "@/lib/epub-validation";
+import {
+  EPUB_PICTURES_TOO_LARGE_MESSAGE,
+  EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE,
+  EPUB_TEXT_TOO_LARGE_MESSAGE,
+  validateEpubStructure,
+  type EpubValidationResult,
+} from "@/lib/epub-validation";
 
 // LIBRUM 2.0 PRODUCT-5 413 CORRECTION: a confirmed production defect --
 // an 8.3MB real-world DOCX (well under the advertised 50MB limit) 413'd
@@ -103,6 +109,16 @@ const ERROR_MESSAGES: Record<string, string> = {
     "Diçka shkoi keq gjatë krijimit të e-librit tuaj. Provoni përsëri ose ngarkoni drejtpërdrejt një EPUB.",
   invalid_choices: "Ndryshimet tuaja nuk u lexuan dot. Rifreskoni faqen dhe provoni përsëri.",
 };
+
+// PV1 1d (sz2 a): a Word book too big for the reader gets the same
+// clear message as an uploaded book file; any other failure keeps the
+// generic one.
+function generatedEpubError(reason: Extract<EpubValidationResult, { valid: false }>["reason"]): string {
+  if (reason === "text_too_large") return EPUB_TEXT_TOO_LARGE_MESSAGE;
+  if (reason === "pictures_too_large") return EPUB_PICTURES_TOO_LARGE_MESSAGE;
+  if (reason === "reader_output_too_large") return EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE;
+  return ERROR_MESSAGES.generated_epub_invalid;
+}
 
 async function requireOwnedTempPath(tempPath: string) {
   const supabase = await createClient();
@@ -229,7 +245,7 @@ export async function parseDocxToDocument(
   const validation = await validateEpubStructure(epubBytes);
   if (!validation.valid) {
     console.error("parseDocxToDocument: generated EPUB failed validation:", validation.reason);
-    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+    return { success: false, error: generatedEpubError(validation.reason) };
   }
 
   const tempEpubPath = `${userId}/tmp/epub/${conversionId}.epub`;
@@ -336,7 +352,7 @@ export async function repackageWithTitle(
   const validation = await validateEpubStructure(patched);
   if (!validation.valid) {
     console.error("repackageWithTitle: patched EPUB failed validation:", validation.reason);
-    return { success: false, error: ERROR_MESSAGES.generated_epub_invalid };
+    return { success: false, error: generatedEpubError(validation.reason) };
   }
 
   const { error: uploadError } = await supabase.storage

@@ -43,6 +43,11 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   // DEL: Restore after the daily job has started the real deletion.
   "Fshirja e llogarisë ka nisur dhe nuk mund të ndalet më.",
   "EPUB-i është shumë i madh ose ka shumë skedarë.",
+  // PV1 1d: EPUB_TEXT_TOO_LARGE_MESSAGE / EPUB_PICTURES_TOO_LARGE_MESSAGE /
+  // EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE.
+  "Ky libër ka shumë foto për t'u hapur te lexuesit. Lejohen deri në 100 foto, dhe një foto mbi 10 megapiksel numërohet si më shumë se një. Hiqni ose zvogëloni disa foto dhe ngarkojeni përsëri.",
+  "Ky libër është shumë i madh për t'u lexuar online në Librum. Zvogëloni fotot ose ndajeni librin në më shumë vëllime.",
+  "Teksti i këtij libri është shumë i madh për t'u hapur te lexuesit. Lejohen deri në 10 MB tekst gjithsej. Ndajeni librin në më shumë vëllime.",
   "Each keyword must be 40 characters or fewer.",
   "Emri duhet të ketë nga 2 deri në 40 karaktere.",
   "Emri mund të ketë deri në 120 karaktere",
