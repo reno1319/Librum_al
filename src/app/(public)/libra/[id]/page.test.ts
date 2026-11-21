@@ -633,6 +633,15 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).not.toMatch(/href="\/autore\/pen-an-author"[^>]*>Arthur Machen/);
   });
 
+  // X19 (pictures x19p1): the original title is a detail row above the
+  // first-publication date; none without one.
+  it("a translated book shows its original title in the details", async () => {
+    const html = await render({ book: { ...BOOK_ROW, original_author: "Jane Example", original_title: "The Last Star" } });
+    expect(text(html)).toContain("Titulli origjinal: The Last Star");
+    const none = await render({ book: { ...BOOK_ROW, original_title: null } });
+    expect(text(none)).not.toContain("Titulli origjinal");
+  });
+
   // DR1 fix 1: on phones the one price box sits under the title block,
   // by visual order only; DR1 fix 4: serif section headings.
   // Patch A: on phones a 7.5rem cover sits beside the title (row 1), the

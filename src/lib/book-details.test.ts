@@ -57,6 +57,7 @@ describe("parseBookDetails", () => {
         contributors: [],
         rightsBasis: null,
         originalAuthor: null,
+        originalTitle: null,
       },
     });
   });
@@ -169,6 +170,20 @@ describe("parseBookDetails", () => {
   });
 });
 
+describe("parseBookDetails: the original title (X19)", () => {
+  it("is cleaned like the original author, empty is null, and too long is refused", () => {
+    const ok = parseBookDetails(form({ title: "T", originalTitle: "  The   Last\tStar " }));
+    expect(ok.ok && ok.details.originalTitle).toBe("The Last Star");
+    const none = parseBookDetails(form({ title: "T", originalTitle: "   " }));
+    expect(none.ok && none.details.originalTitle).toBeNull();
+    const max = parseBookDetails(form({ title: "T", originalTitle: "ë".repeat(300) }));
+    expect(max.ok).toBe(true);
+    const long = parseBookDetails(form({ title: "T", originalTitle: "ë".repeat(301) }));
+    expect(long.ok).toBe(false);
+    expect(!long.ok && long.errors.originalTitle).toBe("Titulli origjinal mund të ketë deri në 300 karaktere");
+  });
+});
+
 describe("missingDetails (the Details tab's done state)", () => {
   const complete = {
     title: "T",
@@ -177,6 +192,8 @@ describe("missingDetails (the Details tab's done state)", () => {
     description: "Rreth librit",
     rightsBasis: "own_rights" as const,
     originalAuthor: null,
+    originalTitle: null,
+    hasTranslator: false,
   };
 
   it("is empty for a complete book", () => {
@@ -190,6 +207,16 @@ describe("missingDetails (the Details tab's done state)", () => {
       "Të drejtat",
     ]);
     expect(missingDetails({ ...complete, rightsBasis: "public_domain" })).toEqual(["Autori origjinal"]);
+  });
+
+  // X19 (x19q2 a): the original title is needed once a Translator is
+  // credited, and only then.
+  it("needs the original title when a translator is credited", () => {
+    expect(missingDetails({ ...complete, hasTranslator: true })).toEqual(["Titulli origjinal"]);
+    expect(missingDetails({ ...complete, hasTranslator: true, originalTitle: "  " })).toEqual(["Titulli origjinal"]);
+    expect(missingDetailItems({ ...complete, hasTranslator: true }).map((m) => m.field)).toEqual(["originalTitle"]);
+    expect(missingDetails({ ...complete, hasTranslator: true, originalTitle: "The Egg" })).toEqual([]);
+    expect(missingDetails({ ...complete, hasTranslator: false, originalTitle: null })).toEqual([]);
   });
 
   // Upload notes C: the book type is needed before review, and only a

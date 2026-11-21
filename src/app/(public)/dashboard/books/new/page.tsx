@@ -64,6 +64,7 @@ export default async function NewBookPage({
     contributors: [],
     rightsBasis: "",
     originalAuthor: "",
+    originalTitle: "",
   };
 
   return (

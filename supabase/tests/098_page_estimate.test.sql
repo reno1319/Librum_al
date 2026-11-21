@@ -153,10 +153,17 @@ select pg_temp.assert(
 select pg_temp.assert(
   (select a.attname from pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) = 'word_count'
+    order by a.attnum desc limit 1) in ('word_count', 'original_title')
+  -- X19 (migration 20261121180000) appends original_title right after it.
+  and (select coalesce(max(a.attnum) filter (where a.attname = 'original_title'),
+                       max(a.attnum) filter (where a.attname = 'word_count') + 1)
+         from pg_attribute a
+        where a.attrelid = 'public.public_books'::regclass and not a.attisdropped)
+      = (select a.attnum + 1 from pg_attribute a
+          where a.attrelid = 'public.public_books'::regclass and a.attname = 'word_count')
   and (select pg_catalog.format_type(a.atttypid, a.atttypmod) from pg_attribute a
         where a.attrelid = 'public.public_books'::regclass and a.attname = 'word_count') = 'integer',
-  'part3: word_count (integer) is public_books'' last column');
+  'part3: word_count (integer) is public_books'' last column, or right before original_title');
 select pg_temp.assert(
   (select word_count from public.public_books where id = 'e0980001-0000-4000-8000-00000000000a') = 45750,
   'part3: the live book shows its CURRENT file''s count (not the old file''s)');

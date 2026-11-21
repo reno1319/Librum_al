@@ -14,6 +14,8 @@ import { isRightsBasis, RIGHTS_BASES } from "@/lib/rights-statements";
 import {
   MISSING_ORIGINAL_AUTHOR_MESSAGE,
   ORIGINAL_AUTHOR_MAX_LENGTH,
+  ORIGINAL_TITLE_LABEL,
+  ORIGINAL_TITLE_MAX_LENGTH,
   normalizeOriginalAuthor,
 } from "@/lib/book-byline";
 import { normalizeDescription } from "@/lib/book-description";
@@ -52,6 +54,7 @@ export const CONTRIBUTOR_INVALID_MESSAGE = `Çdo kontribues ka një emër (deri 
 export const RIGHTS_INVALID_MESSAGE = "Zgjidhni të drejtat nga lista.";
 export const ORIGINAL_AUTHOR_TOO_LONG_MESSAGE = `Autori origjinal mund të ketë deri në ${ORIGINAL_AUTHOR_MAX_LENGTH} karaktere`;
 export { MISSING_ORIGINAL_AUTHOR_MESSAGE };
+export const ORIGINAL_TITLE_TOO_LONG_MESSAGE = `Titulli origjinal mund të ketë deri në ${ORIGINAL_TITLE_MAX_LENGTH} karaktere`;
 
 export type DetailsField =
   | "title"
@@ -67,7 +70,8 @@ export type DetailsField =
   | "keywords"
   | "contributors"
   | "rightsBasis"
-  | "originalAuthor";
+  | "originalAuthor"
+  | "originalTitle";
 
 export type DetailsContributor = { id: string | null; name: string; role: ContributorRole };
 
@@ -89,6 +93,7 @@ export type BookDetails = {
   contributors: DetailsContributor[];
   rightsBasis: RightsBasis | null;
   originalAuthor: string | null;
+  originalTitle: string | null;
 };
 
 export type DetailsResult =
@@ -236,6 +241,12 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
   } else if (rightsBasis && rightsBasis !== "own_rights" && !originalAuthor) {
     errors.originalAuthor = MISSING_ORIGINAL_AUTHOR_MESSAGE;
   }
+  // X19: the same cleaning as the original author. Required-ness (a
+  // Translator in the credits, x19q2 a) is checked at send, below.
+  const originalTitle: string | null = normalizeOriginalAuthor(str(input.get("originalTitle"))) || null;
+  if (originalTitle && Array.from(originalTitle).length > ORIGINAL_TITLE_MAX_LENGTH) {
+    errors.originalTitle = ORIGINAL_TITLE_TOO_LONG_MESSAGE;
+  }
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
@@ -257,13 +268,15 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
       contributors,
       rightsBasis,
       originalAuthor,
+      originalTitle,
     },
   };
 }
 
 // The Details tab is "done" (Plotësuar) once the book has what review
 // needs from it: a title, the book type (upload notes C), at least one
-// category, a description and the rights choice (with the original author for a public-domain one).
+// category, a description and the rights choice (with the original author for a public-domain one),
+// and the original title once a Translator is credited (X19).
 // Everything else is optional.
 export type DetailsCompleteness = {
   title: string | null | undefined;
@@ -272,6 +285,9 @@ export type DetailsCompleteness = {
   description: string | null | undefined;
   rightsBasis: RightsBasis | null | undefined;
   originalAuthor: string | null | undefined;
+  // X19 (x19q2 a): required once a Translator is in the credits.
+  originalTitle: string | null | undefined;
+  hasTranslator: boolean;
 };
 
 export function missingDetails(book: DetailsCompleteness): string[] {
@@ -289,6 +305,8 @@ export function missingDetailItems(book: DetailsCompleteness): { field: DetailsF
   if (!book.rightsBasis) missing.push({ field: "rightsBasis", label: "Të drejtat" });
   else if (book.rightsBasis !== "own_rights" && !book.originalAuthor?.trim())
     missing.push({ field: "originalAuthor", label: "Autori origjinal" });
+  if (book.hasTranslator && !book.originalTitle?.trim())
+    missing.push({ field: "originalTitle", label: ORIGINAL_TITLE_LABEL });
   return missing;
 }
 

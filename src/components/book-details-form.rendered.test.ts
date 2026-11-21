@@ -38,6 +38,7 @@ function render(
         contributors: [{ id: "c1", name: "Besnik", role: "Editor" }],
         rightsBasis: "",
         originalAuthor: "",
+        originalTitle: "",
         ...overrides,
       },
       locked,
