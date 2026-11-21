@@ -17,7 +17,8 @@ const ROOT = path.resolve(__dirname, "../..");
 const SRC = path.join(ROOT, "src");
 
 // Pages that already have their own allowlist (SQ-16, auth-page-messages.ts).
-const SIGN_IN_PAGES = ["/login", "/signup", "/forgot-password", "/reset-password"];
+// N2: /signup/resend shows the same sign-in messages (translateAuthErrorMessage).
+const SIGN_IN_PAGES = ["/login", "/signup", "/signup/resend", "/forgot-password", "/reset-password"];
 // The admin actions' own helper: withQuery(path, "error" | "success", message).
 const QUERY_HELPER = "withQuery";
 
