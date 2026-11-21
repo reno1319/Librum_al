@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
+import { crc32 } from "node:zlib";
 import { validateEpubStructure } from "./epub-validation";
 
 // LAUNCH-1 P1: this file exists because the previous validator (inlined
@@ -346,5 +347,201 @@ describe("validateEpubStructure: Librum-generated EPUB regression (EPUB-VALIDATI
     });
 
     expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+});
+
+// PV1 1d (sz1 a): the two reader-size limits.
+describe("validateEpubStructure: reader size limits (PV1 1d)", () => {
+  const MB = 1024 * 1024;
+
+  // A PNG with no pixel data: sharp reads its size from the header
+  // without decoding anything, so a "huge" picture costs nothing to build.
+  function pngHeader(width: number, height: number): Buffer {
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr[8] = 8; // bit depth
+    ihdr[9] = 2; // RGB
+    const chunk = (name: string, data: Buffer) => {
+      const len = Buffer.alloc(4);
+      len.writeUInt32BE(data.length);
+      const type = Buffer.from(name, "latin1");
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(crc32(Buffer.concat([type, data])) >>> 0);
+      return Buffer.concat([len, type, data, crc]);
+    };
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr),
+      chunk("IDAT", Buffer.alloc(0)),
+      chunk("IEND", Buffer.alloc(0)),
+    ]);
+  }
+
+  // files: archive path under OEBPS/ -> [media-type, bytes, in the spine?]
+  type Item = [string, string | Buffer, boolean?];
+  async function epubWith(files: Record<string, Item>, extra: Record<string, string | Buffer> = {}): Promise<Buffer> {
+    const zip = new JSZip();
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+    zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"));
+    let items = "";
+    let spine = "";
+    Object.entries(files).forEach(([name, [type, data, inSpine]], i) => {
+      items += `<item id="i${i}" href="${name}" media-type="${type}"/>`;
+      if (inSpine) spine += `<itemref idref="i${i}"/>`;
+      zip.file(`OEBPS/${name}`, data, { compression: "DEFLATE" });
+    });
+    zip.file("OEBPS/content.opf", OPF.replace("<manifest></manifest>", `<manifest>${items}</manifest>`).replace("<spine></spine>", `<spine>${spine}</spine>`));
+    for (const [name, data] of Object.entries(extra)) zip.file(name, data, { compression: "DEFLATE" });
+    return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+  }
+
+  const XHTML = "application/xhtml+xml";
+  const text = (bytes: number) => "<p>x</p>".repeat(Math.ceil(bytes / 8)).slice(0, bytes);
+  // Bytes the reader reads but never shows (one HTML comment): counts
+  // toward the 10 MB text limit, adds nothing to the buyer's output.
+  const unseen = (bytes: number) => `<!--${" ".repeat(bytes - 7)}-->`;
+
+  it("accepts a book just under 10 MB of text", async () => {
+    const bytes = await epubWith({ "a.xhtml": [XHTML, unseen(5 * MB), true], "b.xhtml": [XHTML, unseen(5 * MB - 4 * 1024), true] });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+
+  it("refuses a small file holding more than 10 MB of text, split over many pages", async () => {
+    const files: Record<string, Item> = {};
+    for (let i = 0; i < 11; i++) files[`c${i}.xhtml`] = [XHTML, text(MB), true];
+    const bytes = await epubWith(files);
+    expect(bytes.length).toBeLessThan(MB);
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "text_too_large" });
+  });
+
+  it("counts what the reader reads, whatever its name: a spine page named .png is text", async () => {
+    const bytes = await epubWith({ "fake.png": [XHTML, text(11 * MB), true] });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "text_too_large" });
+  });
+
+  it("counts a real picture's bytes as text when the spine lists it as a page", async () => {
+    const disguised = Buffer.concat([pngHeader(10, 10), Buffer.from(text(11 * MB))]);
+    const bytes = await epubWith({ "p.png": ["", disguised, true] });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "text_too_large" });
+  });
+
+  it("does not count what the reader never reads: fonts, files outside the spine", async () => {
+    const font = Buffer.concat([Buffer.from("wOFF", "latin1"), Buffer.alloc(11 * MB)]);
+    const bytes = await epubWith(
+      { "f.woff": ["font/woff", font], "notes.xhtml": [XHTML, text(11 * MB)], "a.xhtml": [XHTML, text(MB), true] },
+      { "OEBPS/unlisted.xhtml": text(11 * MB) },
+    );
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+
+  it("counts the same page once, as the reader reads it once", async () => {
+    const zipFiles: Record<string, Item> = { "a.xhtml": [XHTML, unseen(6 * MB), true] };
+    const bytes = await epubWith(zipFiles);
+    const again = (await JSZip.loadAsync(bytes)).file("OEBPS/content.opf", OPF.replace("<manifest></manifest>", '<manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="a.xhtml" media-type="application/xhtml+xml"/></manifest>').replace("<spine></spine>", '<spine><itemref idref="a"/><itemref idref="b"/></spine>'));
+    const twice = Buffer.from(await again.generateAsync({ type: "nodebuffer" }));
+    expect(await validateEpubStructure(twice)).toEqual({ valid: true });
+  });
+
+  it("accepts pictures up to 1,000 megapixels in total", async () => {
+    const bytes = await epubWith({
+      "a.xhtml": [XHTML, "<p>x</p>", true],
+      "1.png": ["image/png", pngHeader(25_000, 20_000)], // 500 Mpx
+      "2.png": ["image/png", pngHeader(25_000, 20_000)], // 500 Mpx
+    });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+
+  it("refuses pictures over 1,000 megapixels in total, even when the file is tiny", async () => {
+    const bytes = await epubWith({
+      "a.xhtml": [XHTML, "<p>x</p>", true],
+      "1.png": ["image/png", pngHeader(25_000, 20_000)],
+      "2.png": ["image/png", pngHeader(25_000, 20_000)],
+      "3.jpg": ["image/jpeg", pngHeader(10, 10)], // a PNG listed as JPEG: sharp reads it all the same
+    });
+    expect(bytes.length).toBeLessThan(10_000);
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "pictures_too_large" });
+  });
+
+  it("does not count pictures the manifest does not list as pictures (the reader never encodes them)", async () => {
+    const bytes = await epubWith(
+      { "a.xhtml": [XHTML, "<p>x</p>", true], "big.svg": ["image/svg+xml", pngHeader(40_000, 40_000)] },
+      { "OEBPS/unlisted.png": pngHeader(40_000, 40_000) },
+    );
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+  // r2 (sz4 a): each picture counts for at least 10 megapixels.
+  it("accepts 100 small pictures and refuses 101 (each counts as at least 10 megapixels)", async () => {
+    const files: Record<string, Item> = { "a.xhtml": [XHTML, "<p>x</p>", true] };
+    for (let i = 0; i < 100; i++) files[`p${i}.png`] = ["image/png", pngHeader(1200, 1600)];
+    expect(await validateEpubStructure(await epubWith(files))).toEqual({ valid: true });
+    files["p100.png"] = ["image/png", pngHeader(10, 10)];
+    expect(await validateEpubStructure(await epubWith(files))).toEqual({ valid: false, reason: "pictures_too_large" });
+  });
+
+  // r2 (audit r1, LOW-1): stylesheets and the contents page count as text.
+  it("counts the stylesheets the pages link to, once each", async () => {
+    const page = (css: string) => `<html><head><link rel="stylesheet" href="${css}"/></head><body><p>x</p></body></html>`;
+    const once = await epubWith({
+      "a.xhtml": [XHTML, page("s.css"), true],
+      "b.xhtml": [XHTML, page("s.css"), true],
+      "s.css": ["text/css", text(6 * MB)],
+    });
+    expect(await validateEpubStructure(once)).toEqual({ valid: true });
+    const two = await epubWith({
+      "a.xhtml": [XHTML, page("s.css"), true],
+      "b.xhtml": [XHTML, page("t.css"), true],
+      "s.css": ["text/css", text(6 * MB)],
+      "t.css": ["text/css", text(6 * MB)],
+    });
+    expect(await validateEpubStructure(two)).toEqual({ valid: false, reason: "text_too_large" });
+  });
+
+  it("counts a stylesheet link to any file, even one not in the manifest", async () => {
+    const bytes = await epubWith(
+      { "a.xhtml": [XHTML, '<html><head><link rel="stylesheet" href="../x.bin"/></head><body/></html>', true] },
+      { "x.bin": text(11 * MB) },
+    );
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "text_too_large" });
+  });
+
+  it("counts the contents page", async () => {
+    const bytes = await epubWith({ "a.xhtml": [XHTML, "<p>x</p>", true], "nav.xhtml": [XHTML, text(11 * MB)] });
+    const zip = await JSZip.loadAsync(bytes);
+    const opf = (await zip.file("OEBPS/content.opf")!.async("string")).replace('href="nav.xhtml"', 'href="nav.xhtml" properties="nav"');
+    zip.file("OEBPS/content.opf", opf);
+    expect(await validateEpubStructure(Buffer.from(await zip.generateAsync({ type: "nodebuffer" })))).toEqual({
+      valid: false,
+      reason: "text_too_large",
+    });
+  });
+
+  // r2 (sz5 a, audit r1 MEDIUM-1): the buyer's online reader refuses an
+  // answer over 4,000,000 bytes, so such a book is refused at upload.
+  it("refuses a book whose buyer output would be over 4 MB, though its text is under 10 MB", async () => {
+    const bytes = await epubWith({
+      "a.xhtml": [XHTML, text(1.5 * MB), true],
+      "b.xhtml": [XHTML, text(1.5 * MB), true],
+      "c.xhtml": [XHTML, text(1.5 * MB), true],
+    });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: false, reason: "reader_output_too_large" });
+  });
+
+  it("accepts a book whose buyer output fits", async () => {
+    const bytes = await epubWith({ "a.xhtml": [XHTML, text(1.5 * MB), true], "b.xhtml": [XHTML, text(1.5 * MB), true] });
+    expect(await validateEpubStructure(bytes)).toEqual({ valid: true });
+  });
+});
+
+// r3 (audit LOW, his "yes"): the reader and the upload check run with
+// libvips' cache off, so a book's decoded pictures are not all kept alive
+// (25 progressive 40 Mpx JPEGs: +1.1 GB per open with it, +0.2 GB without).
+describe("picture memory (PV1 1d r3)", () => {
+  it("loading the upload check turns sharp's cache off", async () => {
+    const sharp = (await import("sharp")).default;
+    const cache = sharp.cache();
+    expect(cache.memory.max).toBe(0);
+    expect(cache.items.max).toBe(0);
+    expect(cache.files.max).toBe(0);
   });
 });
