@@ -375,6 +375,39 @@ export async function requestPasswordReset(formData: FormData) {
   redirect("/forgot-password?success=1");
 }
 
+// N2: send the sign-up confirmation email again (Renato rs1-rs4, all
+// "a"). The answer is the same success page whatever Supabase says --
+// unknown address, already confirmed, sent too recently, or a failure --
+// so the form can't tell anyone which addresses have an account (rs1).
+// The 60-second wait is on the page (rs2); Supabase's own limits are the
+// only cap (rs4). Failures are logged without the address.
+export async function resendConfirmationEmail(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
+
+  if (!email) {
+    redirect(`/signup/resend?error=${encodeURIComponent(AUTH_ENTER_EMAIL_MESSAGE)}`);
+  }
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: `${resolveSiteOrigin()}/auth/callback` },
+    });
+    if (error) {
+      console.error("resendConfirmationEmail: provider answered with an error", {
+        code: error.code ?? "unknown",
+        status: error.status ?? null,
+      });
+    }
+  } catch {
+    console.error("resendConfirmationEmail: provider request threw");
+  }
+
+  redirect("/signup/resend?success=1");
+}
+
 export async function updatePassword(formData: FormData) {
   const supabase = await createClient();
   const {

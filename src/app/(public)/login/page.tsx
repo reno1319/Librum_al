@@ -84,6 +84,13 @@ export default async function LoginPage({
         </Link>
       </p>
 
+      {/* N2 (rs3 a): a lost sign-up confirmation email. */}
+      <p className="mt-2 text-sm text-muted">
+        <Link href="/signup/resend" className="focus-ring rounded-sm underline underline-offset-2 hover:decoration-2">
+          Nuk ju erdhi emaili i konfirmimit?
+        </Link>
+      </p>
+
       <p className="mt-2 text-sm text-muted">
         Nuk keni ende llogari?{" "}
         <Link href="/signup" className="focus-ring rounded-sm font-medium text-primary underline">

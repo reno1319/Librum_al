@@ -27,7 +27,14 @@ export default async function CheckEmailPage({
           &ldquo;Bëhuni autor&rdquo; te faqja Llogaria.
         </p>
       )}
+      {/* N2 (rs3 a): a lost confirmation email. */}
       <p className="mt-6 text-sm text-muted">
+        Nuk ju erdhi emaili?{" "}
+        <Link href="/signup/resend" className="focus-ring rounded-sm font-medium text-primary underline">
+          Dërgojeni përsëri
+        </Link>
+      </p>
+      <p className="mt-2 text-sm text-muted">
         <Link href="/login" className="focus-ring rounded-sm font-medium text-primary underline">
           Kthehuni te hyrja
         </Link>
