@@ -287,6 +287,29 @@ describe("front page wording (approved 1 Nov)", () => {
   });
 });
 
+// X19 (pictures x19p1): the original title, one line under the byline
+// and before the © lines; none when the book has none.
+describe("front page: the original title (X19)", () => {
+  it("names it under the byline, before the © lines", () => {
+    const html = frontPageXhtml({
+      ...FRONT,
+      originalAuthor: "Jane Example",
+      originalYear: 2019,
+      translators: ["Drita Shembull"],
+      originalTitle: "The Last Star & <Co>",
+    });
+    const title = html.indexOf("<p>Titulli origjinal: The Last Star &amp; &lt;Co&gt;</p>");
+    expect(title).toBeGreaterThan(html.indexOf("Përktheu: Drita Shembull"));
+    expect(title).toBeLessThan(html.indexOf("© 2019 Jane Example."));
+  });
+
+  it("adds nothing without one", () => {
+    expect(frontPageXhtml(FRONT)).not.toContain("Titulli origjinal");
+    expect(frontPageXhtml({ ...FRONT, originalTitle: "  " })).not.toContain("Titulli origjinal");
+    expect(frontPageXhtml({ ...FRONT, originalTitle: null })).not.toContain("Titulli origjinal");
+  });
+});
+
 describe("last page (5a)", () => {
   it("lists the other books with links, then the review link", () => {
     const html = lastPageBody(LAST);

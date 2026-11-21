@@ -236,6 +236,8 @@ async function saveLiveBookDetails(
     book_type: details.bookType,
     categories: details.categories.length > 0 ? details.categories : null,
     keywords: details.keywords.join(", "),
+    // X19 (x19s1 b): the original title changes at once, like these.
+    original_title: details.originalTitle,
   };
   // BD15 P7 (Q1 a; audit r1 N2): a picked edition's details are frozen.
   // A save that changes none of them skips this write (an older book's
@@ -243,18 +245,23 @@ async function saveLiveBookDetails(
   // that changes one is refused here, before anything is written.
   let skipDirect = false;
   let pdFirstType: { book_type: string } | null = null;
+  // X19: a picked edition's stored original title (undefined = not a
+  // picked edition). LB497 does not freeze it, so it is written when it
+  // changed, even when the frozen details' write is skipped.
+  let pdStoredTitle: string | null | undefined;
   if (isPickedPdEdition(existing)) {
     const { data: stored, error: storedError } = await catalogWriter
       .from("books")
-      .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, book_type, categories, keywords")
+      .select("subtitle, language, series_id, series_position, edition_number, reading_age_min, book_type, categories, keywords, original_title")
       .eq("id", existing.id)
       .eq("author_id", userId)
       .eq("status", existing.status)
-      .maybeSingle<PdFrozenDetails>();
+      .maybeSingle<PdFrozenDetails & { original_title?: string | null }>();
     if (storedError) redirect(withQuery(here, "error", SAVE_FAILED_MESSAGE));
     if (!stored) redirect(withQuery(here, "error", LIVE_NOT_LIVE_MESSAGE));
     if (!pdFrozenDetailsUnchanged(stored, direct)) redirect(withQuery(here, "error", PD_FROZEN_MESSAGE));
     skipDirect = true;
+    pdStoredTitle = stored.original_title ?? null;
     // Upload notes C: a picked edition with no type yet may choose one
     // (LB497 allows the first choice); only the type is written then.
     if ((stored.book_type ?? null) === null && details.bookType !== null) {
@@ -262,11 +269,14 @@ async function saveLiveBookDetails(
       skipDirect = false;
     }
   }
-  const { data, error } = skipDirect
+  const titleWrite =
+    pdStoredTitle === undefined || pdStoredTitle !== direct.original_title ? { original_title: direct.original_title } : {};
+  const payload = skipDirect ? titleWrite : pdFirstType ? { ...pdFirstType, ...titleWrite } : direct;
+  const { data, error } = skipDirect && Object.keys(payload).length === 0
     ? { data: [{ id: existing.id }], error: null }
     : await catalogWriter
         .from("books")
-        .update(pdFirstType ?? direct)
+        .update(payload)
         .eq("id", existing.id)
         .eq("author_id", userId)
         // BD16 P2: a live pre-order too, bound to its own status.
@@ -519,6 +529,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     categories: details.categories.length > 0 ? details.categories : null,
     keywords: details.keywords.join(", "),
     original_author: details.originalAuthor,
+    original_title: details.originalTitle,
   };
 
   // The row is written with the trusted catalog writer; every identifying value is the server's own (the

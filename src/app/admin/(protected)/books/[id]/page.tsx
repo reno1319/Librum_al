@@ -115,6 +115,8 @@ type AdminBook = {
   // BD3 patch 4 (audit r1, M1): the "Autori origjinal", which readers
   // see as the book's byline. null = none.
   original_author: string | null;
+  // X19: the translated work's own title. null = none.
+  original_title: string | null;
   description: string;
   is_adult: boolean;
   pd_work_id: string | null;
@@ -213,7 +215,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, original_title, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -575,6 +577,13 @@ export default async function AdminBookPage({
               <p className="mt-0.5 text-sm">
                 <span className="font-semibold">Original author (readers see this as the byline):</span>{" "}
                 {book.original_author}
+              </p>
+            )}
+            {/* X19 (x19s1 b): shows at once on a live book, so staff see
+                the current one here (it never waits under What changed). */}
+            {book.original_title && (
+              <p className="mt-0.5 text-sm">
+                <span className="font-semibold">Original title:</span> {book.original_title}
               </p>
             )}
             {(book.status === "published" || isPreorder) && (

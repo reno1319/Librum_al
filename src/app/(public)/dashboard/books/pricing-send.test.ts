@@ -139,6 +139,8 @@ let onPublishRead: (() => void) | null = null;
 const PUBLISH_READ = "status, price_all, published_at, description, file_path, cover_path";
 // BD15 P5b-2: a live book's waiting changes (none by default).
 let pendingRead: { data: unknown; error: unknown } = { data: null, error: null };
+// X19: the Translator credit read (x19q2 a).
+let contributorsRead: { data: unknown; error: unknown } = { data: [], error: null };
 
 function query(table: string, via: "session" | "writer" = "session") {
   const filters: Filter[] = [];
@@ -154,6 +156,7 @@ function query(table: string, via: "session" | "writer" = "session") {
       if (table === "books") return { data: { ...book }, error: null };
       if (table === "pen_names") return penNameRead;
       if (table === "book_pending_changes") return pendingRead;
+      if (table === "book_contributors") return contributorsRead;
       return { data: null, error: null };
     }
     dbWrites.push({ table, op, payload, filters: [...filters], via });
@@ -320,6 +323,7 @@ beforeEach(async () => {
   paidPublishing = true;
   staffEmails.length = 0;
   pendingRead = { data: null, error: null };
+  contributorsRead = { data: [], error: null };
   recoveryActive = false;
   onPublishRead = null;
   preorderFeature = false;
@@ -472,6 +476,14 @@ describe("saveBookPricing: Ruaj draftin", () => {
 });
 
 describe("saveBookPricing: Dërgo për shqyrtim", () => {
+  it("X19: a translated draft with its original title is sent", async () => {
+    contributorsRead = { data: [{ id: "c1" }], error: null };
+    Object.assign(book, { original_title: "The Last Star" });
+    const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
+    expect(target).toBe(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
+    expect(bookReviewsDoubleState.calls.filter((c) => c.fn === "requestBookReview")).toHaveLength(1);
+  });
+
   it("sends a complete draft for review: price, then the ticks recorded, then the request", async () => {
     const target = await run(saveBookPricing(BOOK_ID, form(SEND)));
     expect(target).toBe(`/dashboard?success=${encodeURIComponent(SENT_FOR_REVIEW_MESSAGE)}`);
@@ -513,6 +525,10 @@ describe("saveBookPricing: Dërgo për shqyrtim", () => {
     ["no book type", () => (book.book_type = null)],
     ["no description", () => (book.description = "")],
     ["no rights choice", () => (rightsState = { kind: "none" })],
+    // X19 (x19q2 a): a credited Translator needs the original title; an
+    // unreadable credits list counts as one.
+    ["a translator but no original title", () => (contributorsRead = { data: [{ id: "c1" }], error: null })],
+    ["unreadable credits and no original title", () => (contributorsRead = { data: null, error: { code: "XX000" } })],
   ])("%s: not ready, nothing recorded or requested", async (_l, setUp) => {
     setUp();
     expect(await run(saveBookPricing(BOOK_ID, form(SEND)))).toBe(err(SEND_INCOMPLETE_MESSAGE));

@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import type { RightsBasis } from "@/lib/types";
-import { resolveTranslatorLine, resolveTranslatorNames, TRANSLATED_BY } from "@/lib/book-byline";
+import { ORIGINAL_TITLE_LABEL, resolveTranslatorLine, resolveTranslatorNames, TRANSLATED_BY } from "@/lib/book-byline";
 import { blankCommentsAndCdata, firstMatchAtTag, tagMatches } from "@/lib/markup-scan";
 
 // BD3 + BD4 + BD4b (Renato 1 Nov 2026: 1a 2a 3a 4a 5a, wording "ok"):
@@ -22,6 +22,9 @@ export type LibrumFrontPage = {
   // is the byline, and "Përktheu:" names the translators (else the pen
   // name) right under it.
   originalAuthor: string | null;
+  // X19 (pictures x19p1): the translated work's own title, or null; one
+  // line under the byline, before the © lines.
+  originalTitle?: string | null;
   // 4a: the original publication year when the author gave one,
   // otherwise the year the book first went up on Librum.
   copyrightYear: number;
@@ -163,6 +166,7 @@ export function frontPageBody(p: LibrumFrontPage): string {
   } else {
     out.push(line(p.penName, "author"));
   }
+  if (p.originalTitle && clean(p.originalTitle)) out.push(line(`${ORIGINAL_TITLE_LABEL}: ${clean(p.originalTitle)}`));
   if (p.rights === "public_domain") {
     // 1a: the author declared the whole book, any translation included,
     // public domain: no ©, no "all rights reserved", no copy ban.
