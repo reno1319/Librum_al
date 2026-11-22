@@ -65,11 +65,11 @@ export function applyFormat(text: string, start: number, end: number, kind: Form
   }
 }
 
-function escapeAlt(value: string): string {
+export function escapeAlt(value: string): string {
   return value.replace(/[\\[\]]/g, (c) => `\\${c}`);
 }
 
-function escapeTitle(value: string): string {
+export function escapeTitle(value: string): string {
   return value.replace(/["\\]/g, (c) => `\\${c}`);
 }
 

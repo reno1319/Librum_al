@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BlogEditorForm } from "./blog-editor-form";
-import { ContentMarkdownInput } from "./blog-content-editor";
+import { BlogContentEditor } from "./blog-content-editor";
 
 // Patch B: the page passes the categories from blog_categories, in
 // their set order, Editorial left out.
@@ -15,39 +15,38 @@ const TEST_CATEGORIES = [
   { value: "vleresime", label: "Vlerësimet & Rekomandimet" },
 ];
 
-// QA H4: saving from Preview must still submit the article body.
-// e1 (2026-11-19): the textarea is always mounted (on a computer the
-// preview sits beside it), so exactly one control named contentMarkdown
-// exists in either mode and it carries the typed text. In Preview it is
-// only hidden (phones) and not `required`, so a hidden invalid field
-// can never silently block a save.
+// ed3 a (2026-11-22): one editing box, no preview box beside it. The
+// article goes to the server in exactly one hidden field named
+// contentMarkdown, carrying the Markdown exactly as given (staff who
+// change nothing send it back unchanged). A hidden field is never
+// `required`, so it can never silently block a save; the server still
+// refuses an empty article ("Content is required.").
+describe("BlogContentEditor", () => {
+  function render(contentMarkdown: string) {
+    return renderToStaticMarkup(
+      createElement(BlogContentEditor, { staffUserId: "s", contentMarkdown, onChange: () => {} }),
+    );
+  }
 
-function render(showPreview: boolean, contentMarkdown: string) {
-  return renderToStaticMarkup(
-    createElement(ContentMarkdownInput, { showPreview, contentMarkdown, onChange: () => {} }),
-  );
-}
-
-function countNamed(html: string) {
-  return (html.match(/name="contentMarkdown"/g) ?? []).length;
-}
-
-describe("ContentMarkdownInput", () => {
-  it("in Preview, keeps the body in the (hidden on phones) textarea and shows the rendered preview", () => {
-    const html = render(true, "Teksti **im**");
-    expect(countNamed(html)).toBe(1);
-    expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*class="hidden lg:block/);
-    expect(html).not.toMatch(/<textarea[^>]*required/);
-    expect(html).toContain("<strong");
+  it("sends the article in one hidden contentMarkdown field, unchanged", () => {
+    const html = render('Teksti **im** & "yt"');
+    expect((html.match(/name="contentMarkdown"/g) ?? []).length).toBe(1);
+    expect(html).toContain('<input type="hidden" name="contentMarkdown" value="Teksti **im** &amp; &quot;yt&quot;"/>');
+    expect(html).not.toMatch(/required/);
   });
 
-  it("while editing, the textarea is visible and required; the preview shows beside it on a computer", () => {
-    const html = render(false, "Body text");
-    expect(countNamed(html)).toBe(1);
-    expect(html).toMatch(/<textarea[^>]*name="contentMarkdown"[^>]*required/);
-    expect(html).toContain(">Body text</textarea>");
-    expect(html).toMatch(/aria-label="Preview" class="hidden lg:block/);
-    expect(html).not.toContain('type="hidden"');
+  it("has no preview box and no Write/Preview switch", () => {
+    const html = render("Body");
+    expect(html).not.toContain('aria-label="Preview"');
+    expect(html).not.toContain("Write or preview");
+    expect(html).not.toContain("<textarea");
+  });
+
+  it("keeps the same buttons as before", () => {
+    const html = render("Body");
+    for (const title of ["Bold", "Italic", "Heading", "Small heading", "Bulleted list", "Numbered list", "Quote", "Link", "Image"]) {
+      expect(html).toContain(`title="${title}"`);
+    }
   });
 });
 

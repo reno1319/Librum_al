@@ -254,9 +254,13 @@ export function findDisallowedImageUrls(
   allowedPrefix: string,
   previousMarkdown: string | null,
 ): string[] {
-  const previous = new Set(previousMarkdown ? markdownImageUrls(previousMarkdown) : []);
+  // img1/img3 (2026-11-22): a picture's size and position are saved
+  // after "#" in its address, so only the part before "#" is checked.
+  // An old outside picture keeps passing when staff only resize it.
+  const file = (url: string) => url.split("#")[0];
+  const previous = new Set(previousMarkdown ? markdownImageUrls(previousMarkdown).map(file) : []);
   return markdownImageUrls(markdown).filter(
-    (url) => !(url.startsWith(allowedPrefix) && !url.includes("..")) && !previous.has(url),
+    (url) => !(file(url).startsWith(allowedPrefix) && !file(url).includes("..")) && !previous.has(file(url)),
   );
 }
 
