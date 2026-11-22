@@ -210,7 +210,7 @@ export function BlogEditorForm({
 
       <BlogCoverField staffUserId={staffUserId} existingCoverUrl={initialValues?.coverImageUrl ?? undefined} />
 
-      <div data-wide className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1">
         <BlogContentEditor staffUserId={staffUserId} contentMarkdown={contentMarkdown} onChange={setContentMarkdown} />
         <span className="text-sm text-muted">
           {contentMarkdown.length.toLocaleString()}/{CONTENT_MARKDOWN_MAX_LENGTH.toLocaleString()} characters

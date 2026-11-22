@@ -16,6 +16,12 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "@tiptap/core": "3.33.0",
+    "@tiptap/extension-image": "3.33.0",
+    "@tiptap/markdown": "3.33.0",
+    "@tiptap/pm": "3.33.0",
+    "@tiptap/react": "3.33.0",
+    "@tiptap/starter-kit": "3.33.0",
     "@vercel/analytics": "^2.0.1",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.1",
