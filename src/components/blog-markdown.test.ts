@@ -52,3 +52,52 @@ describe("BlogMarkdown image captions", () => {
     expect(html).not.toContain("<figure");
   });
 });
+
+// img1/img3 (2026-11-22): size and position after "#" in the address.
+describe("BlogMarkdown picture size and position", () => {
+  it("a Half Left picture wraps from 640 px up, and loads the address without #", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { BlogMarkdown } = await import("./blog-markdown");
+    const html = renderToStaticMarkup(
+      createElement(BlogMarkdown, { markdown: '![K](https://x.test/a.jpg#size=half&pos=left "K")\n\n- a' }),
+    );
+    expect(html).toContain('src="https://x.test/a.jpg"');
+    expect(html).not.toContain("#size");
+    expect(html).toContain("sm:float-left");
+    expect(html).toContain("sm:w-1/2");
+    expect(html).toContain('<div class="flow-root [&amp;_ul]:flow-root [&amp;_ol]:flow-root [&amp;_blockquote]:flow-root text-foreground">');
+  });
+
+  it("an article with no Left/Right picture keeps today's spacing exactly (audit F1)", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { BlogMarkdown } = await import("./blog-markdown");
+    for (const md of [
+      "Para\n\n> quote\n\n- a\n\n- b",
+      "![K](https://x.test/a.jpg#size=half&pos=centre)\n\nText",
+      "![K](https://x.test/a.jpg#size=small)\n\nText",
+      "[pos=left](https://x.test/#pos=leftover)",
+    ]) {
+      const html = renderToStaticMarkup(createElement(BlogMarkdown, { markdown: md }));
+      expect(html).toContain('<div class="text-foreground">');
+      expect(html).not.toContain("flow-root");
+    }
+  });
+
+  it("finds a Left or Right picture however the # part is written", async () => {
+    const { hasWrappedPicture } = await import("./blog-markdown");
+    expect(hasWrappedPicture("![](https://x.test/a.jpg#size=half&pos=left)")).toBe(true);
+    expect(hasWrappedPicture('![](https://x.test/a.jpg#pos=right&size=small "K")')).toBe(true);
+    expect(hasWrappedPicture("![](https://x.test/a.jpg#size=half&pos=centre)")).toBe(false);
+    expect(hasWrappedPicture("no pictures")).toBe(false);
+  });
+
+  it("an old picture with no # looks as before: full width", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { BlogMarkdown } = await import("./blog-markdown");
+    const html = renderToStaticMarkup(createElement(BlogMarkdown, { markdown: "![](https://x.test/b.jpg)" }));
+    expect(html).toContain('<span class="mt-4 block clear-both"><img class="block h-auto w-full rounded-card" src="https://x.test/b.jpg" alt=""/></span>');
+  });
+});

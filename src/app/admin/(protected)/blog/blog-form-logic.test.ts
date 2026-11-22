@@ -314,6 +314,16 @@ describe("markdownImageUrls / findDisallowedImageUrls (e2)", () => {
     expect(markdownImageUrls("`![a](https://x.test/c.png)`\n\n    ![b](https://x.test/d.png)")).toEqual([]);
     expect(findDisallowedImageUrls("![a [b]](https://evil.test/x.png)", BLOG, null)).toEqual(["https://evil.test/x.png"]);
   });
+  it("checks only the part before # (img1/img3 size and position, 2026-11-22)", () => {
+    expect(findDisallowedImageUrls(`![x](${BLOG}inline/a.jpg#size=half&pos=left)`, BLOG, null)).toEqual([]);
+    // An old outside picture may be resized without being refused...
+    expect(findDisallowedImageUrls("![x](https://old.test/a.jpg#size=small&pos=right)", BLOG, "![x](https://old.test/a.jpg)")).toEqual([]);
+    // ...but a new outside one is still refused, with or without #.
+    expect(findDisallowedImageUrls("![x](https://new.test/b.jpg#size=half&pos=left)", BLOG, null)).toEqual(["https://new.test/b.jpg#size=half&pos=left"]);
+    expect(findDisallowedImageUrls(`![x](${BLOG}../avatars/a.jpg#size=half)`, BLOG, null)).toEqual([`${BLOG}../avatars/a.jpg#size=half`]);
+    // A "#" cannot sneak an outside address past the start check.
+    expect(findDisallowedImageUrls(`![x](https://evil.test/x.png#${BLOG})`, BLOG, null)).toEqual([`https://evil.test/x.png#${BLOG}`]);
+  });
 });
 
 describe("mapBlogRpcError: pin and schedule messages", () => {
