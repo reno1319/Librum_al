@@ -238,6 +238,14 @@ describe("BlogArticlePage", () => {
     expect(jsonLd.publisher).toEqual({ "@type": "Organization", name: "Librum" });
   });
 
+  it("au3: a typed Written by name is the JSON-LD author (a Person), Editorial or not", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, is_editorial: true, author_name: "Arben Hoxha" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const jsonLd = JSON.parse(findScriptHtml(page)!.replace(/\\u003c/g, "<"));
+    expect(jsonLd.author).toEqual({ "@type": "Person", name: "Arben Hoxha" });
+  });
+
   it("safely escapes a literal '<' in article text so the JSON-LD script tag can never be prematurely closed", async () => {
     mockMaybeSingle.mockResolvedValueOnce({
       data: { ...basePost, excerpt: "Careful with </script><script>alert(1)</script> tags." },
@@ -320,6 +328,25 @@ describe("BlogArticlePage", () => {
     expect(text).toContain("1 janar 2026 · ");
     expect(hrefs).toContain("/signup?role=author");
     expect(hrefs).not.toContain("/librari");
+  });
+
+  it("au2: a typed Written by name shows as the byline on a normal post", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "zeja", author_name: "Arben Hoxha" } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    expect(allText(page)).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
+  });
+
+  it("au2: on an Editorial post the typed name replaces the Nga Librum byline; the yellow tag stays", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: { ...basePost, category: "kultura", is_editorial: true, author_name: "Arben Hoxha" },
+    });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const text = allText(page);
+    expect(text).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
+    expect(text).not.toContain("Nga Librum · ");
+    expect(text).toContain("Nga Librum");
   });
 
   it("SOCIAL (soc2): the share row follows the article, with the article's full address and title", async () => {

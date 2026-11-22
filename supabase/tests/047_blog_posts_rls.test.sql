@@ -156,8 +156,8 @@ do $$
 declare
   func record;
   sigs text[] := array[
-    'create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[])',
-    'update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[])',
+    'create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[],text)',
+    'update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[],text)',
     'publish_blog_post(uuid)',
     'unpublish_blog_post(uuid)',
     'delete_blog_post(uuid)'

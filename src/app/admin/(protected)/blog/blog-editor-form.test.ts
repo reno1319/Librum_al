@@ -85,6 +85,7 @@ describe("BlogEditorForm category select", () => {
         category: "kultura",
         isEditorial: false,
         keywords: [],
+        authorName: "",
         featured: false,
         seoTitle: "",
         seoDescription: "",
@@ -112,6 +113,7 @@ describe("BlogEditorForm category select", () => {
       category: "tregu",
       isEditorial: true,
       keywords: ["vetë-botim", "e-libër"],
+      authorName: "Arben Hoxha",
       featured: false,
       seoTitle: "",
       seoDescription: "",
@@ -123,10 +125,36 @@ describe("BlogEditorForm category select", () => {
     expect(html).toContain("2/10");
   });
 
+  it("au1: the Written by box sits between the Editorial tick and Keywords, filled from the article", () => {
+    const html = renderForm({
+      title: "t",
+      slug: "t",
+      excerpt: "e",
+      category: "tregu",
+      isEditorial: false,
+      keywords: [],
+      authorName: "Arben Hoxha",
+      featured: false,
+      seoTitle: "",
+      seoDescription: "",
+      contentMarkdown: "b",
+      coverImageUrl: null,
+    });
+    expect(html).toMatch(/<input(?=[^>]*name="authorName")(?=[^>]*value="Arben Hoxha")[^>]*>/);
+    expect(html).toContain("Written by (optional)");
+    expect(html).toContain("Nga Arben Hoxha");
+    const tick = html.indexOf('name="isEditorial"');
+    const box = html.indexOf('name="authorName"');
+    expect(tick).toBeGreaterThan(-1);
+    expect(box).toBeGreaterThan(tick);
+    expect(html.indexOf('name="keywords"')).toBeGreaterThan(box);
+  });
+
   it("a new article: tick off, keywords empty", () => {
     const html = renderForm();
     expect(html).toMatch(/<input type="checkbox"[^>]*name="isEditorial"\/>/);
     expect(html).toMatch(/<input type="text"[^>]*name="keywords" value=""\/>/);
     expect(html).toContain("0/10");
+    expect(html).toMatch(/<input(?=[^>]*name="authorName")(?=[^>]*value="")[^>]*>/);
   });
 });

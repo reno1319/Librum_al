@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 283 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 285 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -69,6 +69,8 @@ begin;
 create temp table grant_contract_expected (kind text not null, line text not null) on commit drop;
 
 insert into grant_contract_expected (kind, line) values
+('col','blog_posts.author_name | anon | SELECT'),
+('col','blog_posts.author_name | authenticated | SELECT'),
 ('col','blog_posts.category | anon | SELECT'),
 ('col','blog_posts.category | authenticated | SELECT'),
 ('col','blog_posts.content_markdown | anon | SELECT'),
@@ -383,8 +385,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 283 then
-    raise exception 'FAIL: part1: the snapshot must hold 283 rows, holds %', v_expected;
+  if v_expected <> 285 then
+    raise exception 'FAIL: part1: the snapshot must hold 285 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

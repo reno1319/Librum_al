@@ -179,7 +179,7 @@ select pg_temp.assert((select count(*) from unnest(array[
     'public.clear_expired_book_reservations()',
     'public.clear_expired_reader_holds()',
     'public.complete_refund_issuance_attempt(uuid,text,text)',
-    'public.create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[])',
+    'public.create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[],text)',
     'public.create_book_checkout_intent(uuid,text,boolean,uuid)',
     'public.create_bundle_checkout_snapshot(uuid,text,text,integer)',
     'public.delete_blog_post(uuid)',
@@ -219,7 +219,7 @@ select pg_temp.assert((select count(*) from unnest(array[
     'public.staff_profile_display_names(uuid[])',
     'public.staff_remove_pen_name_links(uuid)',
     'public.unpublish_blog_post(uuid)',
-    'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[])',
+    'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[],text)',
     'public.user_owns_book(uuid)'
   ]) as f where has_function_privilege('service_role', f::regprocedure, 'EXECUTE')) = 53,
   'part2: service_role holds EXECUTE on all 53 functions');
