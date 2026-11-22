@@ -1,5 +1,6 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import { blogImageLayoutClass, splitBlogImageSrc } from "@/lib/blog-image-layout";
+import { isAllowedBlogHref, opensInNewTab } from "@/lib/blog-links";
 
 // LIBRUM 2.0 BLOG-1C: the one shared Markdown render path for both the
 // admin preview page and the editor's own live preview -- so staff
@@ -27,7 +28,24 @@ const COMPONENTS: Components = {
   h2: (props) => <h2 className="mt-6 font-serif text-xl font-normal text-foreground" {...props} />,
   h3: (props) => <h3 className="mt-4 font-serif text-lg font-normal text-foreground" {...props} />,
   p: (props) => <p className="mt-4 leading-relaxed text-foreground/90" {...props} />,
-  a: (props) => <a className="text-primary underline underline-offset-2" {...props} />,
+  // lk3 a (Renato 2026-11-22): a link to another website opens in a new
+  // tab (rel noopener noreferrer); a Librum or email link stays in the
+  // same tab (audit LINK-r1 F2). A link outside the allowed list
+  // (src/lib/blog-links.ts, e.g. "//other-site" or tel:) is shown as
+  // plain words, not a link (F1).
+  a: ({ node: _node, href, children, ...props }) => {
+    const target = typeof href === "string" ? href : "";
+    if (!isAllowedBlogHref(target)) return <>{children}</>;
+    return opensInNewTab(target) ? (
+      <a className="text-primary underline underline-offset-2" {...props} href={target} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ) : (
+      <a className="text-primary underline underline-offset-2" {...props} href={target}>
+        {children}
+      </a>
+    );
+  },
   ul: (props) => <ul className="mt-4 list-disc space-y-1 pl-6" {...props} />,
   ol: (props) => <ol className="mt-4 list-decimal space-y-1 pl-6" {...props} />,
   blockquote: (props) => (

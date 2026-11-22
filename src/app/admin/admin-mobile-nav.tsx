@@ -77,6 +77,14 @@ export function AdminMobileNav({
               </div>
             );
           })}
+          <div className="mt-1 border-t border-border pt-1">
+            <Link
+              href="/"
+              className="focus-ring flex min-h-11 items-center border-l-[3px] border-transparent px-3 text-base font-medium text-foreground hover:bg-surface-hover"
+            >
+              Visit site
+            </Link>
+          </div>
           <form action={logoutAction} className="mt-1 border-t border-border pt-1">
             <button
               type="submit"
