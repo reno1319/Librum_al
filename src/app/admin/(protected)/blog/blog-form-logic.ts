@@ -19,6 +19,11 @@ export const SEO_DESCRIPTION_MAX_LENGTH = 160;
 // post already live, update_blog_post()); a draft may have none.
 export const KEYWORDS_MAX_COUNT = 10;
 export const KEYWORD_MAX_LENGTH = 40;
+// au1 a (Renato 2026-11-22): an optional "Written by" name, any text
+// staff type (not an account). Empty = no name. Mirrors the CHECK of
+// migration 20261122100000: trimmed, 1..80 characters, no control
+// characters.
+export const AUTHOR_NAME_MAX_LENGTH = 80;
 
 // "vetë-botim,  Vetë-botim , self publishing,," -> ["vetë-botim",
 // "self publishing"]: split on commas, trim, inner spaces collapsed,
@@ -45,6 +50,7 @@ export type BlogPostFieldInput = {
   featured: boolean;
   isEditorial: boolean;
   keywords: string;
+  authorName: string;
   seoTitle: string;
   seoDescription: string;
 };
@@ -58,6 +64,7 @@ export type ValidatedBlogPostFields = {
   featured: boolean;
   isEditorial: boolean;
   keywords: string[];
+  authorName: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
 };
@@ -119,6 +126,23 @@ export function validateBlogPostFields(input: BlogPostFieldInput): BlogValidatio
     return { ok: false, error: `Each keyword must be ${KEYWORD_MAX_LENGTH} characters or fewer.` };
   }
 
+  const authorName = input.authorName.trim();
+  // Counted in characters, like char_length() (an emoji is one, not two).
+  if (Array.from(authorName).length > AUTHOR_NAME_MAX_LENGTH) {
+    return { ok: false, error: `Written by must be ${AUTHOR_NAME_MAX_LENGTH} characters or fewer.` };
+  }
+  // C0/C1 control characters and line/paragraph separators (the
+  // database refuses these too).
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(authorName)) {
+    return { ok: false, error: "Written by must be on one line." };
+  }
+  // Audit r1 F2: invisible or direction-changing characters (zero-width
+  // space, right-to-left override, ...) could make a name look empty or
+  // reversed. The app refuses them; the database check does not.
+  if (/\p{Cf}/u.test(authorName)) {
+    return { ok: false, error: "Written by can't contain invisible characters." };
+  }
+
   const seoTitle = input.seoTitle.trim();
   if (seoTitle.length > SEO_TITLE_MAX_LENGTH) {
     return { ok: false, error: `SEO title must be ${SEO_TITLE_MAX_LENGTH} characters or fewer.` };
@@ -143,6 +167,7 @@ export function validateBlogPostFields(input: BlogPostFieldInput): BlogValidatio
       featured: input.featured,
       isEditorial: input.isEditorial,
       keywords,
+      authorName: authorName || null,
       seoTitle: seoTitle || null,
       seoDescription: seoDescription || null,
     },
@@ -188,6 +213,7 @@ export function mapBlogRpcError(error: { message?: string; code?: string } | nul
       "A live article needs at least one keyword. Add one in Keywords and save.",
     "too many keywords": `Use at most ${KEYWORDS_MAX_COUNT} keywords.`,
     "each keyword must be between 1 and 40 characters": `Each keyword must be ${KEYWORD_MAX_LENGTH} characters or fewer.`,
+    "author_name must be 80 characters or fewer, with no control characters": `Written by must be ${AUTHOR_NAME_MAX_LENGTH} characters or fewer, on one line.`,
     "only a draft post can be deleted, or it does not exist":
       "Only draft articles can be deleted. Unpublish this article first.",
     "the go-live time must be in the future": "Pick a go-live time at least a few minutes from now.",
@@ -254,9 +280,13 @@ export function findDisallowedImageUrls(
   allowedPrefix: string,
   previousMarkdown: string | null,
 ): string[] {
-  const previous = new Set(previousMarkdown ? markdownImageUrls(previousMarkdown) : []);
+  // img1/img3 (2026-11-22): a picture's size and position are saved
+  // after "#" in its address, so only the part before "#" is checked.
+  // An old outside picture keeps passing when staff only resize it.
+  const file = (url: string) => url.split("#")[0];
+  const previous = new Set(previousMarkdown ? markdownImageUrls(previousMarkdown).map(file) : []);
   return markdownImageUrls(markdown).filter(
-    (url) => !(url.startsWith(allowedPrefix) && !url.includes("..")) && !previous.has(url),
+    (url) => !(file(url).startsWith(allowedPrefix) && !file(url).includes("..")) && !previous.has(file(url)),
   );
 }
 

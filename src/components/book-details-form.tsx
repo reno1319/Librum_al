@@ -9,7 +9,13 @@ import { BOOK_TYPES, BOOK_TYPE_LABEL } from "@/lib/book-types";
 import { LANGUAGES } from "@/lib/languages";
 import { CONTRIBUTOR_ROLES, contributorRoleLabel } from "@/lib/contributor-roles";
 import { RIGHTS_BASES, RIGHTS_STATEMENTS } from "@/lib/rights-statements";
-import { ORIGINAL_AUTHOR_HINT, ORIGINAL_AUTHOR_MAX_LENGTH } from "@/lib/book-byline";
+import {
+  ORIGINAL_AUTHOR_HINT,
+  ORIGINAL_AUTHOR_MAX_LENGTH,
+  ORIGINAL_TITLE_HINT,
+  ORIGINAL_TITLE_LABEL,
+  ORIGINAL_TITLE_MAX_LENGTH,
+} from "@/lib/book-byline";
 import {
   CHILDREN_CATEGORIES,
   CONTRIBUTOR_NAME_MAX_LENGTH,
@@ -72,6 +78,7 @@ export type DetailsFormValues = {
   contributors: { id: string; name: string; role: string }[];
   rightsBasis: RightsBasis | "";
   originalAuthor: string;
+  originalTitle: string;
 };
 
 export type EditorPenName = { id: string; name: string; is_default: boolean };
@@ -445,6 +452,25 @@ export function BookDetailsForm({
             {live && ` ${LIVE_REVIEW_FIELD_HINT}`}
           </span>
           <FieldError id="details-originalAuthor-error" message={err("originalAuthor")} />
+        </label>
+        {/* X19 (x19q2 a, x19s1 b; pictures x19p1): no "opsional" tag, the
+            hint says when it is required; on a live book it shows at once,
+            so it carries no review hint. */}
+        <label className={EDITOR_FIELD_CLASSES}>
+          <span className={EDITOR_LABEL_CLASSES}>{ORIGINAL_TITLE_LABEL}</span>
+          <input
+            name="originalTitle"
+            data-field="originalTitle"
+            type="text"
+            maxLength={ORIGINAL_TITLE_MAX_LENGTH}
+            defaultValue={initial.originalTitle}
+            aria-describedby={describe("originalTitle", "details-originalTitle-hint")}
+            className={editorControlClassesFor(!!err("originalTitle"))}
+          />
+          <span id="details-originalTitle-hint" className={EDITOR_HINT_CLASSES}>
+            {ORIGINAL_TITLE_HINT}
+          </span>
+          <FieldError id="details-originalTitle-error" message={err("originalTitle")} />
         </label>
       </Section>
 

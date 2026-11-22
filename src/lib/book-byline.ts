@@ -30,6 +30,13 @@ export const ORIGINAL_AUTHOR_HINT = "Vetëm nëse libri është përkthim.";
 // The Edit page has no live check, so it says the rule up front.
 export const ORIGINAL_AUTHOR_EDIT_NOTE = "E detyrueshme për një vepër në domenin publik.";
 
+// X19 (Renato 11-21, x19q2 a; pictures x19p1 ok): the translated work's
+// own title. Required once a Translator is in the credits.
+export const ORIGINAL_TITLE_LABEL = "Titulli origjinal";
+export const ORIGINAL_TITLE_MAX_LENGTH = 300;
+export const ORIGINAL_TITLE_HINT =
+  "Titulli i veprës në gjuhën e saj. I detyrueshëm kur te kontribuesit keni shtuar një përkthyes.";
+
 // Audit r1 (L1): any run of whitespace -- line and paragraph separators
 // (U+2028/9) included, which some database locales count as control
 // characters -- becomes one space; C0/C1 controls and invisible format

@@ -19,7 +19,13 @@ import {
 import { LIBRUM_MADE_EBOOK_METADATA, readLibrumMadeMarker, syncCoverIntoLibrumEbook } from "@/lib/ebook-cover-sync";
 import { withEbookCoverWarning } from "@/lib/ebook-cover-notice";
 import { readLibrumEbookCover, restampLibrumEpubMetadata } from "@/lib/epub-cover";
-import { validateEpubStructure, type EpubValidationResult } from "@/lib/epub-validation";
+import {
+  EPUB_PICTURES_TOO_LARGE_MESSAGE,
+  EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE,
+  EPUB_TEXT_TOO_LARGE_MESSAGE,
+  validateEpubStructure,
+  type EpubValidationResult,
+} from "@/lib/epub-validation";
 import { recordManuscriptWords } from "@/lib/page-estimate";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
@@ -292,6 +298,12 @@ function epubValidationErrorMessage(
     case "too_large_uncompressed":
     case "entry_too_large":
       return "EPUB-i është shumë i madh ose ka shumë skedarë.";
+    case "text_too_large":
+      return EPUB_TEXT_TOO_LARGE_MESSAGE;
+    case "pictures_too_large":
+      return EPUB_PICTURES_TOO_LARGE_MESSAGE;
+    case "reader_output_too_large":
+      return EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE;
     case "encrypted_or_drm":
       return "Ky EPUB përdor enkriptim/DRM që Librum nuk e mbështet.";
     default:
@@ -1206,6 +1218,23 @@ async function restampLibrumEbookForSend({
 // then request_book_review() sends the waiting version (LB494 nothing to
 // send, LB493 18+ beside a children/teen category, LB489, LB460). The
 // book stays live and is read-only while in review (Q2 a).
+// X19 (x19q2 a): whether the book's credits name a Translator (then the
+// original title is required at send). null when unreadable; the callers
+// treat that as "yes", so an unreadable read never skips the rule.
+async function hasTranslatorCredit(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  bookId: string,
+): Promise<boolean | null> {
+  const { data, error } = await supabase
+    .from("book_contributors")
+    .select("id")
+    .eq("book_id", bookId)
+    .eq("role", "Translator")
+    .limit(1);
+  if (error) return null;
+  return (data ?? []).length > 0;
+}
+
 async function sendLiveBookChanges({
   supabase,
   userId,
@@ -1227,6 +1256,7 @@ async function sendLiveBookChanges({
     description: string | null;
     is_adult: boolean;
     original_author: string | null;
+    original_title: string | null;
   };
   rightsBasis: RightsBasis | null;
   priceAll: number;
@@ -1257,6 +1287,9 @@ async function sendLiveBookChanges({
     description: working.description,
     rightsBasis,
     originalAuthor: working.originalAuthor,
+    // X19 (x19s1 b): the original title is no review value; the live one.
+    originalTitle: existing.original_title,
+    hasTranslator: (await hasTranslatorCredit(supabase, existing.id)) !== false,
   });
   // BD16 P2: a pre-order may send its other changes before the final
   // manuscript (request_book_review allows it while it has none).
@@ -1340,7 +1373,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
 
   const { data: existing, error: existingError } = await supabase
     .from("books")
-    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, book_type, categories, original_author, is_adult")
+    .select("id, author_id, status, title, pen_name_id, price_all, file_path, cover_path, description, book_type, categories, original_author, original_title, is_adult")
     .eq("id", bookId)
     .eq("author_id", user.id)
     .maybeSingle<{
@@ -1356,6 +1389,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       book_type: string | null;
       categories: string[] | null;
       original_author: string | null;
+      original_title: string | null;
       is_adult: boolean;
     }>();
   if (existingError || !existing || existing.id !== bookId || existing.author_id !== user.id) {
@@ -1535,6 +1569,8 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
     description: existing.description,
     rightsBasis,
     originalAuthor: existing.original_author,
+    originalTitle: existing.original_title,
+    hasTranslator: (await hasTranslatorCredit(supabase, existing.id)) !== false,
   });
   if (
     detailsMissing.length > 0 ||

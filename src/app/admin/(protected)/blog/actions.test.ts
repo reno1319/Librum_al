@@ -160,6 +160,28 @@ describe("createBlogPostAction", () => {
     );
   });
 
+  it("au1: passes the trimmed Written by name to create_blog_post, null when empty", async () => {
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
+    });
+    await expect(createBlogPostAction(validFormData({ authorName: " Arben Hoxha " }))).rejects.toBeInstanceOf(
+      RedirectSignal,
+    );
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "create_blog_post",
+      expect.objectContaining({ p_author_name: "Arben Hoxha" }),
+    );
+
+    currentMockSupabase = makeMockSupabase({
+      rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
+    });
+    await expect(createBlogPostAction(validFormData())).rejects.toBeInstanceOf(RedirectSignal);
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "create_blog_post",
+      expect.objectContaining({ p_author_name: null }),
+    );
+  });
+
   it("no tick and no keywords: p_is_editorial false, p_keywords [] (a draft may have none)", async () => {
     currentMockSupabase = makeMockSupabase({
       rpcResults: { create_blog_post: { data: "22222222-2222-4222-8222-222222222222", error: null } },
@@ -400,6 +422,32 @@ describe("updateBlogPostAction", () => {
     expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
       "update_blog_post",
       expect.objectContaining({ p_is_editorial: false, p_keywords: ["mision"] }),
+    );
+  });
+
+  it("au1: update_blog_post gets the name, or '' (remove) when the box is empty, never null (keep)", async () => {
+    currentMockSupabase = makeMockSupabase({
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null },
+      rpcResults: { update_blog_post: { data: null, error: null } },
+    });
+    await expect(
+      updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData({ authorName: "Drita Gjoni" })),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "update_blog_post",
+      expect.objectContaining({ p_author_name: "Drita Gjoni" }),
+    );
+
+    currentMockSupabase = makeMockSupabase({
+      existingRow: { id: "11111111-1111-4111-8111-111111111111", cover_image_path: null },
+      rpcResults: { update_blog_post: { data: null, error: null } },
+    });
+    await expect(
+      updateBlogPostAction("11111111-1111-4111-8111-111111111111", validFormData()),
+    ).rejects.toBeInstanceOf(RedirectSignal);
+    expect(currentMockSupabase._spies.rpc).toHaveBeenCalledWith(
+      "update_blog_post",
+      expect.objectContaining({ p_author_name: "" }),
     );
   });
 

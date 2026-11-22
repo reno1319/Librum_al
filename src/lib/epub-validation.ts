@@ -1,6 +1,13 @@
 import JSZip from "jszip";
+import { posix } from "node:path";
+import sharp from "sharp";
 import { preflightZipEntries } from "@/lib/zip-preflight";
 import { resolveArchivePath } from "@/lib/epub-archive-paths";
+// Imports this file back for EPUB_ZIP_PREFLIGHT_LIMITS, used only
+// inside its functions, so the cycle is safe.
+import { buildReaderContent, linkedStylesheetPaths, RASTER_TYPES, readerNavItem, readReaderSpine } from "@/lib/epub-reader";
+import { MAX_READ_RESPONSE_BYTES } from "@/lib/owned-reader";
+import { firstElementInner } from "@/lib/markup-scan";
 
 // container.xml is always a tiny, fixed-shape file (a few hundred bytes
 // in every real EPUB). This cap is still kept as an EXTRA, tighter,
@@ -95,7 +102,12 @@ export type EpubValidationResult =
         | "too_large_uncompressed"
         | "entry_too_large"
         | "encrypted_or_drm"
-        | "unsafe_path";
+        | "unsafe_path"
+        // PV1 1d (sz1 a): too slow for the reader to open.
+        | "text_too_large"
+        | "pictures_too_large"
+        // sz5 a: the buyer's online reader could not send it.
+        | "reader_output_too_large";
     };
 
 // Deliberately lightweight structural validation, not EPUBCheck-style
@@ -245,5 +257,128 @@ export async function validateEpubStructure(bytes: Buffer): Promise<EpubValidati
 
   if (!zip.file(resolvedOpfPath.path)) return { valid: false, reason: "missing_opf" };
 
+  const size = await checkReaderSize(zip);
+  if (!size.valid) return size;
+  return checkBuyerOutput(bytes);
+}
+
+// PV1 1d (Renato sz1 a, 21 Nov 2026): the reader re-reads the whole
+// book on every open (buyer, author preview, public sample), so a small
+// file holding a lot of text or many huge pictures took 16 s or more per
+// open, or ran the server out of memory. Measured on staging d1a9525:
+// about 0.2 s per MB of text and 0.16 s per 40-megapixel picture. These
+// two limits keep the worst book at a few seconds; real books are far
+// under them (his biggest manuscript: 0.14 MB of text, no pictures).
+export const EPUB_MAX_TEXT_BYTES = 10 * 1024 * 1024;
+export const EPUB_MAX_PICTURE_PIXELS = 1_000_000_000;
+// sz4 a: the least any one picture counts for.
+export const EPUB_MIN_PICTURE_PIXELS = 10_000_000;
+
+// The authors' messages (pictures r1 and r2), shared by the book
+// file upload and the Word upload.
+export const EPUB_TEXT_TOO_LARGE_MESSAGE =
+  "Teksti i këtij libri është shumë i madh për t'u hapur te lexuesit. Lejohen deri në 10 MB tekst gjithsej. Ndajeni librin në më shumë vëllime.";
+export const EPUB_READER_OUTPUT_TOO_LARGE_MESSAGE =
+  "Ky libër është shumë i madh për t'u lexuar online në Librum. Zvogëloni fotot ose ndajeni librin në më shumë vëllime.";
+export const EPUB_PICTURES_TOO_LARGE_MESSAGE =
+  "Ky libër ka shumë foto për t'u hapur te lexuesit. Lejohen deri në 100 foto, dhe një foto mbi 10 megapiksel numërohet si më shumë se një. Hiqni ose zvogëloni disa foto dhe ngarkojeni përsëri.";
+
+// The reader reads two things that grow with the book: the documents
+// of its spine (as text) and the pictures its manifest lists (each
+// re-encoded). Both are measured exactly as the reader finds them
+// (readReaderSpine), so a page or picture the reader would never read
+// costs nothing here, and one it would read cannot hide behind a name.
+async function checkReaderSize(zip: JSZip): Promise<EpubValidationResult> {
+  const found = await readReaderSpine(zip);
+  // A book the reader cannot open costs the reader nothing to open.
+  if (!found) return { valid: true };
+
+  // Text: every page of the spine, the stylesheets those pages link to,
+  // and the contents page, each counted once, as the reader reads each
+  // once. Measured by opening them the way the reader does (never by a
+  // name in the archive's own listing), stopping at the limit.
+  let textBytes = 0;
+  const counted = new Set<string>();
+  const addText = async (path: string): Promise<string | null> => {
+    if (counted.has(path)) return null;
+    counted.add(path);
+    const file = zip.file(path);
+    if (!file) return null;
+    let bytes: Buffer;
+    try {
+      bytes = await file.async("nodebuffer");
+    } catch {
+      return null;
+    }
+    textBytes += bytes.length;
+    return bytes.toString("utf8");
+  };
+  const tooMuchText = { valid: false, reason: "text_too_large" } as const;
+  const nav = readerNavItem(found.manifest);
+  if (nav?.path) await addText(nav.path);
+  if (textBytes > EPUB_MAX_TEXT_BYTES) return tooMuchText;
+  const stylesheets = new Set<string>();
+  for (const item of found.spine) {
+    const xml = await addText(item.path!);
+    if (textBytes > EPUB_MAX_TEXT_BYTES) return tooMuchText;
+    if (xml === null) continue;
+    const head = firstElementInner(xml, "head") ?? "";
+    for (const cssPath of linkedStylesheetPaths(head, posix.dirname(item.path!))) {
+      if (stylesheets.has(cssPath)) continue;
+      stylesheets.add(cssPath);
+      await addText(cssPath);
+      if (textBytes > EPUB_MAX_TEXT_BYTES) return tooMuchText;
+    }
+  }
+
+  // Pictures (sz4 a): every listed picture counts (not only the ones a
+  // page shows), at the size its own header states but never less than
+  // EPUB_MIN_PICTURE_PIXELS, because each picture also costs a fixed
+  // re-encode: 400 mid-size pictures (768 Mpx) took 23-30 s per buyer
+  // open (audit r1, HIGH-1). With the floor, at most about 100 pictures.
+  let pixels = 0;
+  for (const [path, item] of found.byPath) {
+    if (!RASTER_TYPES.has(item.mediaType)) continue;
+    const file = zip.file(path);
+    if (!file) continue;
+    let bytes: Buffer;
+    try {
+      bytes = await file.async("nodebuffer");
+    } catch {
+      continue;
+    }
+    pixels += Math.max(EPUB_MIN_PICTURE_PIXELS, await picturePixels(bytes));
+    if (pixels > EPUB_MAX_PICTURE_PIXELS) return { valid: false, reason: "pictures_too_large" };
+  }
   return { valid: true };
+}
+
+// sz5 a (audit r1, MEDIUM-1): the buyer's online reader
+// (/api/books/[id]/read) refuses an answer over MAX_READ_RESPONSE_BYTES,
+// and a book's output can be up to ~2.7x its text. So the book is built
+// once here exactly as for a buyer, and refused if that answer could
+// not be sent. Run only after checkReaderSize, which bounds its cost
+// (a few seconds at the very worst). The margin covers what the route
+// adds around the book: the title (at most 500 characters, escaped up
+// to 6 bytes each), the byline and the buyer's line.
+const BUYER_RESPONSE_MARGIN_BYTES = 16 * 1024;
+
+async function checkBuyerOutput(bytes: Buffer): Promise<EpubValidationResult> {
+  const content = await buildReaderContent(bytes, "owned");
+  // A book the reader cannot open costs the reader nothing to open.
+  if (!content.available) return { valid: true };
+  const size = Buffer.byteLength(JSON.stringify({ html: content.html, toc: content.toc }), "utf8");
+  if (size + BUYER_RESPONSE_MARGIN_BYTES > MAX_READ_RESPONSE_BYTES) {
+    return { valid: false, reason: "reader_output_too_large" };
+  }
+  return { valid: true };
+}
+
+async function picturePixels(bytes: Buffer): Promise<number> {
+  try {
+    const meta = await sharp(bytes, { limitInputPixels: false, animated: false }).metadata();
+    return meta.width && meta.height ? meta.width * meta.height : 0;
+  } catch {
+    return 0;
+  }
 }

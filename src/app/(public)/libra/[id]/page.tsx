@@ -57,6 +57,7 @@ import {
   resolveBookByline,
   resolveBookPenName,
   resolveOriginalAuthor,
+  ORIGINAL_TITLE_LABEL,
   resolveTranslatorLine,
 } from "@/lib/book-byline";
 import { PD_PREPARED_BY, readPdEditionRedirect, showsPreparedBy } from "@/lib/pd-editions";
@@ -1396,6 +1397,10 @@ export default async function BookDetailPage({
               {/* BD15 P8: the edition number, else the old free text. */}
               {editionValue(book) && (
                 <DetailRow label={EDITION_LABEL}>{editionValue(book)}</DetailRow>
+              )}
+              {/* X19 (pictures x19p1): the translated work's own title. */}
+              {book.original_title?.trim() && (
+                <DetailRow label={ORIGINAL_TITLE_LABEL}>{book.original_title}</DetailRow>
               )}
               {book.original_publication_date && (
                 <DetailRow label="Botuar për herë të parë">

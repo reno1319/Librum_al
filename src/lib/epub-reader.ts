@@ -255,7 +255,15 @@ const IMAGE_LIMITS: Record<ReaderMode, { count: number; bytes: number }> = {
   owned: { count: 200, bytes: 2_500_000 },
 };
 const MAX_SOURCE_PIXELS = 40_000_000;
-const RASTER_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+// PV1 1d r3 (audit LOW): libvips' operation cache kept every decoded
+// picture of a book alive until the open ended: 25 progressive JPEGs of
+// 40 Mpx peaked at +1.1 GB per open (and per upload check, which builds
+// the book once). Each picture here is decoded once and never again, so
+// the cache only costs memory: off, the same open peaks at about +0.2 GB
+// and is as fast. This is sharp's process-wide setting.
+sharp.cache(false);
+export const RASTER_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const CONTENT_TYPES = new Set(["application/xhtml+xml", "text/html"]);
 
 type ManifestItem = { id: string; href: string; path: string | null; mediaType: string; properties: string };
@@ -309,22 +317,26 @@ async function encodeImage(bytes: Buffer): Promise<string | null> {
 
 type Doc = { path: string; chunks: ReaderChunk[]; front: boolean };
 
-export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promise<ReaderContent> {
-  if (!preflightZipEntries(bytes, EPUB_ZIP_PREFLIGHT_LIMITS).ok) return { available: false };
-  let zip: JSZip;
-  try {
-    zip = await JSZip.loadAsync(bytes);
-  } catch {
-    return { available: false };
-  }
+// PV1 1d: the documents the reader reads as text, in reading order (the
+// book's spine), found exactly as buildReaderContent finds them. Shared
+// with the upload check (epub-validation.ts), so the size it measures is
+// the size every open reads. null: the reader cannot open the book.
+export type ReaderSpine = {
+  opf: string;
+  opfDir: string;
+  manifest: Map<string, ManifestItem>;
+  byPath: Map<string, ManifestItem>;
+  spine: ManifestItem[];
+};
 
+export async function readReaderSpine(zip: JSZip): Promise<ReaderSpine | null> {
   const container = await readText(zip, "META-INF/container.xml");
   const rootfile = container ? firstMatchAtTag(container, /<rootfile\b/gi, /<rootfile\b[^>]*\bfull-path\s*=\s*(["'])(.*?)\1/iy)?.[2] : undefined;
-  if (!rootfile) return { available: false };
+  if (!rootfile) return null;
   const opfRes = resolveArchivePath("", rootfile.trim().replace(/^\/+/, ""));
-  if (!opfRes.safe) return { available: false };
+  if (!opfRes.safe) return null;
   const opf = await readText(zip, opfRes.path);
-  if (!opf) return { available: false };
+  if (!opf) return null;
   const opfDir = posix.dirname(opfRes.path);
 
   // Manifest.
@@ -347,15 +359,7 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     if (item.path) byPath.set(item.path, item);
     if (manifest.size > MAX_SPINE_ITEMS * 4) break;
   }
-  if (manifest.size === 0) return { available: false };
-
-  // The cover picture is shown by the reader itself as page 1.
-  const coverPaths = new Set<string>();
-  const coverMetaId = coverMetaContent(opf);
-  for (const item of manifest.values()) {
-    if (!item.path) continue;
-    if (/\bcover-image\b/.test(item.properties) || item.id === coverMetaId) coverPaths.add(item.path);
-  }
+  if (manifest.size === 0) return null;
 
   // Spine.
   const spineXml = firstElementInner(opf, "spine") ?? "";
@@ -371,12 +375,53 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     spine.push(item);
     if (spine.length >= MAX_SPINE_ITEMS) break;
   }
-  if (spine.length === 0) return { available: false };
+  if (spine.length === 0) return null;
+  return { opf, opfDir, manifest, byPath, spine };
+}
+
+// PV1 1d r2: the contents page the reader reads on every open, and the
+// stylesheets a page's <head> links to (read whole before being cut to
+// MAX_CSS_CHARS), found exactly as buildReaderContent finds them. Shared
+// with the upload check, which counts them as text.
+export function readerNavItem(manifest: Map<string, ManifestItem>): ManifestItem | undefined {
+  return [...manifest.values()].find((i) => /\bnav\b/.test(i.properties) && i.path);
+}
+
+export function linkedStylesheetPaths(head: string, docDir: string): string[] {
+  const paths: string[] = [];
+  for (const linkAttrs of tagAttrs(head, "link")) {
+    if (!/stylesheet/i.test(attr(linkAttrs, "rel") ?? "")) continue;
+    const res = resolveArchivePath(docDir, stripFragment(attr(linkAttrs, "href") ?? ""));
+    if (res.safe) paths.push(res.path);
+  }
+  return paths;
+}
+
+export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promise<ReaderContent> {
+  if (!preflightZipEntries(bytes, EPUB_ZIP_PREFLIGHT_LIMITS).ok) return { available: false };
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    return { available: false };
+  }
+
+  const found = await readReaderSpine(zip);
+  if (!found) return { available: false };
+  const { opf, opfDir, manifest, byPath, spine } = found;
+
+  // The cover picture is shown by the reader itself as page 1.
+  const coverPaths = new Set<string>();
+  const coverMetaId = coverMetaContent(opf);
+  for (const item of manifest.values()) {
+    if (!item.path) continue;
+    if (/\bcover-image\b/.test(item.properties) || item.id === coverMetaId) coverPaths.add(item.path);
+  }
 
   // Where the text itself starts: EPUB 3 landmarks "bodymatter", else the
   // EPUB 2 guide "text". Without either, nothing is front matter.
   let bodyStart: string | null = null;
-  const nav = [...manifest.values()].find((i) => /\bnav\b/.test(i.properties) && i.path);
+  const nav = readerNavItem(manifest);
   if (nav?.path) {
     const navXml = (await readText(zip, nav.path)) ?? "";
     const landmarks = navLandmarksInner(navXml) ?? "";
@@ -415,12 +460,10 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
     if (xml === null) continue;
     const docDir = posix.dirname(path);
     const head = firstElementInner(xml, "head") ?? "";
-    for (const linkAttrs of tagAttrs(head, "link")) {
-      if (!/stylesheet/i.test(attr(linkAttrs, "rel") ?? "")) continue;
-      const res = resolveArchivePath(docDir, stripFragment(attr(linkAttrs, "href") ?? ""));
-      if (!res.safe || cssRead.has(res.path)) continue;
-      cssRead.add(res.path);
-      const css = await readText(zip, res.path);
+    for (const cssPath of linkedStylesheetPaths(head, docDir)) {
+      if (cssRead.has(cssPath)) continue;
+      cssRead.add(cssPath);
+      const css = await readText(zip, cssPath);
       if (css) parseCssClassRules(css, classRules);
     }
     for (const css of allElementInners(head, "style")) parseCssClassRules(css, classRules);

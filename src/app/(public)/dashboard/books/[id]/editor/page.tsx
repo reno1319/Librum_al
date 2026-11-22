@@ -85,6 +85,7 @@ type EditorBook = {
   categories: string[] | null;
   keywords: string;
   original_author: string | null;
+  original_title: string | null;
   status: string;
   published_at: string | null;
   file_path: string | null;
@@ -161,7 +162,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, original_title, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
         (preorderFeature ? ", release_date, preorder_count, preorder_slip_used, preorder_listed_at" : ""),
     )
     .eq("id", id)
@@ -338,6 +339,8 @@ export default async function BookEditorPage({
     description: working.description,
     rightsBasis,
     originalAuthor: working.originalAuthor,
+    originalTitle: book.original_title ?? null,
+    hasTranslator: (contributors ?? []).some((c) => c.role === "Translator"),
   });
   const detailsMissing = detailsMissingItems.map((m) => m.label);
   // BD15 P3 (mockup): the manuscript, the cover and the AI answer.
@@ -412,6 +415,7 @@ export default async function BookEditorPage({
     contributors: (contributors ?? []).map((c) => ({ id: c.id, name: c.name, role: c.role })),
     rightsBasis: rightsBasis ?? "",
     originalAuthor: working.originalAuthor ?? "",
+    originalTitle: book.original_title ?? "",
   };
 
   return (

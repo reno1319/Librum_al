@@ -201,6 +201,22 @@ describe("repackageWithTitle", () => {
     expect(opf).toContain("<dc:creator>Autor i panjohur</dc:creator>");
   });
 
+  // PV1 1d (sz2 a): a Word book too big for the reader gets the clear
+  // message, not the generic "try again" one.
+  it("tells the author when the book has too much text for the reader", async () => {
+    const conversionId = await storedTempEpub();
+    const zip = await JSZip.loadAsync(fakeStorage.objects.get(conversionId)!);
+    zip.file("OEBPS/chapter-1.xhtml", "<p>x</p>".repeat(11 * 131_072), { compression: "DEFLATE" });
+    fakeStorage.objects.set(conversionId, Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })));
+
+    const result = await repackageWithTitle(conversionId, "Title", "Author");
+    expect(result).toEqual({
+      success: false,
+      error:
+        "Teksti i këtij libri është shumë i madh për t'u hapur te lexuesit. Lejohen deri në 10 MB tekst gjithsej. Ndajeni librin në më shumë vëllime.",
+    });
+  });
+
   it("rejects a conversionId not owned by the calling user", async () => {
     const result = await repackageWithTitle("someone-else/tmp/epub/x.epub", "Title", "Author");
     expect(result).toEqual({

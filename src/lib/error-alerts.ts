@@ -1,6 +1,7 @@
 import { escapeEmailHtml, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/contact";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ALERTS-1 (Renato 10-27, 4b): email the team when the live site hits a
 // server error -- a page, Route Handler, Server Action or Proxy that
@@ -14,13 +15,20 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 // email anyone.
 //
 // Cap (r2, Renato 10-27: few emails, Resend stays on its free plan of
-// 100 a day shared with every other site email): per server instance,
-// at most one email per hour and at most ERROR_EMAILS_PER_DAY per UTC
-// day. Errors in between are counted and the count rides on the next
-// email. The cap lives in memory, so each Vercel instance has its own:
-// the worst case is ERROR_EMAILS_PER_DAY times the number of instances
-// that hit errors that day (a new instance after a cold start counts as
-// another one). With 3 a day, ten such instances stay at 30.
+// 100 a day shared with every other site email): at most one email per
+// hour and at most ERROR_EMAILS_PER_DAY per UTC day. Errors in between
+// are counted and the count rides on the next email.
+//
+// N18 (Renato 11-21): the cap is ONE count for the whole site, kept in
+// the database by claim_error_email_slot() (migration
+// 20261121170000_error_email_shared_cap.sql), so many Vercel instances
+// no longer get 3 a day each. Site errors and nightly-job failures share
+// it (e2 a). Each instance still keeps its own count in memory and asks
+// the database only when its own count allows a send. When the database
+// cannot be asked (down, slow, or the function missing), the instance's
+// own count decides, as before N18 (e1 a): an outage is exactly when the
+// email matters, and the worst case then is ERROR_EMAILS_PER_DAY times
+// the number of instances that hit errors.
 //
 // What the email holds (no visitor identity): time, method, the path
 // WITHOUT its query string (a query can carry a key or code), the route
@@ -29,6 +37,13 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 // strings (ids included) and long hex runs blanked, and are cut short. Best effort like every email: never throws.
 export const ERROR_EMAIL_MIN_INTERVAL_MS = 60 * 60 * 1000;
 export const ERROR_EMAILS_PER_DAY = 3;
+// How long the shared count may take to answer before the instance's
+// own count decides (e1 a).
+export const SHARED_CAP_TIMEOUT_MS = 3000;
+// r2 (audit M1): after the shared count says no, this instance does not
+// ask again for this long, so an error storm on a healthy database is at
+// most one question per instance every few minutes, not one per error.
+export const SHARED_REFUSAL_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_MESSAGE_LENGTH = 300;
 const MAX_PATH_LENGTH = 200;
 
@@ -39,14 +54,38 @@ const CONTROL_FLOW_DIGESTS = /^(NEXT_REDIRECT|NEXT_NOT_FOUND|NEXT_HTTP_ERROR_FAL
 type RequestInfo = { path: string; method: string };
 type ContextInfo = { routePath: string; routeType: string };
 
-const throttle = { lastSentAt: null as number | null, day: "", sentToday: 0, skipped: 0 };
+const throttle = {
+  lastSentAt: null as number | null,
+  refusedAt: null as number | null,
+  day: "",
+  sentToday: 0,
+  skipped: 0,
+};
 
 // Tests only.
 export function resetErrorAlertThrottle() {
   throttle.lastSentAt = null;
+  throttle.refusedAt = null;
   throttle.day = "";
   throttle.sentToday = 0;
   throttle.skipped = 0;
+}
+
+// N18: true = the shared count allows a send (and counted it), false =
+// it does not, null = it could not be asked.
+async function claimSharedSlot(): Promise<boolean | null> {
+  try {
+    const { data, error } = await createAdminClient()
+      .rpc("claim_error_email_slot", {
+        p_per_day: ERROR_EMAILS_PER_DAY,
+        p_min_interval_seconds: ERROR_EMAIL_MIN_INTERVAL_MS / 1000,
+      })
+      .abortSignal(AbortSignal.timeout(SHARED_CAP_TIMEOUT_MS));
+    if (error || typeof data !== "boolean") return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 function cut(value: string, max: number): string {
@@ -103,14 +142,28 @@ export async function reportServerError(error: unknown, request: RequestInfo, co
     }
     if (
       throttle.sentToday >= ERROR_EMAILS_PER_DAY ||
-      (throttle.lastSentAt !== null && now - throttle.lastSentAt < ERROR_EMAIL_MIN_INTERVAL_MS)
+      (throttle.lastSentAt !== null && now - throttle.lastSentAt < ERROR_EMAIL_MIN_INTERVAL_MS) ||
+      (throttle.refusedAt !== null && now - throttle.refusedAt < SHARED_REFUSAL_BACKOFF_MS)
     ) {
       throttle.skipped += 1;
       return;
     }
-    const skipped = throttle.skipped;
+    // Reserve the send in memory BEFORE asking the shared count, so a
+    // second error on this instance in the meantime is skipped as before.
+    const previousSentAt = throttle.lastSentAt;
     throttle.lastSentAt = now;
     throttle.sentToday += 1;
+    const shared = await claimSharedSlot();
+    if (shared === false) {
+      // Another instance used the shared allowance: give the reservation
+      // back, and do not ask again for SHARED_REFUSAL_BACKOFF_MS.
+      throttle.lastSentAt = previousSentAt;
+      throttle.sentToday = Math.max(0, throttle.sentToday - 1);
+      throttle.refusedAt = now;
+      throttle.skipped += 1;
+      return;
+    }
+    const skipped = throttle.skipped;
     throttle.skipped = 0;
 
     const rows: [string, string][] = [
@@ -124,7 +177,7 @@ export async function reportServerError(error: unknown, request: RequestInfo, co
     ];
     const more =
       skipped > 0
-        ? `<p>${skipped} more server error${skipped === 1 ? "" : "s"} on this server since the last email were not emailed (at most one email an hour and ${ERROR_EMAILS_PER_DAY} a day).</p>`
+        ? `<p>${skipped} more server error${skipped === 1 ? "" : "s"} on this server since the last email were not emailed (at most one email an hour and ${ERROR_EMAILS_PER_DAY} a day ${shared ? "for the whole site" : "on this server, as the shared count could not be reached"}).</p>`
         : "";
 
     await sendEmail(
@@ -154,8 +207,8 @@ export const TEST_ERROR_MESSAGE = "Test error from the owner's test link (ALERTS
 // their own failures and answer 500 or 503 instead of throwing, so
 // onRequestError never sees them. Each job's GET passes its response
 // here: a 5xx is emailed through reportServerError above, with the same
-// Production-only gate and the same cap. Only the job's route path and
-// the status code go in the email, never the response body. Skipped
+// Production-only gate and the same cap (N18: one shared count, e2 a).
+// Only the job's route path and the status code go in the email, never the response body. Skipped
 // while maintenance mode is on, since every job then answers 503 on
 // purpose. A thrown error is not handled here: it already reaches
 // onRequestError. Returns the response unchanged.

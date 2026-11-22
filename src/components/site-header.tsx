@@ -9,6 +9,9 @@ import { MobileNav } from "@/components/mobile-nav";
 import { FeedbackButton } from "@/components/feedback-button";
 import { accountFirstName } from "@/lib/account-first-name";
 import { LibrumLogo } from "@/components/librum-logo";
+import { StaffBar } from "@/components/staff-bar";
+import { roleHasPermission } from "@/lib/staff-permissions";
+import type { StaffRole } from "@/lib/types";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
 // so it's directly unit-testable (src/components/site-header.test.ts)
@@ -137,6 +140,19 @@ export async function SiteHeader() {
     role = profile?.role ?? null;
   }
 
+  // Staff bar (dashboard batch 1, b1q3 a): reads only the signed-in
+  // person's own staff_members row, the same read loadStaffContext() in
+  // lib/staff.ts makes. No row, or any error, means no bar.
+  let staffRole: StaffRole | null = null;
+  if (user) {
+    const { data: staffRow } = await supabase
+      .from("staff_members")
+      .select("role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    staffRole = (staffRow?.role as StaffRole | undefined) ?? null;
+  }
+
   const cookieStore = await cookies();
   const recoveryActive = isRecoverySessionActive(cookieStore);
 
@@ -149,6 +165,12 @@ export async function SiteHeader() {
 
   return (
     <header className="relative bg-primary text-primary-foreground">
+      {staffRole && !recoveryActive && (
+        <StaffBar
+          canWritePosts={roleHasPermission(staffRole, "blog.manage")}
+          canViewBooks={roleHasPermission(staffRole, "reports.view")}
+        />
+      )}
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
       {/* HEADER NAME: one row at every width now (below lg it only ever

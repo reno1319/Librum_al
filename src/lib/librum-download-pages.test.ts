@@ -23,6 +23,7 @@ const BOOK_ROW = {
   edition: null,
   original_publication_date: "2015-03-08",
   original_author: null,
+  original_title: null,
   published_at: "2026-11-01T09:00:00Z",
   pen_name_id: PEN_ID,
   price_all: 299,
@@ -83,6 +84,7 @@ describe("readLibrumPages", () => {
       subtitle: "Tregim",
       penName: "Arben Prova",
       originalAuthor: null,
+      originalTitle: null,
       copyrightYear: 2015,
       originalYear: 2015,
       translators: [],
@@ -151,6 +153,16 @@ describe("readLibrumPages", () => {
     expect(pages!.front.penName).toBe("Arben Prova");
     expect(pages!.last.penName).toBe("Arben Prova");
     expect(calls.find((c) => c.table === "public_books")!.columns).toContain("original_author");
+  });
+
+  it("X19: reads original_title; a blank one is none", async () => {
+    const { client, calls } = fakeAdmin({ book: { data: { ...BOOK_ROW, original_title: "The Last Star" }, error: null } });
+    const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
+    expect(pages!.front.originalTitle).toBe("The Last Star");
+    expect(calls.find((c) => c.table === "public_books")!.columns).toContain("original_title");
+    const blank = fakeAdmin({ book: { data: { ...BOOK_ROW, original_title: "  " }, error: null } });
+    const none = await readLibrumPages(blank.client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
+    expect(none!.front.originalTitle).toBeNull();
   });
 
   it("BD3 patch 4: a blank original_author is none", async () => {

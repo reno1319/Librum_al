@@ -94,6 +94,39 @@ describe("PreviewBlogPostPage", () => {
     expect(page).toBeTruthy();
   });
 
+  it("pv1 b: the byline matches the live page (typed name, else Librum on Editorial, else none)", async () => {
+    const base = {
+      id: "post-1",
+      title: "T",
+      excerpt: "E",
+      content_markdown: "Body",
+      cover_image_path: null,
+      category: "zeja",
+      status: "draft",
+      published_at: null,
+    };
+    const text = async (data: Record<string, unknown>) => {
+      mockMaybeSingle.mockResolvedValueOnce({ data });
+      // Text of the page's own elements (children strings), joined.
+      const collect = (node: unknown): string => {
+        if (typeof node === "string" || typeof node === "number") return String(node);
+        if (Array.isArray(node)) return node.map(collect).join("");
+        if (node && typeof node === "object" && "props" in node) {
+          return collect((node as { props: { children?: unknown } }).props.children);
+        }
+        return "";
+      };
+      return collect(await PreviewBlogPostPage({ params: Promise.resolve({ id: "post-1" }) }));
+    };
+    const named = await text({ ...base, is_editorial: true, author_name: "Arben Hoxha" });
+    expect(named).toContain("Nga Arben Hoxha · ");
+    expect(named).not.toContain("By Librum Editorial");
+    expect(await text({ ...base, is_editorial: true, author_name: null })).toContain("Nga Librum · ");
+    const none = await text({ ...base, is_editorial: false, author_name: null });
+    expect(none).not.toContain("Nga ");
+    expect(none).not.toContain("By Librum Editorial");
+  });
+
   it("a missing post results in notFound(), not a crash", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: null });
 

@@ -41,6 +41,7 @@ let mockSupabaseAuth: {
   signInWithPassword: ReturnType<typeof vi.fn>;
   signUp: ReturnType<typeof vi.fn>;
   resetPasswordForEmail: ReturnType<typeof vi.fn>;
+  resend: ReturnType<typeof vi.fn>;
 };
 const mockCreateClient = vi.fn(() => Promise.resolve({ auth: mockSupabaseAuth }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
@@ -95,7 +96,8 @@ function createdUser(session: unknown) {
   return { data: { session, user: { id: CREATED_ID, identities: [{ id: "identity-1" }] } }, error: null };
 }
 
-const { updatePassword, logout, login, signup, requestPasswordReset } = await import("./actions");
+const { updatePassword, logout, login, signup, requestPasswordReset, resendConfirmationEmail } =
+  await import("./actions");
 
 function resetMocks() {
   mockRedirect.mockClear();
@@ -118,6 +120,7 @@ function resetMocks() {
     ),
     signUp: vi.fn(() => Promise.resolve(createdUser({ access_token: "tok" }))),
     resetPasswordForEmail: vi.fn(() => Promise.resolve({ data: {}, error: null })),
+    resend: vi.fn(() => Promise.resolve({ data: { user: null, session: null }, error: null })),
   };
 }
 
@@ -131,6 +134,74 @@ async function expectRedirectTo(promise: Promise<unknown>, target: string) {
   await expect(promise).rejects.toBeInstanceOf(RedirectSignal);
   expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining(target));
 }
+
+// N2 (Renato rs1 a): one answer whatever Supabase says, so the form
+// can't tell anyone which addresses have an account.
+describe("resendConfirmationEmail: same answer every time", () => {
+  beforeEach(resetMocks);
+
+  it("rejects an empty email before calling Supabase", async () => {
+    await expectRedirectTo(resendConfirmationEmail(formData({ email: "  " })), "Shkruani%20emailin.");
+    expect(mockRedirect).toHaveBeenCalledWith(expect.stringContaining("/signup/resend?error="));
+    expect(mockSupabaseAuth.resend).not.toHaveBeenCalled();
+  });
+
+  it("asks Supabase for a sign-up email to the trimmed address, back to /auth/callback", async () => {
+    await expectRedirectTo(
+      resendConfirmationEmail(formData({ email: "  reader@example.com  " })),
+      "/signup/resend?success=1",
+    );
+    expect(mockSupabaseAuth.resend).toHaveBeenCalledExactlyOnceWith({
+      type: "signup",
+      email: "reader@example.com",
+      options: { emailRedirectTo: expect.stringMatching(/\/auth\/callback$/) },
+    });
+  });
+
+  it.each([
+    ["sent too recently", { code: "over_email_send_rate_limit", status: 429 }],
+    ["already confirmed or unknown", { code: "validation_failed", status: 400 }],
+  ])("gives the same success page when Supabase answers %s, logging no address", async (_label, error) => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockSupabaseAuth.resend.mockResolvedValue({
+      data: { user: null, session: null },
+      error: { ...error, message: "provider detail that must not be exposed" },
+    });
+    try {
+      await expectRedirectTo(
+        resendConfirmationEmail(formData({ email: "private@example.com" })),
+        "/signup/resend?success=1",
+      );
+      expect(mockRedirect).toHaveBeenCalledExactlyOnceWith("/signup/resend?success=1");
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+        "resendConfirmationEmail: provider answered with an error",
+        error,
+      );
+      const logged = JSON.stringify(consoleError.mock.calls);
+      expect(logged).not.toContain("private@example.com");
+      expect(logged).not.toContain("provider detail that must not be exposed");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("gives the same success page when the request throws, logging no detail", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockSupabaseAuth.resend.mockRejectedValue(new Error("transport detail private@example.com"));
+    try {
+      await expectRedirectTo(
+        resendConfirmationEmail(formData({ email: "private@example.com" })),
+        "/signup/resend?success=1",
+      );
+      expect(mockRedirect).toHaveBeenCalledExactlyOnceWith("/signup/resend?success=1");
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+        "resendConfirmationEmail: provider request threw",
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
 
 describe("requestPasswordReset: provider failures and anti-enumeration", () => {
   beforeEach(resetMocks);

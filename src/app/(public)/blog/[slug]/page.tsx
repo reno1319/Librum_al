@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
+import { blogBylineName, blogJsonLdAuthor } from "@/lib/blog-byline";
 import { blogCategoryHref, getBlogCategory } from "@/lib/blog-categories";
 import { getBlogCategories } from "@/lib/blog-categories-server";
 import { BLOG_RELATED_POSTS_LIMIT, selectRelatedPosts, type BlogLandingCandidate } from "@/lib/blog-landing-logic";
@@ -24,6 +25,7 @@ type PublicBlogPostDetail = {
   cover_image_path: string | null;
   category: string;
   is_editorial: boolean;
+  author_name: string | null;
   seo_title: string | null;
   seo_description: string | null;
   published_at: string | null;
@@ -48,7 +50,7 @@ const getPublishedBlogPostBySlug = cache(async (slug: string) => {
   const { data } = await supabase
     .from("blog_posts")
     .select(
-      "id, title, slug, excerpt, content_markdown, cover_image_path, category, is_editorial, seo_title, seo_description, published_at, updated_at",
+      "id, title, slug, excerpt, content_markdown, cover_image_path, category, is_editorial, author_name, seo_title, seo_description, published_at, updated_at",
     )
     .eq("slug", slug)
     .eq("status", "published")
@@ -120,6 +122,7 @@ export async function generateMetadata({
 // CHECK constraints, or a controlled date/URL this function itself
 // constructs -- never raw Markdown body content.
 function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; url: string; coverUrl: string | null }) {
+  const jsonLdAuthor = blogJsonLdAuthor(post);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -127,10 +130,9 @@ function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; ur
     description: post.seo_description ?? post.excerpt,
     datePublished: post.published_at ?? post.updated_at,
     dateModified: post.updated_at,
-    // Blog categories audit F3 (Renato 2026-11-17, a): only an
-    // Editorial post names an author; every other post has none (blog3:
-    // no byline), only Librum as publisher.
-    ...(post.is_editorial ? { author: { "@type": "Organization", name: "Librum Editorial" } } : {}),
+    // au3 (Renato 2026-11-22): a typed "Written by" name is the author;
+    // with none, only an Editorial post names one (audit F3, 2026-11-17).
+    ...(jsonLdAuthor ? { author: jsonLdAuthor } : {}),
     publisher: { "@type": "Organization", name: "Librum" },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     ...(coverUrl ? { image: [coverUrl] } : {}),
@@ -187,6 +189,9 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
   const categories = await getBlogCategories();
   const categoryInfo = getBlogCategory(categories, post.category);
   const isEditorial = post.is_editorial === true;
+  // au2 a (2026-11-22): a typed name on any article, else "Librum" on
+  // Editorial only.
+  const bylineName = blogBylineName(post);
   const origin = resolveSiteOrigin();
   const url = `${origin}/blog/${post.slug}`;
 
@@ -233,7 +238,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>
 
         <p className="mt-4 text-sm text-muted">
-          {isEditorial && "Nga Librum · "}
+          {bylineName && `Nga ${bylineName} · `}
           {post.published_at && `${formatTimestampAsDate(post.published_at)} · `}
           {readingMinutes} min lexim
         </p>

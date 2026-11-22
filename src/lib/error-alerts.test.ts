@@ -6,9 +6,19 @@ vi.mock("@/lib/email", async (importOriginal) => ({
   sendEmail,
 }));
 
+// N18: the shared count. By default the database cannot be asked, so
+// every test above the N18 block exercises the per-instance fallback
+// (e1 a), which is exactly the pre-N18 behaviour.
+const rpc = vi.hoisted(() => vi.fn());
+const abortSignal = vi.hoisted(() => vi.fn());
+const createAdminClient = vi.hoisted(() => vi.fn(() => ({ rpc })));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient }));
+
 import {
   ERROR_EMAIL_MIN_INTERVAL_MS,
   ERROR_EMAILS_PER_DAY,
+  SHARED_CAP_TIMEOUT_MS,
+  SHARED_REFUSAL_BACKOFF_MS,
   alertIfCronFailed,
   cleanPath,
   redactErrorMessage,
@@ -23,6 +33,11 @@ const T0 = Date.UTC(2026, 9, 27, 20, 0, 0);
 beforeEach(() => {
   resetErrorAlertThrottle();
   sendEmail.mockClear();
+  rpc.mockReset();
+  abortSignal.mockReset();
+  createAdminClient.mockClear();
+  rpc.mockReturnValue({ abortSignal });
+  abortSignal.mockRejectedValue(new Error("database unreachable"));
   vi.stubEnv("VERCEL_ENV", "production");
 });
 
@@ -79,7 +94,7 @@ describe("reportServerError", () => {
     const html = sendEmail.mock.calls[1]![2];
     expect(html).toContain("fourth");
     expect(html).toContain(
-      "2 more server errors on this server since the last email were not emailed (at most one email an hour and 3 a day).",
+      "2 more server errors on this server since the last email were not emailed (at most one email an hour and 3 a day on this server, as the shared count could not be reached).",
     );
 
     await reportServerError(new Error("fifth"), REQUEST, CONTEXT, T0 + 2 * ERROR_EMAIL_MIN_INTERVAL_MS);
@@ -206,5 +221,125 @@ describe("alertIfCronFailed", () => {
     await reportServerError(new Error("page"), REQUEST, CONTEXT, T0);
     await alertIfCronFailed(PATH, new Response(null, { status: 500 }), T0 + 1000);
     expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+// N18 (Renato 11-21): one shared count across instances.
+describe("shared count (N18)", () => {
+  const shared = (answer: { data: unknown; error: unknown }) => abortSignal.mockResolvedValue(answer);
+
+  it("asks the database with the same limits, and sends when it allows", async () => {
+    shared({ data: true, error: null });
+    await reportServerError(new Error("x"), REQUEST, CONTEXT, T0);
+    expect(rpc).toHaveBeenCalledWith("claim_error_email_slot", { p_per_day: 3, p_min_interval_seconds: 3600 });
+    expect(abortSignal).toHaveBeenCalledWith(expect.any(AbortSignal));
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing when another instance used the shared allowance, and counts it on the next email", async () => {
+    shared({ data: false, error: null });
+    await reportServerError(new Error("refused"), REQUEST, CONTEXT, T0);
+    expect(sendEmail).not.toHaveBeenCalled();
+
+    // The refusal gave the hour reservation back: once the back-off is
+    // over this instance may ask again, and the shared count now allows it.
+    shared({ data: true, error: null });
+    await reportServerError(new Error("allowed"), REQUEST, CONTEXT, T0 + SHARED_REFUSAL_BACKOFF_MS);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const html = sendEmail.mock.calls[0]![2];
+    expect(html).toContain("1 more server error on this server");
+    expect(html).toContain("3 a day for the whole site).");
+  });
+
+  it("after a refusal, does not ask the database again for 5 minutes (audit M1)", async () => {
+    expect(SHARED_REFUSAL_BACKOFF_MS).toBe(5 * 60 * 1000);
+    shared({ data: false, error: null });
+    await reportServerError(new Error("refused"), REQUEST, CONTEXT, T0);
+    for (let i = 1; i <= 50; i += 1) {
+      await reportServerError(new Error(`storm ${i}`), REQUEST, CONTEXT, T0 + i * 1000);
+    }
+    await reportServerError(new Error("almost"), REQUEST, CONTEXT, T0 + SHARED_REFUSAL_BACKOFF_MS - 1);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(sendEmail).not.toHaveBeenCalled();
+
+    await reportServerError(new Error("asks again"), REQUEST, CONTEXT, T0 + SHARED_REFUSAL_BACKOFF_MS);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("the email names the per-server limit when the shared count could not be reached (audit L1)", async () => {
+    // Database unreachable (the default): one sent, one skipped, then the next hour.
+    await reportServerError(new Error("first"), REQUEST, CONTEXT, T0);
+    await reportServerError(new Error("skipped"), REQUEST, CONTEXT, T0 + 1000);
+    await reportServerError(new Error("next"), REQUEST, CONTEXT, T0 + ERROR_EMAIL_MIN_INTERVAL_MS);
+    const html = sendEmail.mock.calls[1]![2];
+    expect(html).toContain("3 a day on this server, as the shared count could not be reached).");
+    expect(html).not.toContain("whole site");
+  });
+
+  it("gives the database 3 seconds, then falls back when the request is aborted (audit L2)", async () => {
+    expect(SHARED_CAP_TIMEOUT_MS).toBe(3000);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    // A fake RPC that never answers until its signal aborts.
+    abortSignal.mockImplementation(
+      (signal: AbortSignal) =>
+        new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
+    );
+    const controller = new AbortController();
+    timeout.mockReturnValue(controller.signal);
+    const pending = reportServerError(new Error("x"), REQUEST, CONTEXT, T0);
+    expect(timeout).toHaveBeenCalledWith(3000);
+    expect(sendEmail).not.toHaveBeenCalled();
+    controller.abort(new DOMException("timed out", "TimeoutError"));
+    await pending;
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask the database when this instance's own count already says no", async () => {
+    shared({ data: true, error: null });
+    await reportServerError(new Error("first"), REQUEST, CONTEXT, T0);
+    await reportServerError(new Error("second"), REQUEST, CONTEXT, T0 + 1000);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("a second error on the same instance while the database is answering is skipped", async () => {
+    let answer!: (value: { data: boolean; error: null }) => void;
+    abortSignal.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const first = reportServerError(new Error("first"), REQUEST, CONTEXT, T0);
+    await reportServerError(new Error("second"), REQUEST, CONTEXT, T0 + 10);
+    answer({ data: true, error: null });
+    await first;
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a database error", { data: null, error: { message: "function does not exist" } }],
+    ["an unexpected answer", { data: "yes", error: null }],
+  ])("falls back to this instance's own count on %s (e1 a)", async (_label, answer) => {
+    shared(answer);
+    await reportServerError(new Error("x"), REQUEST, CONTEXT, T0);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the admin client cannot even be made (e1 a)", async () => {
+    createAdminClient.mockImplementationOnce(() => {
+      throw new Error("env guard");
+    });
+    await reportServerError(new Error("x"), REQUEST, CONTEXT, T0);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("nightly-job failures go through the same shared count (e2 a)", async () => {
+    shared({ data: false, error: null });
+    await alertIfCronFailed("/api/internal/payouts/run", new Response(null, { status: 500 }), T0);
+    expect(rpc).toHaveBeenCalledWith("claim_error_email_slot", { p_per_day: 3, p_min_interval_seconds: 3600 });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("never asks the database outside Production", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    await reportServerError(new Error("x"), REQUEST, CONTEXT, T0);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

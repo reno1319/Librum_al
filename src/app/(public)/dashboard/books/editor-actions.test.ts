@@ -615,6 +615,30 @@ describe("saveBookDetails: a live book (P5b-2)", () => {
     expect(decodeURIComponent(changed)).toContain(PD_FROZEN_MESSAGE);
   });
 
+  // X19 (x19s1 b): the original title changes at once, with no review --
+  // on a picked edition too (LB497 does not freeze it).
+  it("a live book's original title is written onto the live row, nothing waits for review", async () => {
+    seedLive();
+    await redirectOf(saveBookDetails(BOOK, liveForm({ originalTitle: "  The Last  Star " })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.payload).toMatchObject({ original_title: "The Last Star" });
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("a picked edition: a changed original title alone is written; an unchanged one writes nothing", async () => {
+    seedLive();
+    Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555", original_title: "Old" });
+    const changed = await redirectOf(saveBookDetails(BOOK, liveForm({ originalTitle: "New" })));
+    const updates = catalogWrites.filter((w) => w.op === "update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toEqual({ original_title: "New" });
+    expect(changed).toMatch(/editor\?tab=details&success=/);
+    catalogWrites.length = 0;
+    Object.assign(tables.books[0], { original_title: "New" });
+    await redirectOf(saveBookDetails(BOOK, liveForm({ originalTitle: "New" })));
+    expect(catalogWrites.filter((w) => w.op === "update")).toEqual([]);
+  });
+
   it("a picked edition: a changed frozen detail is refused before anything is written", async () => {
     seedLive();
     Object.assign(tables.books[0], { pd_work_id: "55555555-5555-4555-8555-555555555555" });

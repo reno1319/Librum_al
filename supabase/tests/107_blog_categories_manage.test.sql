@@ -372,6 +372,9 @@ insert into public.blog_posts (title, slug, excerpt, content_markdown, category,
   ('n', 'p107-new-cat', 'x', 'x', 'poezi', 'e1070000-0000-4000-8000-000000000003', '2026-02-01'),
   ('k', 'p107-kultura', 'x', 'x', 'kultura', 'e1070000-0000-4000-8000-000000000003', '2026-02-01');
 
+-- Migration 20261122100000 (Written by name) came later still: its
+-- rollback goes first.
+\i supabase/tests/110_blog_author_name.rollback.sql
 \i supabase/tests/107_blog_categories_manage.rollback.sql
 \i supabase/tests/107_blog_categories_manage.rollback.sql
 

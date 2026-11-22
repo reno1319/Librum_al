@@ -21700,3 +21700,473 @@ grant execute on function public.create_blog_category(text, text, text, text, te
 grant execute on function public.update_blog_category(text, text, text, text, text, text) to authenticated;
 grant execute on function public.move_blog_category(text, text) to authenticated;
 grant execute on function public.delete_blog_category(text, text) to authenticated;
+
+-- ------------------------------------------------------------
+-- N18: one shared limit for error emails (src/lib/error-alerts.ts).
+-- Migration 20261121170000_error_email_shared_cap.sql.
+-- ------------------------------------------------------------
+create table public.error_email_throttle (
+  id boolean primary key default true
+    constraint error_email_throttle_single_row check (id),
+  day date not null,
+  sent_today integer not null
+    constraint error_email_throttle_sent_today_check check (sent_today >= 0),
+  last_sent_at timestamptz not null
+);
+
+comment on table public.error_email_throttle is
+  'N18: the one shared count of error emails (src/lib/error-alerts.ts). A single row; written only by claim_error_email_slot().';
+
+alter table public.error_email_throttle enable row level security;
+revoke all on public.error_email_throttle from public, anon, authenticated, service_role;
+
+create function public.claim_error_email_slot(p_per_day integer, p_min_interval_seconds integer)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_now timestamptz := pg_catalog.now();
+  v_day date := (pg_catalog.timezone('UTC', v_now))::date;
+  v_claimed boolean;
+begin
+  if p_per_day is null or p_per_day < 1 or p_per_day > 100 then
+    raise exception 'p_per_day must be between 1 and 100' using errcode = '22023';
+  end if;
+  if p_min_interval_seconds is null or p_min_interval_seconds < 0 or p_min_interval_seconds > 86400 then
+    raise exception 'p_min_interval_seconds must be between 0 and 86400' using errcode = '22023';
+  end if;
+
+  insert into public.error_email_throttle as t (id, day, sent_today, last_sent_at)
+  values (true, v_day, 1, v_now)
+  on conflict (id) do update
+    set day = excluded.day,
+        sent_today = case when t.day = excluded.day then t.sent_today + 1 else 1 end,
+        last_sent_at = excluded.last_sent_at
+    where (t.day <> excluded.day or t.sent_today < p_per_day)
+      and t.last_sent_at <= excluded.last_sent_at - pg_catalog.make_interval(secs => p_min_interval_seconds)
+  returning true into v_claimed;
+
+  return coalesce(v_claimed, false);
+end;
+$$;
+
+comment on function public.claim_error_email_slot(integer, integer) is
+  'N18: true (and the send is counted) when an error email may go out now under the shared daily and hourly limit; false otherwise.';
+
+revoke all on function public.claim_error_email_slot(integer, integer) from public, anon, authenticated;
+grant execute on function public.claim_error_email_slot(integer, integer) to service_role;
+
+
+-- ============================================================
+-- X19 (migration 20261121180000_original_title.sql): books.original_title,
+-- public_books, search_books() and the LB490 guard. Same statements and
+-- reasoning as the migration.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The column
+-- ------------------------------------------------------------
+alter table public.books
+  add column original_title text
+    constraint books_original_title_check
+    check (original_title is null
+           or (char_length(original_title) between 1 and 300
+               and original_title = btrim(original_title)
+               and original_title !~ '[[:cntrl:]]'));
+
+-- ------------------------------------------------------------
+-- 2. public_books: same columns, one appended
+-- ------------------------------------------------------------
+create or replace view public.public_books
+  with (security_barrier)
+as
+  select b.id, b.title, b.subtitle, b.description, b.preview_text, b.keywords,
+         b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
+         b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
+         b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
+         b.librum_choice_at,
+         -- BD15 P7: null on a public-domain edition without an editor
+         -- mention, for every reader (its author too).
+         b.public_pen_name_id as pen_name_id,
+         b.original_author,
+         b.categories, b.is_adult, b.reading_age_min, b.edition_number,
+         b.pd_work_id, b.pd_editor_credit,
+         -- BD16 P1 (migration 20261106120000): appended last.
+         b.release_date,
+         -- Upload notes C (migration 20261107120000): appended last.
+         b.book_type,
+         -- Upload notes D (migration 20261107140000): appended last.
+         (select w.word_count
+            from public.book_file_words w
+           where w.book_id = b.id and w.file_path = b.file_path) as word_count,
+         -- X19 (migration 20261121180000): appended last.
+         b.original_title
+  from public.books b
+  where public.book_is_publicly_listed(b)
+     or b.author_id = auth.uid()
+     or public.user_owns_book(b.id);
+
+-- ------------------------------------------------------------
+-- 3. search_books(): the original title is searched too (x19q3 a)
+-- ------------------------------------------------------------
+create or replace function public.search_books(
+  search_term text default null,
+  genre_filter text default null,
+  min_price_cents int default null,
+  max_price_cents int default null,
+  result_limit int default 500
+)
+returns table (book_id uuid)
+language sql
+security invoker
+set search_path = ''
+stable
+as $$
+  -- PEN-NAMES-2: public_books (no account columns), so this keeps working
+  -- for anon after books' public SELECT is removed.
+  select books.id as book_id
+  from public.public_books books
+  -- BD16 (D1): pre-orders are found too.
+  where books.status in ('published', 'preorder')
+    and (genre_filter is null or books.genre = genre_filter)
+    -- ALL-SEARCH-1: a row with no authored ALL price is not ALL-ready.
+    -- Unconditional, never folded into the two bound checks below: a
+    -- reader who applies no price filter at all must not be shown an
+    -- unpriced book either.
+    and books.price_all is not null
+    -- ALL-SEARCH-1: whole-ALL catalog bounds. The parameter names still
+    -- read "cents" and are deliberately not renamed here -- see the
+    -- header. `price_cents` is never consulted: it is legacy USD minor
+    -- units and its values are not lek.
+    and (min_price_cents is null or books.price_all >= min_price_cents)
+    and (max_price_cents is null or books.price_all <= max_price_cents)
+    and (
+      search_term is null
+      or extensions.unaccent(books.title) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.description) ilike extensions.unaccent('%' || search_term || '%')
+      or extensions.unaccent(books.keywords) ilike extensions.unaccent('%' || search_term || '%')
+      -- BD3-P4 (migration 20261101170000, 3a): the original author too.
+      or extensions.unaccent(books.original_author) ilike extensions.unaccent('%' || search_term || '%')
+      -- X19 (migration 20261121180000, x19q3 a): the original title too.
+      or extensions.unaccent(books.original_title) ilike extensions.unaccent('%' || search_term || '%')
+      or exists (
+        -- PEN-NAMES-1 (5a): the book's OWN pen name, through the public
+        -- view (no author_id). The account's public name finds only the
+        -- books published under it (its default pen name), never a book
+        -- under another pen name.
+        select 1
+        from public.public_pen_names pn
+        where pn.id = books.pen_name_id
+          and extensions.unaccent(pn.name)
+            ilike extensions.unaccent('%' || search_term || '%')
+      )
+    )
+  -- SEARCH CANDIDATE LIMIT (500) -- see the comment block above. NOT the
+  -- 48-row VISIBLE SEARCH RESULT LIMIT the bookstore displays.
+  limit least(greatest(coalesce(result_limit, 500), 1), 500);
+$$;
+
+-- ------------------------------------------------------------
+-- 4. LB490: a book waiting for review keeps its original title too
+-- ------------------------------------------------------------
+create or replace function public.books_refuse_change_while_in_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if ((new.title, new.subtitle, new.description, new.keywords, new.isbn, new.language,
+       new.publisher, new.edition, new.original_publication_date, new.genre, new.categories,
+       new.cover_path, new.file_path, new.price_all, new.original_author, new.is_adult,
+       new.reading_age_min, new.edition_number, new.pen_name_id, new.book_type, new.original_title)
+      is distinct from
+      (old.title, old.subtitle, old.description, old.keywords, old.isbn, old.language,
+       old.publisher, old.edition, old.original_publication_date, old.genre, old.categories,
+       old.cover_path, old.file_path, old.price_all, old.original_author, old.is_adult,
+       old.reading_age_min, old.edition_number, old.pen_name_id, old.book_type, old.original_title)
+      -- A deleted series clears series_id through its foreign key (ON
+      -- DELETE SET NULL, run by a trigger, so depth > 1): allowed.
+      or ((new.series_id, new.series_position) is distinct from (old.series_id, old.series_position)
+          and not (pg_catalog.pg_trigger_depth() > 1 and new.series_id is null)))
+     and public.book_is_locked_for_review(old.id)
+  then
+    raise exception 'This book is waiting for review. Cancel the review to change it.'
+      using errcode = 'LB490';
+  end if;
+  -- Audit r2 (N2): a deleted series clears series_id through its foreign
+  -- key; its position goes with it, on every book of the series, so no
+  -- book keeps a position without a series (the app's own unlink before
+  -- the delete fails as a whole when one book is in review).
+  if pg_catalog.pg_trigger_depth() > 1 and new.series_id is null and old.series_id is not null then
+    new.series_position := null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger books_refuse_change_while_in_review on public.books;
+create trigger books_refuse_change_while_in_review
+  before update of title, subtitle, description, keywords, isbn, language, publisher, edition,
+    original_publication_date, genre, categories, cover_path, file_path, price_all,
+    original_author, is_adult, reading_age_min, edition_number, pen_name_id, series_id,
+    series_position, book_type, original_title
+  on public.books
+  for each row
+  execute function public.books_refuse_change_while_in_review();
+
+
+-- ============================================================
+-- Blog: "Written by" name (migration 20261122100000_blog_author_name.sql):
+-- blog_posts.author_name and create/update_blog_post() with
+-- p_author_name. Same statements as the migration; see its header.
+-- ============================================================
+-- 1. The column.
+alter table public.blog_posts
+  add column author_name text
+    constraint blog_posts_author_name_check
+    check (author_name is null
+           or (pg_catalog.char_length(author_name) between 1 and 80
+               and author_name = pg_catalog.btrim(author_name)
+               and author_name !~ '[[:cntrl:]]'));
+
+grant select (author_name) on public.blog_posts to anon, authenticated;
+
+-- 2. The two functions, one parameter more.
+drop function public.create_blog_post(text, text, text, text, text, text, boolean, text, text, boolean, text[]);
+drop function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[]);
+
+create function public.create_blog_post(
+  p_title text,
+  p_slug text,
+  p_excerpt text,
+  p_content_markdown text,
+  p_cover_image_path text,
+  p_category text,
+  p_featured boolean,
+  p_seo_title text,
+  p_seo_description text,
+  p_is_editorial boolean default false,
+  p_keywords text[] default '{}',
+  p_author_name text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_new_id uuid;
+  v_keyword text;
+  -- Written by: trimmed; empty = no name ("Nga Librum" / none).
+  v_author_name text := nullif(pg_catalog.btrim(coalesce(p_author_name, '')), '');
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('blog.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  -- Patch B: any blog_categories row except the Editorial section.
+  if p_category is null or p_category = 'editorial'
+     or not exists (select 1 from public.blog_categories c where c.value = p_category) then
+    raise exception 'invalid category';
+  end if;
+
+  if p_title is null or pg_catalog.char_length(p_title) = 0 or pg_catalog.char_length(p_title) > 200 then
+    raise exception 'title must be between 1 and 200 characters';
+  end if;
+  if p_slug is null or pg_catalog.char_length(p_slug) = 0 or pg_catalog.char_length(p_slug) > 200 then
+    raise exception 'slug must be between 1 and 200 characters';
+  end if;
+  if p_excerpt is null or pg_catalog.char_length(p_excerpt) = 0 or pg_catalog.char_length(p_excerpt) > 500 then
+    raise exception 'excerpt must be between 1 and 500 characters';
+  end if;
+  if p_content_markdown is null or pg_catalog.char_length(p_content_markdown) = 0
+     or pg_catalog.char_length(p_content_markdown) > 50000 then
+    raise exception 'content_markdown must be between 1 and 50000 characters';
+  end if;
+  if p_seo_title is not null and pg_catalog.char_length(p_seo_title) > 70 then
+    raise exception 'seo_title must be 70 characters or fewer';
+  end if;
+  if p_seo_description is not null and pg_catalog.char_length(p_seo_description) > 160 then
+    raise exception 'seo_description must be 160 characters or fewer';
+  end if;
+
+  if pg_catalog.cardinality(coalesce(p_keywords, '{}')) > 10 then
+    raise exception 'too many keywords';
+  end if;
+  foreach v_keyword in array coalesce(p_keywords, '{}') loop
+    if v_keyword is null or pg_catalog.char_length(pg_catalog.btrim(v_keyword)) = 0
+       or pg_catalog.char_length(v_keyword) > 40 then
+      raise exception 'each keyword must be between 1 and 40 characters';
+    end if;
+  end loop;
+
+  if v_author_name is not null
+     and (pg_catalog.char_length(v_author_name) > 80 or v_author_name ~ '[[:cntrl:]]') then
+    raise exception 'author_name must be 80 characters or fewer, with no control characters';
+  end if;
+
+  -- e4: one pin.
+  if coalesce(p_featured, false) then
+    update public.blog_posts set featured = false where featured;
+  end if;
+
+  insert into public.blog_posts
+    (title, slug, excerpt, content_markdown, cover_image_path, category, featured,
+     seo_title, seo_description, status, created_by, is_editorial, keywords, author_name)
+  values
+    (p_title, p_slug, p_excerpt, p_content_markdown, p_cover_image_path, p_category, coalesce(p_featured, false),
+     nullif(trim(coalesce(p_seo_title, '')), ''), nullif(trim(coalesce(p_seo_description, '')), ''),
+     'draft', v_actor_id, coalesce(p_is_editorial, false), coalesce(p_keywords, '{}'), v_author_name)
+  returning id into v_new_id;
+
+  return v_new_id;
+end;
+$$;
+
+create function public.update_blog_post(
+  p_id uuid,
+  p_title text,
+  p_slug text,
+  p_excerpt text,
+  p_content_markdown text,
+  p_cover_image_path text,
+  p_category text,
+  p_featured boolean,
+  p_seo_title text,
+  p_seo_description text,
+  p_is_editorial boolean default null,
+  p_keywords text[] default null,
+  p_author_name text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_published_at timestamptz;
+  v_current_slug text;
+  v_is_editorial boolean;
+  v_keywords text[];
+  v_keyword text;
+  v_author_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('blog.manage') then
+    raise exception 'not authorized';
+  end if;
+
+  select status, published_at, slug, is_editorial, keywords, author_name
+    into v_status, v_published_at, v_current_slug, v_is_editorial, v_keywords, v_author_name
+  from public.blog_posts
+  where id = p_id;
+
+  if v_status is null then
+    raise exception 'no such blog post';
+  end if;
+
+  -- e5: locked once live. A scheduled article that is not live yet
+  -- can still change it.
+  if v_status = 'published' and v_published_at <= pg_catalog.now()
+     and p_slug is distinct from v_current_slug then
+    raise exception 'slug is immutable once a post is published';
+  end if;
+
+  -- Patch B: any blog_categories row except the Editorial section.
+  if p_category is null or p_category = 'editorial'
+     or not exists (select 1 from public.blog_categories c where c.value = p_category) then
+    raise exception 'invalid category';
+  end if;
+
+  if p_title is null or pg_catalog.char_length(p_title) = 0 or pg_catalog.char_length(p_title) > 200 then
+    raise exception 'title must be between 1 and 200 characters';
+  end if;
+  if p_slug is null or pg_catalog.char_length(p_slug) = 0 or pg_catalog.char_length(p_slug) > 200 then
+    raise exception 'slug must be between 1 and 200 characters';
+  end if;
+  if p_excerpt is null or pg_catalog.char_length(p_excerpt) = 0 or pg_catalog.char_length(p_excerpt) > 500 then
+    raise exception 'excerpt must be between 1 and 500 characters';
+  end if;
+  if p_content_markdown is null or pg_catalog.char_length(p_content_markdown) = 0
+     or pg_catalog.char_length(p_content_markdown) > 50000 then
+    raise exception 'content_markdown must be between 1 and 50000 characters';
+  end if;
+  if p_seo_title is not null and pg_catalog.char_length(p_seo_title) > 70 then
+    raise exception 'seo_title must be 70 characters or fewer';
+  end if;
+  if p_seo_description is not null and pg_catalog.char_length(p_seo_description) > 160 then
+    raise exception 'seo_description must be 160 characters or fewer';
+  end if;
+
+  v_is_editorial := coalesce(p_is_editorial, v_is_editorial);
+  v_keywords := coalesce(p_keywords, v_keywords);
+
+  if pg_catalog.cardinality(v_keywords) > 10 then
+    raise exception 'too many keywords';
+  end if;
+  foreach v_keyword in array v_keywords loop
+    if v_keyword is null or pg_catalog.char_length(pg_catalog.btrim(v_keyword)) = 0
+       or pg_catalog.char_length(v_keyword) > 40 then
+      raise exception 'each keyword must be between 1 and 40 characters';
+    end if;
+  end loop;
+
+  -- A live or scheduled post always keeps at least one keyword.
+  if v_status = 'published' and pg_catalog.cardinality(v_keywords) = 0 then
+    raise exception 'a published article needs at least one keyword';
+  end if;
+
+  -- Written by: NULL = keep what the row has (an older call without
+  -- the parameter); '' or spaces = remove the name; otherwise trimmed.
+  if p_author_name is not null then
+    v_author_name := nullif(pg_catalog.btrim(p_author_name), '');
+  end if;
+  if v_author_name is not null
+     and (pg_catalog.char_length(v_author_name) > 80 or v_author_name ~ '[[:cntrl:]]') then
+    raise exception 'author_name must be 80 characters or fewer, with no control characters';
+  end if;
+
+  -- e4: one pin.
+  if coalesce(p_featured, false) then
+    update public.blog_posts set featured = false where featured and id <> p_id;
+  end if;
+
+  update public.blog_posts
+  set title = p_title,
+      slug = p_slug,
+      excerpt = p_excerpt,
+      content_markdown = p_content_markdown,
+      cover_image_path = p_cover_image_path,
+      category = p_category,
+      featured = coalesce(p_featured, false),
+      seo_title = nullif(trim(coalesce(p_seo_title, '')), ''),
+      seo_description = nullif(trim(coalesce(p_seo_description, '')), ''),
+      is_editorial = v_is_editorial,
+      keywords = v_keywords,
+      author_name = v_author_name,
+      updated_at = pg_catalog.now()
+  where id = p_id;
+end;
+$$;
+
+revoke all on function public.create_blog_post(text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
+  from public, anon, authenticated;
+grant execute on function public.create_blog_post(text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
+  to authenticated, service_role;
+
+revoke all on function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
+  from public, anon, authenticated;
+grant execute on function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
+  to authenticated, service_role;

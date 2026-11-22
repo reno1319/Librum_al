@@ -26,6 +26,7 @@ function validInput(overrides: Partial<BlogPostFieldInput> = {}): BlogPostFieldI
     featured: false,
     isEditorial: false,
     keywords: "",
+    authorName: "",
     seoTitle: "",
     seoDescription: "",
     ...overrides,
@@ -33,6 +34,48 @@ function validInput(overrides: Partial<BlogPostFieldInput> = {}): BlogPostFieldI
 }
 
 describe("validateBlogPostFields", () => {
+  it("au1: Written by is trimmed; empty means no name", () => {
+    const named = validateBlogPostFields(validInput({ authorName: "  Arben Hoxha  " }));
+    expect(named.ok && named.value.authorName).toBe("Arben Hoxha");
+    const empty = validateBlogPostFields(validInput({ authorName: "   " }));
+    expect(empty.ok && empty.value.authorName).toBeNull();
+  });
+
+  it("au1: Written by allows 80 characters (an emoji counts as one), not 81, and one line only", () => {
+    expect(validateBlogPostFields(validInput({ authorName: "ë".repeat(80) })).ok).toBe(true);
+    expect(validateBlogPostFields(validInput({ authorName: "😀".repeat(80) })).ok).toBe(true);
+    expect(validateBlogPostFields(validInput({ authorName: "a".repeat(81) }))).toEqual({
+      ok: false,
+      error: "Written by must be 80 characters or fewer.",
+    });
+    expect(validateBlogPostFields(validInput({ authorName: "Arben\nHoxha" }))).toEqual({
+      ok: false,
+      error: "Written by must be on one line.",
+    });
+  });
+
+  it("audit F2/F3: invisible characters, C1 controls and line separators are refused", () => {
+    for (const bad of ["Arben\u200bHoxha", "\u200b", "Arben\u202eHoxha", "Arben\u2060Hoxha", "Arben\ufeffHoxha"]) {
+      expect(validateBlogPostFields(validInput({ authorName: bad }))).toEqual({
+        ok: false,
+        error: "Written by can't contain invisible characters.",
+      });
+    }
+    for (const bad of ["Arben\u0085Hoxha", "Arben\u2028Hoxha", "Arben\u2029Hoxha"]) {
+      expect(validateBlogPostFields(validInput({ authorName: bad }))).toEqual({
+        ok: false,
+        error: "Written by must be on one line.",
+      });
+    }
+    expect(validateBlogPostFields(validInput({ authorName: "Ëndërr Çela-Gjoni" })).ok).toBe(true);
+  });
+
+  it("au1: the database's Written by message is mapped to plain words", () => {
+    expect(
+      mapBlogRpcError({ message: "author_name must be 80 characters or fewer, with no control characters" }),
+    ).toBe("Written by must be 80 characters or fewer, on one line.");
+  });
+
   it("accepts a fully valid input", () => {
     const result = validateBlogPostFields(validInput());
     expect(result.ok).toBe(true);
@@ -313,6 +356,16 @@ describe("markdownImageUrls / findDisallowedImageUrls (e2)", () => {
     // Code is shown as text, not as a picture, so it is not an image.
     expect(markdownImageUrls("`![a](https://x.test/c.png)`\n\n    ![b](https://x.test/d.png)")).toEqual([]);
     expect(findDisallowedImageUrls("![a [b]](https://evil.test/x.png)", BLOG, null)).toEqual(["https://evil.test/x.png"]);
+  });
+  it("checks only the part before # (img1/img3 size and position, 2026-11-22)", () => {
+    expect(findDisallowedImageUrls(`![x](${BLOG}inline/a.jpg#size=half&pos=left)`, BLOG, null)).toEqual([]);
+    // An old outside picture may be resized without being refused...
+    expect(findDisallowedImageUrls("![x](https://old.test/a.jpg#size=small&pos=right)", BLOG, "![x](https://old.test/a.jpg)")).toEqual([]);
+    // ...but a new outside one is still refused, with or without #.
+    expect(findDisallowedImageUrls("![x](https://new.test/b.jpg#size=half&pos=left)", BLOG, null)).toEqual(["https://new.test/b.jpg#size=half&pos=left"]);
+    expect(findDisallowedImageUrls(`![x](${BLOG}../avatars/a.jpg#size=half)`, BLOG, null)).toEqual([`${BLOG}../avatars/a.jpg#size=half`]);
+    // A "#" cannot sneak an outside address past the start check.
+    expect(findDisallowedImageUrls(`![x](https://evil.test/x.png#${BLOG})`, BLOG, null)).toEqual([`https://evil.test/x.png#${BLOG}`]);
   });
 });
 
