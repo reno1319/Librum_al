@@ -49,6 +49,19 @@ const SAMPLES: Record<string, string> = {
   "a heading with bold": "## Kreu **i fortë**",
   "a link with bold": "[**lidhje**](https://x.test)",
   "Albanian letters": "Ç'kemi, Ëmbëlsira, çështje",
+  // ls1 a (2026-11-22): each list keeps the spacing it was written with.
+  "a spaced bullet list": "Hyrje:\n\n- **Një**: e para.\n\n- **Dy**: e dyta.\n\n- Tre.\n\nPas.",
+  "a spaced numbered list": "1. një\n\n2. dy\n\n3. tre",
+  "a spaced numbered list starting at 4": "4. katër\n\n5. pesë",
+  "a bullet list with one gap": "- a\n- b\n\n- c",
+  "a numbered list with one gap": "1. a\n2. b\n\n3. c",
+  "a tight list then a paragraph": "1. a\n2. b\n\nParagraf.",
+  "an item with two paragraphs": "- a\n\n  vazhdim\n- b",
+  "a numbered item with two paragraphs": "1. a\n\n   vazhdim\n2. b",
+  "a spaced list with a tight list inside": "- a\n  - a1\n  - a2\n\n- b",
+  "a tight list with a spaced list inside": "- a\n  - a1\n\n  - a2\n- b",
+  "a spaced list in a quote": "> - a\n>\n> - b",
+  "star bullets, spaced": "* a\n\n* b",
 };
 
 describe("new editor: open and save changes nothing on the site", () => {
@@ -62,6 +75,30 @@ describe("new editor: open and save changes nothing on the site", () => {
     for (const md of Object.values(SAMPLES)) {
       const once = roundTrip(md);
       expect(roundTrip(once)).toBe(once);
+    }
+  });
+});
+
+describe("new editor: list spacing (ls1 a)", () => {
+  it("saves a spaced list and a tight list exactly as written", () => {
+    for (const md of ["- a\n\n- b\n\n- c", "- a\n- b\n- c", "1. a\n\n2. b", "1. a\n2. b", "Para.\n\n- a\n\n- b\n\nPas."]) {
+      expect(roundTrip(md)).toBe(md);
+    }
+  });
+
+  it("remembers the spacing on the list, so a new item added in a spaced list is spaced too", () => {
+    const doc = blogMarkdownToDoc("- a\n\n- b");
+    const list = doc.content?.[0];
+    expect(list?.attrs?.loose).toBe(true);
+    list?.content?.push({ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "c" }] }] });
+    expect(blogDocToMarkdown(doc)).toBe("- a\n\n- b\n\n- c");
+  });
+
+  it("a list made in the editor is tight, as before", () => {
+    const item = (t: string) => ({ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: t }] }] });
+    for (const type of ["bulletList", "orderedList"]) {
+      const doc = { type: "doc", content: [{ type, content: [item("a"), item("b")] }] };
+      expect(blogDocToMarkdown(doc)).toBe(type === "bulletList" ? "- a\n- b" : "1. a\n2. b");
     }
   });
 });

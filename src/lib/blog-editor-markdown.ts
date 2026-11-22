@@ -11,6 +11,7 @@
 import { type AnyExtension, type JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
+import { BulletList, OrderedList } from "@tiptap/extension-list";
 import { MarkdownManager } from "@tiptap/markdown";
 import { escapeAlt, escapeTitle } from "@/lib/markdown-format";
 import { isAllowedBlogHref } from "@/lib/blog-links";
@@ -50,6 +51,61 @@ export const BlogImage = Image.extend({
   },
 });
 
+// Spaced lists (ls1, 2026-11-22): a list written with a blank line
+// between its items ("loose") shows a gap between them on the site; one
+// without ("tight") does not. The editor remembers which kind each list
+// was and saves it the same way, so opening and saving an article keeps
+// every list looking exactly as it did. A list made in the editor is
+// tight, as before. The editor itself looks the same for both kinds.
+type ListToken = { loose?: unknown; items?: { raw?: unknown }[] };
+
+// Bullet lists come from the standard Markdown reader, which already
+// says whether a list is loose. Numbered lists come from Tiptap's own
+// reader, which does not, so it is worked out from the item text the
+// same way CommonMark does: a blank line between two items, or between
+// two parts of one item, makes the list loose.
+export function isLooseListToken(token: ListToken): boolean {
+  if (typeof token.loose === "boolean") return token.loose;
+  const items = Array.isArray(token.items) ? token.items : [];
+  return items.some((item, i) => {
+    const raw = typeof item.raw === "string" ? item.raw : "";
+    if (/\n[ \t]*\n[ \t]*\S/.test(raw)) return true;
+    return i < items.length - 1 && /\n[ \t]*$/.test(raw);
+  });
+}
+
+function withLooseAttr<T extends { attrs?: Record<string, unknown> }>(node: T | T[], token: ListToken): T | T[] {
+  if (Array.isArray(node) || !isLooseListToken(token)) return node;
+  return { ...node, attrs: { ...node.attrs, loose: true } };
+}
+
+const looseAttribute = {
+  loose: { default: false, rendered: false, parseHTML: () => false },
+};
+
+const renderList = (node: JSONContent, h: { renderChildren: (nodes: JSONContent[], separator?: string) => string }) =>
+  node.content ? h.renderChildren(node.content, node.attrs?.loose ? "\n\n" : "\n") : "";
+
+export const BlogBulletList = BulletList.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...looseAttribute };
+  },
+  parseMarkdown(token, helpers) {
+    return withLooseAttr(this.parent!(token, helpers), token);
+  },
+  renderMarkdown: (node, h) => renderList(node, h),
+});
+
+export const BlogOrderedList = OrderedList.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...looseAttribute };
+  },
+  parseMarkdown(token, helpers) {
+    return withLooseAttr(this.parent!(token, helpers), token);
+  },
+  renderMarkdown: (node, h) => renderList(node, h),
+});
+
 export function blogEditorExtensions(image: AnyExtension = BlogImage): AnyExtension[] {
   return [
     StarterKit.configure({
@@ -58,6 +114,9 @@ export function blogEditorExtensions(image: AnyExtension = BlogImage): AnyExtens
       // that turns into "++text++" on the site).
       underline: false,
       strike: false,
+      // Replaced below by the versions that remember list spacing.
+      bulletList: false,
+      orderedList: false,
       // Links (2026-11-22, lk1 c): pasting a web address onto selected
       // words links them; only addresses the link box accepts
       // (src/lib/blog-links.ts). A bare address typed as text stays text.
@@ -73,6 +132,8 @@ export function blogEditorExtensions(image: AnyExtension = BlogImage): AnyExtens
         isAllowedUri: (url: string) => isAllowedBlogHref(url),
       },
     }),
+    BlogBulletList,
+    BlogOrderedList,
     image,
   ];
 }
