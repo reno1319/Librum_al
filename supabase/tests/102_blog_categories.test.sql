@@ -94,6 +94,9 @@ insert into public.staff_members (user_id, role) values
 -- this schema again: their rollback files, newest first, put the database back
 -- on this migration's final state, so every part below still tests 102
 -- itself. (104's own suite tests the later migration.)
+-- Migration 20261122100000 (Written by name) came later still: its
+-- rollback goes first.
+\i supabase/tests/110_blog_author_name.rollback.sql
 \i supabase/tests/107_blog_categories_manage.rollback.sql
 \i supabase/tests/104_blog_editorial_keywords.rollback.sql
 

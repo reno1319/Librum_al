@@ -141,6 +141,7 @@ function fieldsFromFormData(formData: FormData) {
     featured: formData.get("featured") === "on",
     isEditorial: formData.get("isEditorial") === "on",
     keywords: String(formData.get("keywords") ?? ""),
+    authorName: String(formData.get("authorName") ?? ""),
     seoTitle: String(formData.get("seoTitle") ?? ""),
     seoDescription: String(formData.get("seoDescription") ?? ""),
   };
@@ -184,6 +185,7 @@ export async function createBlogPostAction(formData: FormData) {
     p_featured: validation.value.featured,
     p_is_editorial: validation.value.isEditorial,
     p_keywords: validation.value.keywords,
+    p_author_name: validation.value.authorName,
     p_seo_title: validation.value.seoTitle,
     p_seo_description: validation.value.seoDescription,
   });
@@ -225,6 +227,8 @@ export async function createBlogPostAction(formData: FormData) {
       p_featured: validation.value.featured,
       p_is_editorial: validation.value.isEditorial,
       p_keywords: validation.value.keywords,
+      // '' removes the name (NULL would keep the saved one).
+      p_author_name: validation.value.authorName ?? "",
       p_seo_title: validation.value.seoTitle,
       p_seo_description: validation.value.seoDescription,
     });
@@ -319,6 +323,8 @@ export async function updateBlogPostAction(postId: string, formData: FormData) {
     p_featured: validation.value.featured,
     p_is_editorial: validation.value.isEditorial,
     p_keywords: validation.value.keywords,
+    // '' removes the name (NULL would keep the saved one).
+    p_author_name: validation.value.authorName ?? "",
     p_seo_title: validation.value.seoTitle,
     p_seo_description: validation.value.seoDescription,
   });

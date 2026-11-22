@@ -120,8 +120,8 @@ begin
     and not has_function_privilege('anon', 'public.schedule_blog_post(uuid,timestamptz)', 'EXECUTE'),
     'part1: schedule_blog_post executable by authenticated only');
   perform pg_temp.assert(
-    has_function_privilege('anon', 'public.create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[])', 'EXECUTE') = false
-    and has_function_privilege('authenticated', 'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[])', 'EXECUTE'),
+    has_function_privilege('anon', 'public.create_blog_post(text,text,text,text,text,text,boolean,text,text,boolean,text[],text)', 'EXECUTE') = false
+    and has_function_privilege('authenticated', 'public.update_blog_post(uuid,text,text,text,text,text,text,boolean,text,text,boolean,text[],text)', 'EXECUTE'),
     'part1: create/update grants kept by CREATE OR REPLACE');
 end;
 $$;
@@ -242,6 +242,9 @@ select pg_temp.assert((select count(*) = 1 from public.admin_audit_log where act
 -- ============================================================
 -- Part 4: the migration on old data (extra pins cleared).
 -- ============================================================
+-- Migration 20261122100000 (Written by name) came later still: its
+-- rollback goes first.
+\i supabase/tests/110_blog_author_name.rollback.sql
 \i supabase/tests/106_blog_pin_schedule.rollback.sql
 delete from public.blog_posts;
 insert into public.blog_posts (title, slug, excerpt, content_markdown, category, status, published_at, featured, created_by, keywords, updated_at) values

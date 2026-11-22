@@ -266,6 +266,11 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "We couldn't review this report. Please try again.",
   "Write a message to the author.",
   "Write a note for “Other”.",
+  // Blog "Written by" (au1, 2026-11-22).
+  "Written by must be 80 characters or fewer.",
+  "Written by must be 80 characters or fewer, on one line.",
+  "Written by must be on one line.",
+  "Written by can't contain invisible characters.",
   "You can't approve or reject your own review. Another staff member has to.",
   "Write the reason for the suspension.",
   "You can't change your own role.",

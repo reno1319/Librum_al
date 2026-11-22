@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff";
 import { getBlogCategory } from "@/lib/blog-categories";
 import { getBlogCategories } from "@/lib/blog-categories-server";
 import { calculateReadingTime } from "@/lib/blog-reading-time";
+import { blogBylineName } from "@/lib/blog-byline";
 import { BlogMarkdown } from "@/components/blog-markdown";
 import type { BlogPostStatus } from "@/lib/types";
 import type { Metadata } from "next";
@@ -22,6 +23,7 @@ type PreviewBlogPost = {
   cover_image_path: string | null;
   category: string;
   is_editorial: boolean;
+  author_name: string | null;
   status: BlogPostStatus;
   published_at: string | null;
 };
@@ -42,7 +44,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
   const supabase = await createClient();
   const { data: post } = await supabase
     .from("blog_posts")
-    .select("id, title, excerpt, content_markdown, cover_image_path, category, is_editorial, status, published_at")
+    .select("id, title, excerpt, content_markdown, cover_image_path, category, is_editorial, author_name, status, published_at")
     .eq("id", id)
     .maybeSingle<PreviewBlogPost>();
 
@@ -54,6 +56,9 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
     ? supabase.storage.from("blog").getPublicUrl(post.cover_image_path).data.publicUrl
     : null;
   const readingMinutes = calculateReadingTime(post.content_markdown);
+  // pv1 b (Renato 2026-11-22): the same byline as the live article page
+  // (au2 a): the typed name, else "Librum" on Editorial, else none.
+  const bylineName = blogBylineName(post);
 
   // e3: a scheduled article is published with its time still ahead.
   const state = blogPublishState(post);
@@ -83,18 +88,17 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>
 
         <p className="mt-4 text-sm text-muted">
-          By Librum Editorial
+          {bylineName && `Nga ${bylineName} · `}
           {post.status === "published" && post.published_at && (
             <>
-              {" · "}
               {new Date(post.published_at).toLocaleDateString(undefined, {
                 year: "numeric",
                 month: "long",
                 day: "numeric",
               })}
+              {" · "}
             </>
           )}
-          {" · "}
           {readingMinutes} min read
         </p>
 

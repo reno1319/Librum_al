@@ -8,6 +8,7 @@ import { BlogCoverField } from "@/components/blog-cover-field";
 import { Button } from "@/components/ui/button";
 import { BlogContentEditor } from "./blog-content-editor";
 import {
+  AUTHOR_NAME_MAX_LENGTH,
   CONTENT_MARKDOWN_MAX_LENGTH,
   EXCERPT_MAX_LENGTH,
   KEYWORD_MAX_LENGTH,
@@ -27,6 +28,7 @@ export type BlogEditorInitialValues = {
   featured: boolean;
   isEditorial: boolean;
   keywords: string[];
+  authorName: string;
   seoTitle: string;
   seoDescription: string;
   contentMarkdown: string;
@@ -76,6 +78,7 @@ export function BlogEditorForm({
   const [contentMarkdown, setContentMarkdown] = useState(initialValues?.contentMarkdown ?? "");
   const [keywords, setKeywords] = useState((initialValues?.keywords ?? []).join(", "));
   const keywordCount = parseKeywords(keywords).length;
+  const [authorName, setAuthorName] = useState(initialValues?.authorName ?? "");
   const [seoTitle, setSeoTitle] = useState(initialValues?.seoTitle ?? "");
   const [seoDescription, setSeoDescription] = useState(initialValues?.seoDescription ?? "");
   const formRef = useRef<HTMLFormElement>(null);
@@ -171,6 +174,24 @@ export function BlogEditorForm({
             Adds the yellow &ldquo;Nga Librum&rdquo; tag and byline. The article shows in the
             Editorial section and in its category above.
           </span>
+        </span>
+      </label>
+
+      {/* au1 a / au2 a (Renato 2026-11-22): any name staff type, not an account. */}
+      <label className="flex flex-col gap-1 text-sm">
+        Written by (optional)
+        <input
+          type="text"
+          name="authorName"
+          value={authorName}
+          onChange={(e) => setAuthorName(e.target.value)}
+          maxLength={AUTHOR_NAME_MAX_LENGTH}
+          autoComplete="off"
+          className="rounded-control border border-control bg-surface px-3 py-2"
+        />
+        <span className="text-sm text-muted">
+          Shown under the title as &ldquo;Nga {authorName.trim() || "\u2026"}&rdquo;. Leave empty:
+          Editorial articles show &ldquo;Nga Librum&rdquo;, other articles show no name.
         </span>
       </label>
 
