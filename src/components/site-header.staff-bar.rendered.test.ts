@@ -50,6 +50,8 @@ vi.mock("@/app/(public)/auth/actions", () => ({ logout: vi.fn() }));
 vi.mock("@/components/nav-links", () => ({ NavLinks: () => null }));
 vi.mock("@/components/mobile-nav", () => ({ MobileNav: () => null }));
 vi.mock("@/components/feedback-button", () => ({ FeedbackButton: () => null }));
+let pathname = "/blog";
+vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 const { SiteHeader } = await import("./site-header");
 
@@ -65,6 +67,7 @@ describe("SiteHeader staff bar", () => {
     staffRead = { data: null, error: null };
     recovery = false;
     staffQueries.length = 0;
+    pathname = "/blog";
   });
 
   it("signed out: no bar and no staff read", async () => {
@@ -110,5 +113,32 @@ describe("SiteHeader staff bar", () => {
     staffRead = { data: { role: "owner" }, error: null };
     recovery = true;
     expect(await render()).not.toContain(BAR);
+  });
+
+  it("batch 2: the page link follows the role (Ndrysho on an article, Faqja e stafit on a book)", async () => {
+    const cases: [string, string, string | null][] = [
+      ["owner", "/blog/a", "Ndrysho"],
+      ["editor", "/blog/a", "Ndrysho"],
+      ["moderator", "/blog/a", null],
+      ["owner", "/libra/b", "Faqja e stafit"],
+      ["moderator", "/libra/b", "Faqja e stafit"],
+      ["editor", "/libra/b", null],
+      ["support", "/libra/b", null],
+    ];
+    for (const [role, path, label] of cases) {
+      staffRead = { data: { role }, error: null };
+      pathname = path;
+      const html = await render();
+      if (label === null) {
+        expect(html, `${role} ${path}`).not.toMatch(/>(Ndrysho|Faqja e stafit)</);
+      } else {
+        expect(html, `${role} ${path}`).toContain(`>${label}</a>`);
+      }
+    }
+    staffRead = { data: { role: "owner" }, error: null };
+    pathname = "/blog/a";
+    expect(await render()).toMatch(/<a [^>]*href="\/admin\/blog\/open\/a"[^>]*>Ndrysho<\/a>/);
+    pathname = "/libra/b";
+    expect(await render()).toMatch(/<a [^>]*href="\/admin\/books\/b"[^>]*>Faqja e stafit<\/a>/);
   });
 });

@@ -166,7 +166,10 @@ export async function SiteHeader() {
   return (
     <header className="relative bg-primary text-primary-foreground">
       {staffRole && !recoveryActive && (
-        <StaffBar canWritePosts={roleHasPermission(staffRole, "blog.manage")} />
+        <StaffBar
+          canWritePosts={roleHasPermission(staffRole, "blog.manage")}
+          canViewBooks={roleHasPermission(staffRole, "reports.view")}
+        />
       )}
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
