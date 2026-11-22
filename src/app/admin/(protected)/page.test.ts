@@ -275,6 +275,18 @@ describe("AdminPage (Today)", () => {
     expect(failed).toContain("Some items couldn’t be loaded.");
   });
 
+  it("+ New post (dashboard batch 1): only roles with blog.manage, linking to the new-post page", async () => {
+    for (const role of ["owner", "admin", "editor"] as const) {
+      const html = await renderAs(role);
+      expect(html, role).toMatch(/<a [^>]*href="\/admin\/blog\/new"[^>]*>\+ New post<\/a>/);
+    }
+    for (const role of ["moderator", "support"] as const) {
+      const html = await renderAs(role);
+      expect(html, role).not.toContain("+ New post");
+      expect(html, role).not.toContain('href="/admin/blog/new"');
+    }
+  });
+
   it("editor: no tiles, Nothing waiting, no activity, and no queue queries at all", async () => {
     const html = await renderAs("editor");
     expect(html).not.toContain('aria-label="Waiting"');
