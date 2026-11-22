@@ -13,6 +13,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import { MarkdownManager } from "@tiptap/markdown";
 import { escapeAlt, escapeTitle } from "@/lib/markdown-format";
+import { isAllowedBlogHref } from "@/lib/blog-links";
 import { joinBlogImageSrc, splitBlogImageSrc, type BlogImagePos, type BlogImageSize } from "@/lib/blog-image-layout";
 
 // Plain CommonMark, the same flavour BlogMarkdown shows. Without this,
@@ -57,7 +58,20 @@ export function blogEditorExtensions(image: AnyExtension = BlogImage): AnyExtens
       // that turns into "++text++" on the site).
       underline: false,
       strike: false,
-      link: { openOnClick: false, autolink: false, linkOnPaste: true },
+      // Links (2026-11-22, lk1 c): pasting a web address onto selected
+      // words links them; only addresses the link box accepts
+      // (src/lib/blog-links.ts). A bare address typed as text stays text.
+      // isAllowedUri: links in pasted HTML (copied from another page)
+      // obey the same list; a refused link is kept as plain words
+      // (audit LINK-r1 F1). Saved articles are read from Markdown, which
+      // does not use this check, so opening an old article changes nothing.
+      link: {
+        openOnClick: false,
+        autolink: false,
+        linkOnPaste: true,
+        shouldAutoLink: isAllowedBlogHref,
+        isAllowedUri: (url: string) => isAllowedBlogHref(url),
+      },
     }),
     image,
   ];

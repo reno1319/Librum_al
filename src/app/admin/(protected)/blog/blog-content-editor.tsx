@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import { Markdown } from "@tiptap/markdown";
 import { plainFileInputClasses } from "@/lib/form-styles";
@@ -8,6 +8,7 @@ import { BLOG_MARKED_OPTIONS, blogEditorExtensions } from "@/lib/blog-editor-mar
 import { EditorBlogImage } from "./blog-image-view";
 import { CropDialog } from "./blog-image-crop";
 import { uploadBlogPicture } from "./blog-image-upload";
+import { ActiveLinkHighlight, LinkBar, LinkSearchBox, selectionAnchor, type AnchorRect } from "./blog-link-popover";
 
 // Blog editor, one box (Renato 2026-11-22, ed3 a; pictures approved
 // 09:43 UTC): staff edit the article as it will look, in one place. The
@@ -19,6 +20,9 @@ import { uploadBlogPicture } from "./blog-image-upload";
 // Pictures: size, position, wrap and crop (img1-img3), see
 // blog-image-view.tsx. The old box jumped to the bottom after Bold or
 // Italic (item 1); this editor has no such box.
+// Links (2026-11-22, lk1 c): the 🔗 box opens under the selected words
+// (🔗 Link button or Ctrl+K / Cmd+K) and searches Librum; clicking a
+// link shows Open ↗ / Change / Remove (blog-link-popover.tsx).
 
 type Tool = { key: string; label: React.ReactNode; title: string; run: (e: Editor) => void; active: (e: Editor) => boolean };
 
@@ -65,18 +69,29 @@ export function BlogContentEditor({
   contentMarkdown: string;
   onChange: (value: string) => void;
 }) {
-  const [panel, setPanel] = useState<"none" | "image" | "link">("none");
+  const [panel, setPanel] = useState<"none" | "image">("none");
+  const [linkBox, setLinkBox] = useState<{ anchor: AnchorRect; initial: string } | null>(null);
+  const openLinkRef = useRef<() => void>(() => {});
 
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
       ...blogEditorExtensions(EditorBlogImage.configure({ staffUserId })),
+      ActiveLinkHighlight,
       Markdown.configure({ markedOptions: BLOG_MARKED_OPTIONS }),
     ],
     content: contentMarkdown,
     contentType: "markdown",
     editorProps: {
       attributes: { class: CONTENT_CLASS, "aria-label": "Content", "aria-multiline": "true", role: "textbox" },
+      handleKeyDown: (_view, event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          openLinkRef.current();
+          return true;
+        }
+        return false;
+      },
     },
     onUpdate: ({ editor: e }) => onChange(e.getMarkdown()),
   });
@@ -84,6 +99,31 @@ export function BlogContentEditor({
   const active = useEditorState({
     editor,
     selector: ({ editor: e }) => (e ? Object.fromEntries(TOOLS.map((t) => [t.key, t.active(e)]).concat([["link", e.isActive("link")]])) : {}),
+  });
+
+  // The bar for the link the cursor is in (only while the box is
+  // focused, nothing selected, and the 🔗 box is closed).
+  const linkState = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      if (!e || !e.isFocused || !e.state.selection.empty || !e.isActive("link")) return null;
+      const href = String(e.getAttributes("link").href ?? "");
+      const anchor = selectionAnchor(e);
+      return href && anchor ? { href, left: anchor.left, bottom: anchor.bottom } : null;
+    },
+    equalityFn: (a, b) => a?.href === b?.href && a?.left === b?.left && a?.bottom === b?.bottom,
+  });
+
+  function openLink() {
+    if (!editor) return;
+    const anchor = selectionAnchor(editor);
+    if (!anchor) return;
+    const current = editor.isActive("link") ? String(editor.getAttributes("link").href ?? "") : "";
+    setPanel("none");
+    setLinkBox({ anchor, initial: current });
+  }
+  useEffect(() => {
+    openLinkRef.current = openLink;
   });
 
   function insertPicture(url: string, caption: string) {
@@ -121,11 +161,13 @@ export function BlogContentEditor({
         <button
           type="button"
           title="Link"
-          aria-expanded={panel === "link"}
+          aria-keyshortcuts="Control+K Meta+K"
+          data-link-button=""
+          aria-expanded={linkBox !== null}
           disabled={!editor}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setPanel((p) => (p === "link" ? "none" : "link"))}
-          className={`${toolClass} ${panel === "link" || active?.link ? toolOn : ""}`}
+          onClick={() => (linkBox ? setLinkBox(null) : openLink())}
+          className={`${toolClass} ${linkBox || active?.link ? toolOn : ""}`}
         >
           🔗 Link
         </button>
@@ -141,82 +183,18 @@ export function BlogContentEditor({
         </button>
       </div>
 
-      {panel === "link" && editor && <LinkPanel editor={editor} onDone={() => setPanel("none")} />}
+      {linkBox && editor && (
+        <LinkSearchBox editor={editor} anchor={linkBox.anchor} initial={linkBox.initial} onClose={() => setLinkBox(null)} />
+      )}
+      {!linkBox && linkState && editor && (
+        <LinkBar editor={editor} anchor={linkState} href={linkState.href} onChange={openLink} />
+      )}
       {panel === "image" && (
         <InlineImagePanel staffUserId={staffUserId} onInserted={insertPicture} onCancel={() => setPanel("none")} />
       )}
 
       <div className="w-full min-w-0 rounded-control border border-control bg-surface focus-within:ring-2 focus-within:ring-primary/40">
         <EditorContent editor={editor} />
-      </div>
-    </div>
-  );
-}
-
-// 🔗 Link: the address for the selected words. With nothing selected,
-// the address itself is added as a link.
-function LinkPanel({ editor, onDone }: { editor: Editor; onDone: () => void }) {
-  const current = String(editor.getAttributes("link").href ?? "");
-  const [href, setHref] = useState(current || "https://");
-  const [error, setError] = useState("");
-
-  function apply() {
-    const value = href.trim();
-    if (!/^(https?:\/\/[^\s]+|mailto:[^\s]+)$/i.test(value) || value === "https://") {
-      setError("Please enter a full address starting with https://");
-      return;
-    }
-    const chain = editor.chain().focus();
-    if (editor.state.selection.empty && !editor.isActive("link")) {
-      chain.insertContent({ type: "text", text: value, marks: [{ type: "link", attrs: { href: value } }] }).run();
-    } else {
-      chain.extendMarkRange("link").setLink({ href: value }).run();
-    }
-    onDone();
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-3.5 text-sm lg:max-w-3xl">
-      <label className="flex flex-col gap-1">
-        Link address
-        <input
-          type="url"
-          value={href}
-          autoFocus
-          onChange={(e) => setHref(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              apply();
-            }
-          }}
-          className="rounded-control border border-control bg-background px-3 py-2"
-        />
-      </label>
-      {error && (
-        <p role="alert" className="text-red-700">
-          {error}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={apply} className="focus-ring inline-flex h-9 items-center rounded-full bg-primary px-4 font-medium text-primary-foreground">
-          Apply link
-        </button>
-        {current && (
-          <button
-            type="button"
-            onClick={() => {
-              editor.chain().focus().extendMarkRange("link").unsetLink().run();
-              onDone();
-            }}
-            className="focus-ring inline-flex h-9 items-center rounded-full border border-control px-4"
-          >
-            Remove link
-          </button>
-        )}
-        <button type="button" onClick={onDone} className="focus-ring inline-flex h-9 items-center rounded-full border border-control px-4">
-          Cancel
-        </button>
       </div>
     </div>
   );
