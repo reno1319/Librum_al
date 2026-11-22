@@ -77,6 +77,7 @@ export default async function AdminPage({
   const { error: rawError, preorderRun: rawRun } = (await searchParams) ?? {};
   const pageError = pageErrorMessage(rawError);
   const isOwner = role === "owner";
+  const canWritePosts = roleHasPermission(role, "blog.manage");
   const runCounts = isOwner ? parseRunCounts(rawRun) : null;
 
   const { showReports, showRefunds, showActivity, showReviews, showReaderReviews } = resolveTodayVisibility({
@@ -249,14 +250,24 @@ export default async function AdminPage({
           </p>
           <h1 className="mt-1 font-serif text-[2rem] font-bold text-primary md:mt-1.5 md:text-[2.5rem]">Today</h1>
         </div>
-        <ul aria-label="Status" className="flex flex-wrap gap-2 text-[0.8125rem]">
-          <li className="rounded-control border border-control px-2.5 py-1.5">
-            Paid publishing: <strong>{paidPublishingOn ? "On" : "Off"}</strong>
-          </li>
-          <li className="rounded-control border border-control px-2.5 py-1.5">
-            Paid checkout: <strong>{paidCheckoutOn ? "On" : "Off"}</strong>
-          </li>
-        </ul>
+        <div className="flex flex-wrap items-center gap-2">
+          {canWritePosts && (
+            <Link
+              href="/admin/blog/new"
+              className="focus-ring inline-flex min-h-11 items-center justify-center rounded-full bg-primary px-[1.125rem] text-[0.9375rem] font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              + New post
+            </Link>
+          )}
+          <ul aria-label="Status" className="flex flex-wrap gap-2 text-[0.8125rem]">
+            <li className="rounded-control border border-control px-2.5 py-1.5">
+              Paid publishing: <strong>{paidPublishingOn ? "On" : "Off"}</strong>
+            </li>
+            <li className="rounded-control border border-control px-2.5 py-1.5">
+              Paid checkout: <strong>{paidCheckoutOn ? "On" : "Off"}</strong>
+            </li>
+          </ul>
+        </div>
       </div>
 
       {pageError && (

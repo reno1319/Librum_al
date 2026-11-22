@@ -100,4 +100,16 @@ describe("AdminMobileNav (phone Section control)", () => {
     expect(source).toContain('from "@/components/dismissable-details"');
     expect(source).not.toMatch(/from\s+"[^"]*dashboard-menu/);
   });
+
+  it("Visit site (dashboard batch 1): every role gets it just above Log out, same tab", () => {
+    for (const role of ["owner", "admin", "editor", "moderator", "support"] as const) {
+      const html = render(role, "/admin");
+      const link = anchor(html, "/");
+      expect(link, role).not.toBe("");
+      expect(link).not.toContain("target=");
+      const visitAt = html.indexOf(">Visit site<");
+      expect(visitAt, role).toBeGreaterThan(-1);
+      expect(html.indexOf(">Log out<"), role).toBeGreaterThan(visitAt);
+    }
+  });
 });

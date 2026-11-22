@@ -87,6 +87,13 @@ export async function AdminShell({
             <span className="text-accent">{ROLE_LABELS[role]}</span>
           </p>
 
+          <Link
+            href="/"
+            className="focus-ring hidden min-h-11 items-center rounded-sm text-sm font-medium text-primary-foreground underline-offset-4 transition-colors hover:underline md:inline-flex"
+          >
+            Visit site
+          </Link>
+
           <form action={logout} className="hidden md:block">
             <button
               type="submit"

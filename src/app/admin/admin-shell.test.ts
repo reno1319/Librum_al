@@ -196,4 +196,15 @@ describe("AdminShell", () => {
     expect(typeof mobile.props.logoutAction).toBe("function");
     expect((sidebar.props.groups as NavGroupLike[]).map((g) => g.label)).toEqual(["Daily", "Catalog"]);
   });
+
+  it("Visit site (dashboard batch 1): a same-tab link to the public home page, desktop header only", async () => {
+    const { default: Link } = await import("next/link");
+    const shell = await AdminShell({ userId: "user-1", role: "moderator", children: "content" });
+    const header = findFirstByTagName(shell, "header");
+    const links = findAllByType(header?.props.children, Link);
+    const visit = links.find((l) => collectText(l.props.children as ReactNode).join("") === "Visit site");
+    expect(visit?.props.href).toBe("/");
+    expect(visit?.props.target).toBeUndefined();
+    expect(String(visit?.props.className).split(" ")).toEqual(expect.arrayContaining(["hidden", "md:inline-flex"]));
+  });
 });
