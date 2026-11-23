@@ -219,8 +219,10 @@ begin
   perform pg_temp.assert(
     (select array_agg(column_name::text order by ordinal_position) from information_schema.columns
       where table_schema = 'public' and table_name = 'public_pen_names')
-      = array['id', 'name', 'bio', 'avatar_path', 'links'],
-    'part6 (PEN-NAMES-2): public_pen_names must expose exactly these five columns, in this order'
+      -- BUILD 2b (migration 20261123160000) appends house_id and
+      -- linked_pen_name_id: both are pen name ids, never an account id.
+      = array['id', 'name', 'bio', 'avatar_path', 'links', 'house_id', 'linked_pen_name_id'],
+    'part6 (PEN-NAMES-2): public_pen_names must expose exactly these seven columns, in this order'
   );
   perform pg_temp.assert(
     (select count(*) from public.pen_names pn

@@ -9,6 +9,8 @@ import {
   PEN_NAME_MAX_LENGTH,
   PEN_NAME_MAX_LINKS,
   authorPagePath,
+  housePagePath,
+  PEN_NAME_LINKED_MESSAGE,
   readPenNameLinks,
   type OwnPenName,
 } from "@/lib/pen-names";
@@ -92,6 +94,10 @@ export function PenNameCard({
   const isMain = kind === "main" || kind === "house";
   const links = readPenNameLinks(penName.links);
   const Heading = isMain ? "h2" : "h3";
+  // BUILD 2b (b7 a, g1 a): staff linked this house author to the writer's
+  // own page, which shows the writer's own name, bio and photo. The house
+  // can't change any of it here (the database refuses a rename too).
+  const nameLocked = kind === "houseAuthor" && !!penName.linked_pen_name_id;
   const fromAuthors =
     kind === "houseAuthor" ? <input type="hidden" name={FROM_AUTHORS_FIELD} value={FROM_AUTHORS_VALUE} /> : null;
 
@@ -104,79 +110,85 @@ export function PenNameCard({
         </p>
       </div>
       {kind === "main" && <p className="mt-1 text-sm text-muted">Ky emër shfaqet te librat tuaj dhe te faqja juaj e autorit.</p>}
-      {/* A house's own page comes with build 2b (k1); until then no link. */}
-      {used && kind !== "house" && (
+      {/* BUILD 2b: the house's own page (b1 a). */}
+      {used && (
         <Link
-          href={authorPagePath(penName.id)}
+          href={kind === "house" ? housePagePath(penName.id) : authorPagePath(penName.id)}
           className="focus-ring mt-1 inline-block rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2"
         >
-          Shikoni faqen e autorit &rarr;
+          {kind === "house" ? "Shikoni faqen e shtëpisë botuese" : "Shikoni faqen e autorit"} &rarr;
         </Link>
       )}
 
-      <form
-        id={kind === "main" ? MAIN_CARD_FORM_ID : undefined}
-        action={updatePenName.bind(null, penName.id)}
-        className="mt-4 flex flex-col gap-4"
-      >
-        {fromAuthors}
-        <AvatarField userId={userId} existingAvatarUrl={photoUrl} label={wording.photoLabel} />
-        {photoUrl && (
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name="removePhoto" className="focus-ring size-4" />
-            {wording.removePhotoLabel}
-          </label>
-        )}
+      {nameLocked ? (
+        <p id={`linked-${penName.id}`} className="mt-4 text-sm text-muted" data-linked-locked>
+          {PEN_NAME_LINKED_MESSAGE}
+        </p>
+      ) : (
+        <form
+          id={kind === "main" ? MAIN_CARD_FORM_ID : undefined}
+          action={updatePenName.bind(null, penName.id)}
+          className="mt-4 flex flex-col gap-4"
+        >
+          {fromAuthors}
+          <AvatarField userId={userId} existingAvatarUrl={photoUrl} label={wording.photoLabel} />
+          {photoUrl && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="removePhoto" className="focus-ring size-4" />
+              {wording.removePhotoLabel}
+            </label>
+          )}
 
-        <label className="flex flex-col gap-1 text-sm">
-          {wording.nameLabel}
-          <input
-            name="name"
-            type="text"
-            required
-            maxLength={PEN_NAME_MAX_LENGTH}
-            defaultValue={penName.name}
-            className={formControlClasses}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
-          {wording.bioLabel}
-          <textarea
-            name="bio"
-            rows={4}
-            maxLength={PEN_NAME_BIO_MAX_LENGTH}
-            defaultValue={penName.bio ?? ""}
-            placeholder={wording.bioPlaceholder}
-            className={formControlClasses}
-          />
-        </label>
-
-        <fieldset className="flex flex-col gap-2 text-sm">
-          <legend className="mb-1">Lidhjet (opsionale, deri në {PEN_NAME_MAX_LINKS})</legend>
-          {Array.from({ length: PEN_NAME_MAX_LINKS }, (_, i) => (
+          <label className="flex flex-col gap-1 text-sm">
+            {wording.nameLabel}
             <input
-              key={i}
-              name="links"
-              type="url"
-              inputMode="url"
-              maxLength={PEN_NAME_LINK_MAX_LENGTH}
-              pattern="https://.*"
-              placeholder="https://"
-              aria-label={`Lidhja ${i + 1}`}
-              defaultValue={links[i] ?? ""}
+              name="name"
+              type="text"
+              required
+              maxLength={PEN_NAME_MAX_LENGTH}
+              defaultValue={penName.name}
               className={formControlClasses}
             />
-          ))}
-          <span className="text-muted">Adresa të plota interneti që fillojnë me https://.</span>
-        </fieldset>
+          </label>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="submit" className={buttonClasses("primary", "md")}>
-            Ruani
-          </button>
-        </div>
-      </form>
+          <label className="flex flex-col gap-1 text-sm">
+            {wording.bioLabel}
+            <textarea
+              name="bio"
+              rows={4}
+              maxLength={PEN_NAME_BIO_MAX_LENGTH}
+              defaultValue={penName.bio ?? ""}
+              placeholder={wording.bioPlaceholder}
+              className={formControlClasses}
+            />
+          </label>
+
+          <fieldset className="flex flex-col gap-2 text-sm">
+            <legend className="mb-1">Lidhjet (opsionale, deri në {PEN_NAME_MAX_LINKS})</legend>
+            {Array.from({ length: PEN_NAME_MAX_LINKS }, (_, i) => (
+              <input
+                key={i}
+                name="links"
+                type="url"
+                inputMode="url"
+                maxLength={PEN_NAME_LINK_MAX_LENGTH}
+                pattern="https://.*"
+                placeholder="https://"
+                aria-label={`Lidhja ${i + 1}`}
+                defaultValue={links[i] ?? ""}
+                className={formControlClasses}
+              />
+            ))}
+            <span className="text-muted">Adresa të plota interneti që fillojnë me https://.</span>
+          </fieldset>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="submit" className={buttonClasses("primary", "md")}>
+              Ruani
+            </button>
+          </div>
+        </form>
+      )}
 
       {wording.deleteLabel && !isMain && !used && (
         <form action={deletePenName.bind(null, penName.id)} className="mt-3">

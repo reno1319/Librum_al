@@ -78,7 +78,9 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
     // P1 (design B): the name links to the pen name's page.
     expect(source).toMatch(/<Link href=\{penNamePath\} className="[^"]*">\s*\{authorName\}\s*<\/Link>/);
     expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
-    expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
+    // BUILD 2b (b5 a): "More by" reads the About pen name plus the house
+    // pen names linked to it.
+    expect(source).toContain('.in("pen_name_id", aboutPenIds.length > 0 ? aboutPenIds : [book.pen_name_id])');
     expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
     expect(source).not.toMatch(/\/autore\/\$\{book\.author_id\}/);
   });
@@ -86,7 +88,10 @@ describe("PEN-NAMES-1: places that named the author now name the pen name", () =
   it("the author page names its pen name and lists only that pen name's books and bundles (1a)", () => {
     const source = readSrc("app/(public)/autore/[id]/page.tsx");
     expect(source).toContain("const authorPublicName = author.name;");
-    expect(source.match(/\.eq\("pen_name_id", id\)/g)?.length).toBeGreaterThanOrEqual(4);
+    // BUILD 2b (b3 a): the books shelf also lists the house books under
+    // pen names linked to this one; the other reads stay on this pen name.
+    expect(source).toContain('.in("pen_name_id", shelfPenIds)');
+    expect(source.match(/\.eq\("pen_name_id", id\)/g)?.length).toBeGreaterThanOrEqual(3);
     expect(source).not.toMatch(/\.eq\("author_id", id\)/);
     expect(source).not.toContain("No biography added yet.");
   });

@@ -49,7 +49,7 @@ export default async function HouseAuthorsPage({
   const [{ data: penNames }, { data: books }, { data: series }, { data: bundles }] = await Promise.all([
     supabase
       .from("pen_names")
-      .select("id, name, bio, avatar_path, links, is_default, created_at")
+      .select("id, name, bio, avatar_path, links, is_default, created_at, linked_pen_name_id")
       .eq("author_id", user.id)
       .eq("is_default", false)
       .order("created_at")

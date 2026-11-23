@@ -30,6 +30,7 @@ export function BookCard({
   book,
   coverUrl,
   authorName,
+  publishedBy,
 }: {
   // PEN-NAMES-1: the byline links to the book's pen name page, never to
   // the account (no author_id here).
@@ -48,6 +49,8 @@ export function BookCard({
     { status?: string | null; release_date?: string | null };
   coverUrl: string | null;
   authorName?: string | null;
+  // BUILD 2b: "Botuar nga <house>" on a linked writer's page.
+  publishedBy?: string | null;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -107,6 +110,12 @@ export function BookCard({
         ) : (
           <span className="w-fit text-[0.8125rem] text-muted">{authorName}</span>
         ))}
+
+      {publishedBy && (
+        <span data-published-by="" className="w-fit text-[0.8125rem] text-muted">
+          Botuar nga {publishedBy}
+        </span>
+      )}
 
       <span
         className={`text-sm font-bold ${book.price_all === 0 ? "text-[#2f6b4f]" : "text-primary"}`}

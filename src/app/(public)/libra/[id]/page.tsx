@@ -63,8 +63,9 @@ import {
 import { PD_PREPARED_BY, readPdEditionRedirect, showsPreparedBy } from "@/lib/pd-editions";
 import { readRightsBasisForPages } from "@/lib/librum-download-rights";
 import {
-  authorPagePath,
+  housePagePath,
   penNameLinkKind,
+  penNamePagePath,
   penNameLinkLabel,
   readPenNameLinks,
   type PenNameRef,
@@ -226,7 +227,7 @@ const getBookForDetail = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: book } = await supabase
     .from("public_books")
-    .select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")
+    .select("*, pen:public_pen_names(id, name, bio, avatar_path, links, house_id, linked_pen_name_id)")
     .eq("id", id)
     .single<BookWithAuthorBio>();
   return book;
@@ -498,6 +499,34 @@ export default async function BookDetailPage({
     ? readRightsBasisForPages(createAdminClient(), book.id)
     : null;
 
+  // BUILD 2b: a house book names its house ("Botuar nga", b2 a: not when
+  // the house itself is the author). A house author that staff linked to
+  // the writer's own name (b4 c, b5 a) shows that writer's page in "About
+  // the author": its bio, photo, links, Follow and book count, which also
+  // counts the house books linked to it.
+  const housePenId = book.pen?.house_id && book.pen.house_id !== book.pen.id ? book.pen.house_id : null;
+  const [{ data: houseRow }, { data: linkedPenRow }] = await Promise.all([
+    housePenId
+      ? supabase.from("public_pen_names").select("id, name").eq("id", housePenId).maybeSingle<PenNameRef>()
+      : Promise.resolve({ data: null }),
+    book.pen?.linked_pen_name_id
+      ? supabase
+          .from("public_pen_names")
+          .select("id, name, bio, avatar_path, links, house_id, linked_pen_name_id")
+          .eq("id", book.pen.linked_pen_name_id)
+          .maybeSingle<PublicPenName>()
+      : Promise.resolve({ data: null }),
+  ]);
+  const aboutPen: PublicPenName | null = linkedPenRow ?? book.pen;
+  const { data: linkedToAboutRows } = aboutPen
+    ? await supabase
+        .from("public_pen_names")
+        .select("id")
+        .eq("linked_pen_name_id", aboutPen.id)
+        .returns<{ id: string }[]>()
+    : { data: [] as { id: string }[] };
+  const aboutPenIds = aboutPen ? [aboutPen.id, ...(linkedToAboutRows ?? []).map((row) => row.id)] : [];
+
   const [
     { data: reviews },
     { data: myReviewRow, error: myReviewError },
@@ -568,7 +597,7 @@ export default async function BookDetailPage({
           .select("*, pen:public_pen_names(id, name)")
           .in("status", LISTED_BOOK_STATUSES)
           .not("price_all", "is", null)
-          .eq("pen_name_id", book.pen_name_id)
+          .in("pen_name_id", aboutPenIds.length > 0 ? aboutPenIds : [book.pen_name_id])
           .neq("id", id)
           .order("created_at", { ascending: false })
           .limit(8)
@@ -601,12 +630,12 @@ export default async function BookDetailPage({
     // book's pen name (PEN-NAMES-1, 4a), for the Follow button in About
     // the Author -- the same query the pen name's own page runs. Never
     // asked for the author themself or for a visitor who is not signed in.
-    user && !isAuthor && book.pen_name_id
+    user && !isAuthor && aboutPen
       ? supabase
           .from("pen_name_follows")
           .select("pen_name_id")
           .eq("follower_id", user.id)
-          .eq("pen_name_id", book.pen_name_id)
+          .eq("pen_name_id", aboutPen.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     // P1 (design B): "N libra në Librum" under the author's name -- a
@@ -618,7 +647,7 @@ export default async function BookDetailPage({
           .select("id", { count: "exact", head: true })
           .in("status", LISTED_BOOK_STATUSES)
           .not("price_all", "is", null)
-          .eq("pen_name_id", book.pen_name_id)
+          .in("pen_name_id", aboutPenIds.length > 0 ? aboutPenIds : [book.pen_name_id])
       : Promise.resolve({ count: null }),
     // Download count (Renato 11-15): "N shkarkime" under the genre -- one
     // per person who got this published book (bought or free), refunds
@@ -808,11 +837,11 @@ export default async function BookDetailPage({
                 : "Kthehu te libri",
         };
 
-  const authorAvatarUrl = book.pen?.avatar_path
-    ? supabase.storage.from("avatars").getPublicUrl(book.pen.avatar_path).data.publicUrl
+  const authorAvatarUrl = aboutPen?.avatar_path
+    ? supabase.storage.from("avatars").getPublicUrl(aboutPen.avatar_path).data.publicUrl
     : null;
-  const penNameLinks = readPenNameLinks(book.pen?.links);
-  const penNamePath = book.pen ? authorPagePath(book.pen.id) : null;
+  const penNameLinks = readPenNameLinks(aboutPen?.links);
+  const penNamePath = aboutPen ? penNamePagePath(aboutPen) : null;
 
   // REDESIGN STEP 3 (P2): the existing purchase sentence, as the price
   // card's footnote. Shown in the same purchase states as before.
@@ -1233,6 +1262,17 @@ export default async function BookDetailPage({
             </p>
           )}
 
+          {/* BUILD 2b (b2 a): "Botuar nga <house>", never when the house
+              itself is the author. */}
+          {houseRow && (
+            <p data-published-by="" className="mt-1 text-[0.9375rem] text-foreground">
+              Botuar nga{" "}
+              <Link href={housePagePath(houseRow.id)} className={INLINE_LINK_CLASSES}>
+                {houseRow.name}
+              </Link>
+            </p>
+          )}
+
           {/* BD15 P7 (Q4 a): the uploader of a public-domain edition, only
               when Librum gave the editor mention (otherwise no pen name
               reaches this page at all). */}
@@ -1391,7 +1431,8 @@ export default async function BookDetailPage({
                   </Link>
                 </DetailRow>
               )}
-              {book.publisher && (
+              {/* BUILD 2b (b6 a): a house book says it in "Botuar nga". */}
+              {book.publisher && !book.pen?.house_id && (
                 <DetailRow label="Botuesi">{book.publisher}</DetailRow>
               )}
               {/* BD15 P8: the edition number, else the old free text. */}
@@ -1548,7 +1589,7 @@ export default async function BookDetailPage({
                 <form
                   action={(isFollowingAuthor ? unfollowAuthorFromBook : followAuthorFromBook).bind(
                     null,
-                    book.pen_name_id!,
+                    aboutPen!.id,
                     book.id,
                   )}
                 >
@@ -1586,9 +1627,9 @@ export default async function BookDetailPage({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            {book.pen?.bio && (
+            {aboutPen?.bio && (
               <ExpandableText lines={3} className="max-w-[42.5rem] text-[0.9375rem] leading-relaxed text-foreground/90">
-                <p className="whitespace-pre-line">{book.pen.bio}</p>
+                <p className="whitespace-pre-line">{aboutPen.bio}</p>
               </ExpandableText>
             )}
             {penNamePath && (

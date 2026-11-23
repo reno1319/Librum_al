@@ -98,6 +98,8 @@ let penNameReadResult: Result = { data: { name: "Emri i Penës" }, error: null }
 let writerStorageOps: string[] = [];
 // BD15 P5b-2: a live book's waiting changes (none by default).
 let pendingReadResult: Result = { data: null, error: null };
+// BUILD 2b (b6 a): the caller's own account kind.
+let profileReadResult: Result = { data: { account_kind: "person" }, error: null };
 let rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 // Audit r1 F7: what later reads of books return (a change in between).
 let bookReads = 0;
@@ -118,6 +120,7 @@ function query(table: string) {
       if (table === "bundle_books") return bundleBooksResult;
       if (table === "pen_names") return penNameReadResult;
       if (table === "book_pending_changes") return pendingReadResult;
+      if (table === "profiles") return profileReadResult;
       if (table === "purchases" || table === "author_book_purchases") return { data: null, error: null, count: 0 } as Result;
       throw new Error(`unexpected read of ${table}`);
     }
@@ -375,6 +378,7 @@ beforeEach(() => {
   deleteResult = null;
   removeError = null;
   pendingReadResult = { data: null, error: null };
+  profileReadResult = { data: { account_kind: "person" }, error: null };
   rpcCalls = [];
   rpcError = null;
   bookReads = 0;
@@ -1557,6 +1561,27 @@ describe("saveBookContent (BD15 P3, the Content tab)", () => {
         { kind: "is", column: "file_path", value: null },
       ]),
     );
+  });
+
+  it("BUILD 2b (b6 a): a publishing house's book always gets the house name as its publisher", async () => {
+    profileReadResult = { data: { account_kind: "publishing_house" }, error: null };
+    penNameReadResult = { data: { name: "Botime Test" }, error: null };
+    await run(saveBookContent(BOOK_ID, form({ publisher: "Diçka tjetër" })));
+    const [write] = bookUpdates();
+    expect(write.payload).toEqual({ isbn: null, publisher: "Botime Test" });
+  });
+
+  it("BUILD 2b (audit F6): a house whose own name can't be read stops before any write", async () => {
+    profileReadResult = { data: { account_kind: "publishing_house" }, error: null };
+    penNameReadResult = { data: null, error: { code: "XX000" } } as Result;
+    await run(saveBookContent(BOOK_ID, form({ publisher: "Botime X" })));
+    expect(bookUpdates()).toHaveLength(0);
+  });
+
+  it("BUILD 2b: an unreadable account kind stops before any write", async () => {
+    profileReadResult = { data: null, error: { code: "XX000" } } as Result;
+    await run(saveBookContent(BOOK_ID, form({ publisher: "Botime X" })));
+    expect(bookUpdates()).toHaveLength(0);
   });
 
   it("no upload: no path key is written and no Storage call is made", async () => {

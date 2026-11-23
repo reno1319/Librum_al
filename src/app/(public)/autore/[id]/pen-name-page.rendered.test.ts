@@ -169,8 +169,12 @@ describe("PEN-NAMES-1 Author Page", () => {
     expect(html).not.toContain("Pako B");
     expect(html).not.toContain("Arben Leka");
     expect(html).toContain("1 ndjekës");
-    expect(log.find((q) => q.table === "public_pen_names")?.select).toBe("id, name, bio, avatar_path, links");
-    expect(log.filter((q) => q.table === "public_books" || q.table === "public_bundles").every((q) => q.filters.includes("eq:pen_name_id"))).toBe(true);
+    expect(log.find((q) => q.table === "public_pen_names")?.select).toBe(
+      "id, name, bio, avatar_path, links, house_id, linked_pen_name_id",
+    );
+    // BUILD 2b: the books by this name and by house authors linked to it.
+    expect(log.find((q) => q.table === "public_books")?.filters).toContain("in:pen_name_id");
+    expect(log.filter((q) => q.table === "public_bundles").every((q) => q.filters.includes("eq:pen_name_id"))).toBe(true);
     expect(log.some((q) => q.table === "books" || q.table === "bundles" || q.table === "series")).toBe(false);
     expect(log.some((q) => q.filters.includes("eq:author_id") && q.table !== "pen_names")).toBe(false);
   });
@@ -193,6 +197,39 @@ describe("PEN-NAMES-1 Author Page", () => {
     install();
     tables.public_bundles[0].bundle_books = [{ books: { status: "draft", is_adult: true } }, { books: null }];
     expect(await render()).not.toContain("18+");
+  });
+
+  // BUILD 2b (b1 a, b5 a): a house's own name forwards to its house
+  // page; a linked house author forwards to the writer's page while that
+  // page is public, and shows as before when it isn't.
+  it("BUILD 2b: a house's own name forwards to /shtepi-botuese/<id>", async () => {
+    install({ penA: { house_id: PEN_A, linked_pen_name_id: null } });
+    await expect(render()).rejects.toThrow(`REDIRECT:/shtepi-botuese/${PEN_A}`);
+  });
+
+  it("BUILD 2b: a linked house author forwards to the writer's page; not when that page is gone", async () => {
+    install({ penA: { house_id: "house", linked_pen_name_id: PEN_B } });
+    await expect(render()).rejects.toThrow(`REDIRECT:/autore/${PEN_B}`);
+
+    install({ penA: { house_id: "house", linked_pen_name_id: "cccccccc-0000-4000-8000-00000000000c" } });
+    expect(await render()).toContain("Libri i Penës A");
+  });
+
+  it("BUILD 2b: the writer's page lists the linked house books with 'Botuar nga <house>'", async () => {
+    const HOUSE = "dddddddd-0000-4000-8000-00000000000d";
+    const HOUSE_AUTHOR = "dddddddd-0000-4000-8000-00000000000e";
+    install();
+    tables.public_pen_names.push(
+      { id: HOUSE, name: "Botime Test", bio: null, avatar_path: null, links: [], house_id: HOUSE, linked_pen_name_id: null },
+      { id: HOUSE_AUTHOR, name: "Ëngjëll Çela", bio: null, avatar_path: null, links: [], house_id: HOUSE, linked_pen_name_id: PEN_A },
+    );
+    tables.public_books.push(withoutAccount(book("book-h1", "Libri i Shtëpisë", HOUSE_AUTHOR)));
+    const html = await render();
+    expect(html).toContain("Libri i Penës A");
+    expect(html).toContain("Libri i Shtëpisë");
+    expect(html).toMatch(/Botuar nga (<!-- -->)?Botime Test/);
+    expect(html.split("Botuar nga").length - 1).toBe(1);
+    expect(html).not.toContain("Libri i Penës B");
   });
 
   it("never links to the account or the author's other pen names", async () => {

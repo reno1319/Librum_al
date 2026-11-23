@@ -15,6 +15,7 @@ import {
   PEN_NAME_BIO_MAX_LENGTH,
   PEN_NAME_PHOTO_MAX_BYTES,
   PEN_NAME_TAKEN_MESSAGE,
+  PEN_NAME_LINKED_MESSAGE,
   authorPagePath,
   parsePenNameLinks,
   parsePenNameName,
@@ -87,7 +88,12 @@ function succeed(message: string, back: Back): never {
   redirect(`${back.page}?success=${encodeURIComponent(text)}`);
 }
 
-type OwnPenNameRow = { id: string; is_default: boolean; avatar_path: string | null };
+type OwnPenNameRow = {
+  id: string;
+  is_default: boolean;
+  avatar_path: string | null;
+  linked_pen_name_id: string | null;
+};
 
 async function requireOwnPenName(penNameId: string, back: Back) {
   if (!UUID_PATTERN.test(penNameId)) fail(SAVE_ERROR, back);
@@ -99,7 +105,7 @@ async function requireOwnPenName(penNameId: string, back: Back) {
 
   const { data: row, error } = await supabase
     .from("pen_names")
-    .select("id, is_default, avatar_path")
+    .select("id, is_default, avatar_path, linked_pen_name_id")
     .eq("id", penNameId)
     .eq("author_id", user.id)
     .maybeSingle<OwnPenNameRow>();
@@ -140,6 +146,10 @@ async function readStagedPhoto(
 export async function updatePenName(penNameId: string, formData: FormData) {
   const back = backFrom(formData);
   const { supabase, user, row } = await requireOwnPenName(penNameId, back);
+  // BUILD 2b (b7 a, g1 a): a house author staff linked to the writer's
+  // own page shows the writer's own name, bio and photo; nothing here is
+  // saved while the link stays.
+  if (row.linked_pen_name_id) fail(PEN_NAME_LINKED_MESSAGE, back);
 
   const name = parsePenNameName(formData.get("name"));
   if (!name.ok) fail(name.message, back);

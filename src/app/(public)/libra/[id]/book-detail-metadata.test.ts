@@ -90,7 +90,8 @@ describe("Book Detail: metadata tiles and rows, order and conditional rendering"
   });
 
   it("Publisher renders only book.publisher itself -- never a substituted 'Librum' or author name", () => {
-    const publisherRow = rows.match(/\{book\.publisher && \([\s\S]*?\)\}/)![0];
+    // BUILD 2b (b6 a): not on a publishing house's book ("Botuar nga").
+    const publisherRow = rows.match(/\{book\.publisher && !book\.pen\?\.house_id && \([\s\S]*?\)\}/)![0];
     expect(publisherRow).toContain("{book.publisher}");
     expect(publisherRow).not.toContain("Librum");
     expect(publisherRow).not.toContain("profiles?.display_name");
@@ -210,5 +211,25 @@ describe("Book Detail: page estimate and reading time", () => {
 
   it("reads the count from public_books, never the manuscript", () => {
     expect(source).not.toMatch(/countEpubWords|recordManuscriptWords|book_file_words/);
+  });
+});
+
+// BUILD 2b: "Botuar nga <house>" on a house author's book (b2 a: never
+// when the house itself is the author), and a linked house author's
+// "About the author" is the writer's own page (b5 a).
+describe("Book Detail: BUILD 2b publishing houses", () => {
+  it("names the house only for a house author's book, linked to the house page", () => {
+    expect(source).toContain(
+      "const housePenId = book.pen?.house_id && book.pen.house_id !== book.pen.id ? book.pen.house_id : null;",
+    );
+    const line = source.match(/\{houseRow && \([\s\S]*?\)\}/)![0];
+    expect(line).toContain("Botuar nga");
+    expect(line).toContain("href={housePagePath(houseRow.id)}");
+  });
+
+  it("About the author uses the linked writer's page when it is public, else the book's pen name", () => {
+    expect(source).toContain("const aboutPen: PublicPenName | null = linkedPenRow ?? book.pen;");
+    expect(source).toContain("const penNamePath = aboutPen ? penNamePagePath(aboutPen) : null;");
+    expect(source).toContain("{aboutPen?.bio && (");
   });
 });

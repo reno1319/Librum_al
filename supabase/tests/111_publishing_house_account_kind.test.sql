@@ -160,6 +160,9 @@ update public.profiles set account_kind = 'person' where id = :AUTHOR;
 -- ============================================================
 -- Part 4: the real files.
 -- ============================================================
+-- BUILD 2b's view reads account_kind, so its rollback goes first (the
+-- real order: newest migration rolled back first).
+\i supabase/tests/112_publishing_house_pages.rollback.sql
 \i supabase/tests/111_publishing_house_account_kind.rollback.sql
 \i supabase/tests/111_publishing_house_account_kind.rollback.sql
 

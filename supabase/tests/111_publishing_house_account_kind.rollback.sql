@@ -1,6 +1,7 @@
 -- ROLLBACK for migration 20261123140000_publishing_house_account_kind.sql.
 -- LOCAL/DISPOSABLE DATABASE TEST, or a deliberate rollback only.
--- Revert the app first. Lossy: every publishing house becomes an
+-- Revert the app first. Roll back 20261123160000_publishing_house_pages
+-- first (112_publishing_house_pages.rollback.sql): its view reads this column. Lossy: every publishing house becomes an
 -- ordinary author account (its role, pen names and books are untouched).
 -- Drops profiles.account_kind and its two CHECKs.
 

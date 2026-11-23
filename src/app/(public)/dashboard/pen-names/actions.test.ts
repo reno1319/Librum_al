@@ -87,6 +87,7 @@ vi.mock("@/lib/pen-name-write-client", () => ({
 }));
 
 const { updatePenName, deletePenName, createPenName } = await import("./actions");
+const { PEN_NAME_LINKED_MESSAGE } = await import("@/lib/pen-names");
 
 let ownRow: Record<string, unknown> | null;
 let profileRole: string;
@@ -185,6 +186,15 @@ describe("updatePenName", () => {
     ownRow = null;
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo" })))).toContain("?error=");
     expect(queries.some((q) => method(q, "update"))).toBe(false);
+  });
+
+  it("BUILD 2b (b7 a, g1 a): a house author linked to the writer's own page is refused, nothing written", async () => {
+    ownRow = { id: PEN_ID, is_default: false, avatar_path: null, linked_pen_name_id: NEW_ID };
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", bio: "New bio" })))).toBe(
+      `/dashboard/profile?error=${PEN_NAME_LINKED_MESSAGE}`,
+    );
+    expect(queries.some((q) => method(q, "update"))).toBe(false);
+    expect(storageCalls).toEqual([]);
   });
 
   it("a malformed id is refused before any query", async () => {

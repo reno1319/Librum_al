@@ -11,7 +11,13 @@ const BOOK = "c3333333-3333-4333-8333-333333333333";
 const AUTHOR = "a1111111-1111-4111-8111-111111111111";
 
 function render(
-  o: { hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[] } = {},
+  o: {
+    hasManuscript?: boolean;
+    aiAnswer?: "yes" | "no" | null;
+    aiUnreadable?: boolean;
+    markMissing?: string[];
+    housePublisher?: string | null;
+  } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookContentForm, {
@@ -30,6 +36,7 @@ function render(
       aiAnswer: o.aiAnswer ?? null,
       aiUnreadable: o.aiUnreadable ?? false,
       markMissing: o.markMissing,
+      housePublisher: o.housePublisher ?? null,
     }),
   );
 }
@@ -138,5 +145,14 @@ describe("BookContentForm: upload notes", () => {
     const html = render();
     expect(html).not.toContain("border-red-700");
     expect(html).not.toContain("Plotësojeni këtë para se ta dërgoni.");
+  });
+
+  it("BUILD 2b (g2 a): a house sees its own name as plain text, with no publisher box", () => {
+    const html = render({ housePublisher: "Botime <Test>" });
+    expect(html).toContain("data-house-publisher");
+    expect(html).toContain("Botuesi:</span> Botime &lt;Test&gt;");
+    expect(html).toContain("Emri i shtëpisë suaj botuese vendoset vetë.");
+    expect(html).not.toContain('name="publisher"');
+    expect(html).not.toContain("Botuesi / shtëpia botuese");
   });
 });

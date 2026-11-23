@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AdultTag } from "@/components/adult-tag";
 import { bundleIsAdult } from "@/lib/book-reader-details";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
@@ -18,6 +18,7 @@ import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { hasPermission } from "@/lib/staff";
 import {
   authorPagePath,
+  housePagePath,
   penNameLinkLabel,
   readPenNameLinks,
   type PublicPenName,
@@ -62,7 +63,7 @@ const getPublicPenName = cache(async (id: string) => {
   const supabase = await createClient();
   const { data: penName } = await supabase
     .from("public_pen_names")
-    .select("id, name, bio, avatar_path, links")
+    .select("id, name, bio, avatar_path, links, house_id, linked_pen_name_id")
     .eq("id", id)
     .maybeSingle<PublicPenName>();
   return penName ?? null;
@@ -133,6 +134,44 @@ export default async function AuthorProfilePage({
     notFound();
   }
 
+  // BUILD 2b (b1 a): a house's own name has its house page.
+  if (author.house_id && author.house_id === author.id) {
+    redirect(housePagePath(id));
+  }
+  // BUILD 2b (b5 a): a house author that staff linked to the writer's
+  // own name forwards to that page while it is public; if it isn't
+  // (unlinked, suspended, deleted), this page shows as before.
+  if (author.linked_pen_name_id && (await getPublicPenName(author.linked_pen_name_id))) {
+    redirect(authorPagePath(author.linked_pen_name_id));
+  }
+
+  // BUILD 2b: house authors linked to this name. Their books are listed
+  // here too, each with "Botuar nga <house>". Money is unchanged.
+  const { data: linkedRows } = await supabase
+    .from("public_pen_names")
+    .select("id, house_id")
+    .eq("linked_pen_name_id", id)
+    .returns<{ id: string; house_id: string | null }[]>();
+  const linkedPens = linkedRows ?? [];
+  const linkedHouseIds = Array.from(
+    new Set(linkedPens.map((row) => row.house_id).filter((v): v is string => !!v)),
+  );
+  const { data: linkedHouses } =
+    linkedHouseIds.length > 0
+      ? await supabase
+          .from("public_pen_names")
+          .select("id, name")
+          .in("id", linkedHouseIds)
+          .returns<{ id: string; name: string }[]>()
+      : { data: [] as { id: string; name: string }[] };
+  const houseNameById = new Map((linkedHouses ?? []).map((row) => [row.id, row.name]));
+  const publishedByPen = new Map<string, string>();
+  for (const row of linkedPens) {
+    const houseName = row.house_id ? houseNameById.get(row.house_id) : undefined;
+    if (houseName) publishedByPen.set(row.id, houseName);
+  }
+  const shelfPenIds = [id, ...publishedByPen.keys()];
+
   const admin = createAdminClient();
 
   // "Is this one of my own pen names?" -- pen_names RLS shows a
@@ -171,7 +210,7 @@ export default async function AuthorProfilePage({
       supabase
         .from("public_books")
         .select("*")
-        .eq("pen_name_id", id)
+        .in("pen_name_id", shelfPenIds)
         // BD16 P4 (D1): the author's pre-orders are listed too.
         .in("status", LISTED_BOOK_STATUSES)
         .not("price_all", "is", null)
@@ -419,7 +458,11 @@ export default async function AuthorProfilePage({
                   {/* No authorName -- we're already on this author's own
                       page, so BookCard's author byline would just link
                       back to the page the reader is already on. */}
-                  <BookCard book={book} coverUrl={coverUrl} />
+                  <BookCard
+                    book={book}
+                    coverUrl={coverUrl}
+                    publishedBy={book.pen_name_id ? publishedByPen.get(book.pen_name_id) : null}
+                  />
                 </li>
               );
             })}

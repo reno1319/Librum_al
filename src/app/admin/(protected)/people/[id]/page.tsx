@@ -25,7 +25,13 @@ import {
   type PersonRow,
 } from "../people-logic";
 import { accessFixNeeded, type AccessFix } from "../suspension-logic";
-import { liftSuspensionAsStaff, retryAccountAccessAsStaff, suspendAccountAsStaff } from "./actions";
+import {
+  liftSuspensionAsStaff,
+  linkHouseAuthorAsStaff,
+  retryAccountAccessAsStaff,
+  suspendAccountAsStaff,
+  unlinkHouseAuthorAsStaff,
+} from "./actions";
 import { setReviewNameAsStaff } from "../../reader-reviews/actions";
 import { REVIEW_NAME_MAX } from "@/lib/reader-reviews";
 import { SuspensionPanel } from "./suspension-panel";
@@ -65,7 +71,7 @@ export const dynamic = "force-dynamic";
 // reviews, which only staff change or clear once chosen. Read with the
 // service-role client after the people.view gate.
 
-type PenNameRow = { id: string; name: string; is_default: boolean };
+type PenNameRow = { id: string; name: string; is_default: boolean; linked_pen_name_id: string | null };
 type BookRow = { id: string; title: string; status: string; pen: { name: string } | null };
 type SuspensionRow = {
   id: string;
@@ -151,7 +157,7 @@ export default async function AdminPersonPage({
   const [pensResult, booksResult, suspensionsResult, reviewNameResult] = await Promise.all([
     admin
       .from("pen_names")
-      .select("id, name, is_default")
+      .select("id, name, is_default, linked_pen_name_id")
       .eq("author_id", id)
       .order("is_default", { ascending: false })
       .order("name", { ascending: true })
@@ -257,6 +263,27 @@ export default async function AdminPersonPage({
   // BUILD 2a-1: "Publishing house" for a house account.
   const typeLabel = personTypeLabel(person, reviewNameResult.data?.[0]?.account_kind ?? null);
 
+  // BUILD 2b: a house's authors (its non-default pen names) and, for a
+  // linked one, the email of the writer's own account it is linked to.
+  const isHouse = reviewNameResult.data?.[0]?.account_kind === "publishing_house";
+  const houseAuthors = isHouse ? pens.filter((pen) => !pen.is_default) : [];
+  const linkedEmailByTarget = new Map<string, string>();
+  const linkedTargets = houseAuthors.map((pen) => pen.linked_pen_name_id).filter((v): v is string => !!v);
+  if (linkedTargets.length > 0) {
+    const { data: targetRows } = await admin
+      .from("pen_names")
+      .select("id, author_id")
+      .in("id", linkedTargets)
+      .returns<{ id: string; author_id: string }[]>();
+    await Promise.all(
+      (targetRows ?? []).map(async (row) => {
+        const { data } = await admin.auth.admin.getUserById(row.author_id);
+        linkedEmailByTarget.set(row.id, data?.user?.email ?? "an account without an email");
+      }),
+    );
+  }
+  const unlinkedAuthors = houseAuthors.filter((pen) => !pen.linked_pen_name_id);
+
   const facts: [string, string][] = [
     ["Email", person.email ?? "No email"],
     ["Type", typeLabel],
@@ -315,23 +342,109 @@ export default async function AdminPersonPage({
         />
       )}
 
-      <section aria-labelledby="person-pen-names" className={SECTION_CLASSES}>
-        <h2 id="person-pen-names" className={SECTION_HEADING_CLASSES}>
-          Pen names
-        </h2>
-        {pens.length === 0 ? (
-          <p className="text-sm text-muted">No pen names.</p>
-        ) : (
-          <ul className="flex flex-col gap-1 text-sm">
-            {pens.map((pen) => (
-              <li key={pen.id} className="break-words">
-                {pen.name}
-                {pen.is_default && <span className="text-muted"> (default)</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {isHouse ? (
+        <section aria-labelledby="person-house-authors" className={SECTION_CLASSES}>
+          <h2 id="person-house-authors" className={SECTION_HEADING_CLASSES}>
+            Authors
+          </h2>
+          {houseAuthors.length === 0 ? (
+            <p className="text-sm text-muted">No authors yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-sm">
+              {houseAuthors.map((pen) => (
+                <li key={pen.id} className="break-words">
+                  <span className="font-semibold">{pen.name}</span>
+                  {pen.linked_pen_name_id ? (
+                    <>
+                      <span className="text-muted">
+                        {" "}
+                        · linked to the author account {linkedEmailByTarget.get(pen.linked_pen_name_id) ?? "(not found)"}{" "}
+                        (their own bio and photo show)
+                      </span>
+                      {canManage && (
+                        <form action={unlinkHouseAuthorAsStaff} className="ml-3 inline">
+                          <input type="hidden" name="userId" value={id} />
+                          <input type="hidden" name="pen_name_id" value={pen.id} />
+                          <button type="submit" className="focus-ring rounded-sm underline underline-offset-2">
+                            Unlink
+                          </button>
+                        </form>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-muted"> · not linked</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {canManage && unlinkedAuthors.length > 0 && (
+            <>
+              <p className="mt-3 text-sm text-muted">
+                Link one of this house&apos;s authors to the same writer&apos;s own author account, so readers see one
+                author page. The author name must be the same on both accounts. Check with the author first. Money
+                stays separate: each book pays the account that sells it.
+              </p>
+              <form action={linkHouseAuthorAsStaff} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                <input type="hidden" name="userId" value={id} />
+                {unlinkedAuthors.length === 1 ? (
+                  <input type="hidden" name="pen_name_id" value={unlinkedAuthors[0].id} />
+                ) : (
+                  <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold sm:w-56">
+                    Author
+                    <select
+                      name="pen_name_id"
+                      required
+                      className="min-h-11 rounded-control border border-control bg-surface px-3 font-normal"
+                    >
+                      {unlinkedAuthors.map((pen) => (
+                        <option key={pen.id} value={pen.id}>
+                          {pen.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-semibold">
+                  {unlinkedAuthors.length === 1
+                    ? `Link ${unlinkedAuthors[0].name} to the email of the writer's own author account`
+                    : "Email of the writer's own author account"}
+                  <input
+                    name="email"
+                    type="email"
+                    required
+                    className="min-h-11 rounded-control border border-control px-3 font-normal"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="focus-ring min-h-11 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+                >
+                  Link author
+                </button>
+              </form>
+            </>
+          )}
+        </section>
+      ) : (
+        <section aria-labelledby="person-pen-names" className={SECTION_CLASSES}>
+          <h2 id="person-pen-names" className={SECTION_HEADING_CLASSES}>
+            Pen names
+          </h2>
+          {pens.length === 0 ? (
+            <p className="text-sm text-muted">No pen names.</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-sm">
+              {pens.map((pen) => (
+                <li key={pen.id} className="break-words">
+                  {pen.name}
+                  {pen.is_default && <span className="text-muted"> (default)</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {!reviewNameResult.error && (
         <section aria-labelledby="person-review-name" className={SECTION_CLASSES}>

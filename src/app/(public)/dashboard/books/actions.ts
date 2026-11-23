@@ -874,6 +874,26 @@ export async function saveBookContent(bookId: string, formData: FormData) {
     fail(INVALID_ISBN_MESSAGE);
   }
   const publisherResolved = resolveBoundedOptionalText(formData, "publisher", PUBLISHER_MAX_LENGTH, "Botuesi", here);
+  // BUILD 2b (b6 a): a publishing house's books always carry the house
+  // name (its own pen name) as the publisher; the form can't change it.
+  // Own-row reads; an unreadable kind stops before any write.
+  const [{ data: kindRow, error: kindError }, { data: housePen, error: housePenError }] = await Promise.all([
+    supabase.from("profiles").select("account_kind").eq("id", user.id).maybeSingle<{ account_kind: string | null }>(),
+    supabase
+      .from("pen_names")
+      .select("name")
+      .eq("author_id", user.id)
+      .eq("is_default", true)
+      .maybeSingle<{ name: string }>(),
+  ]);
+  if (kindError) return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  const isHouse = kindRow?.account_kind === "publishing_house";
+  // A house whose own name can't be read stops too (audit F6), never a
+  // silent save without the house name.
+  if (isHouse && (housePenError || !housePen?.name)) {
+    return fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+  }
+  const housePublisher = isHouse ? housePen!.name : null;
   // Not answered stays not answered; a value other than yes/no is refused.
   const rawAi = formData.get("aiUsed");
   const aiAnswer = parseAiAnswer(rawAi);
@@ -980,7 +1000,11 @@ export async function saveBookContent(bookId: string, formData: FormData) {
   // provably the ones this write replaced.
   const payload = {
     ...(isbnPresent ? { isbn } : {}),
-    ...(publisherResolved.present ? { publisher: publisherResolved.value } : {}),
+    ...(housePublisher !== null
+      ? { publisher: housePublisher }
+      : publisherResolved.present
+        ? { publisher: publisherResolved.value }
+        : {}),
     ...(!live && newCoverPath !== null ? { cover_path: newCoverPath } : {}),
     ...(!live && newManuscriptPath !== null ? { file_path: newManuscriptPath } : {}),
   };

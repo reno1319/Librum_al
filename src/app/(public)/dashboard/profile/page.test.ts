@@ -84,8 +84,13 @@ describe("Dashboard Profili for a publishing house", () => {
     expect(wording).toContain("deleteLabel: null");
   });
 
-  it("k1: no link to the house page until build 2b", () => {
-    expect(card).toContain('{used && kind !== "house" && (');
-    expect(card).not.toContain("Shikoni faqen e shtëpisë botuese");
+  it("BUILD 2b: the house card links to the house page (b1 a); author cards to the author page", () => {
+    expect(card).toContain('href={kind === "house" ? housePagePath(penName.id) : authorPagePath(penName.id)}');
+    expect(card).toContain('{kind === "house" ? "Shikoni faqen e shtëpisë botuese" : "Shikoni faqen e autorit"}');
+  });
+
+  it("BUILD 2b (b7 a, g1 a): a linked house author's card has no form, only the note", () => {
+    expect(card).toContain('const nameLocked = kind === "houseAuthor" && !!penName.linked_pen_name_id;');
+    expect(card).toMatch(/\{nameLocked \? \(\s*<p id=\{`linked-\$\{penName\.id\}`\}[^>]*>\s*\{PEN_NAME_LINKED_MESSAGE\}\s*<\/p>\s*\) : \(\s*<form/);
   });
 });

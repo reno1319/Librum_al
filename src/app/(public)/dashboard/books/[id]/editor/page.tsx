@@ -330,6 +330,14 @@ export default async function BookEditorPage({
   // pen name, also after a cancel (books_lock_after_first_publish).
   const locked = book.published_at !== null || (book.preorder_listed_at ?? null) !== null;
   const penNameList = penNames ?? [];
+  // BUILD 2b (b6 a): a house sees its own name as the publisher.
+  const { data: kindRow } = await supabase
+    .from("profiles")
+    .select("account_kind")
+    .eq("id", user.id)
+    .maybeSingle<{ account_kind: string | null }>();
+  const housePublisher =
+    kindRow?.account_kind === "publishing_house" ? penNameList.find((p) => p.is_default)?.name ?? null : null;
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
   const detailsMissingItems = missingDetailItems({
@@ -499,6 +507,7 @@ export default async function BookEditorPage({
             live={live}
             authorId={user.id}
             authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
+            housePublisher={housePublisher}
             aiAnswer={ai.ok ? ai.answer : null}
             aiUnreadable={!ai.ok}
             markMissing={showMissing ? contentMissing : []}

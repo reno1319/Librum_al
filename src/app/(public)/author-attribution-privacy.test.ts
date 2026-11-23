@@ -188,7 +188,7 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   // pen name view. PEN-NAMES-2: nothing on the page reads
   // public_author_profiles any more.
   it("every author-attribution select on this page reads the pen name view, never the base profiles table", () => {
-    expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")');
+    expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links, house_id, linked_pen_name_id)")');
     const shelfSelects = source.match(/\.select\("\*, pen:public_pen_names\(id, name\)"\)/g) ?? [];
     expect(shelfSelects.length).toBe(2); // moreByAuthor + youMightLike
     expect(source).not.toMatch(/public_author_profiles\(/);

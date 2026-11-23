@@ -181,8 +181,10 @@ begin
   perform pg_temp.assert(
     (select array_agg(column_name::text order by ordinal_position) from information_schema.columns
       where table_schema = 'public' and table_name = 'public_pen_names')
-      = array['id', 'name', 'bio', 'avatar_path', 'links'],
-    'part3 (PEN-NAMES-2): public_pen_names has exactly id, name, bio, avatar_path, links -- no account id or display name');
+      -- BUILD 2b (migration 20261123160000) appends house_id and
+      -- linked_pen_name_id: both are PEN NAME ids, never an account id.
+      = array['id', 'name', 'bio', 'avatar_path', 'links', 'house_id', 'linked_pen_name_id'],
+    'part3 (PEN-NAMES-2): public_pen_names has exactly id, name, bio, avatar_path, links (+ house_id, linked_pen_name_id: pen name ids) -- no account id or display name');
   perform pg_temp.assert(
     (select array_agg(a.privilege_type::text order by a.privilege_type)
        from pg_class c cross join lateral aclexplode(c.relacl) a

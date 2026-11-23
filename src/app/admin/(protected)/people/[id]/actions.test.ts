@@ -60,7 +60,13 @@ const mockScheduleReaders = vi.fn();
 vi.mock("@/lib/preorder-emails", () => ({
   scheduleWaitingReaderEmails: (source: string) => mockScheduleReaders(source),
 }));
-const { suspendAccountAsStaff, liftSuspensionAsStaff, retryAccountAccessAsStaff } = await import("./actions");
+const {
+  suspendAccountAsStaff,
+  liftSuspensionAsStaff,
+  retryAccountAccessAsStaff,
+  linkHouseAuthorAsStaff,
+  unlinkHouseAuthorAsStaff,
+} = await import("./actions");
 
 const ANA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PAGE = `/admin/people/${ANA}`;
@@ -283,5 +289,65 @@ describe("retryAccountAccessAsStaff", () => {
     mockUpdateUserById.mockResolvedValueOnce({ data: null, error: { code: "unexpected_failure" } });
     const target = await redirectOf(() => retryAccountAccessAsStaff(form({ userId: ANA })));
     expect(messageOf(target, "error")).toBe("Couldn't update sign-in. Please try again.");
+  });
+});
+
+// BUILD 2b (b4 c): the staff author link. people.manage, then the RPC on
+// the staff session (it checks the house, the account and the name
+// match, and writes the audit log); each refusal has its own message and
+// the email is never logged.
+describe("linkHouseAuthorAsStaff / unlinkHouseAuthorAsStaff", () => {
+  const PEN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  it("links through the staff session with people.manage and says so", async () => {
+    mockRpc.mockResolvedValue({ data: "linked", error: null });
+    const target = await redirectOf(() =>
+      linkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: PEN, email: " Writer@Example.com " })),
+    );
+    expect(mockRequireStaff).toHaveBeenCalledWith("people.manage");
+    expect(mockRpc).toHaveBeenCalledWith("staff_link_house_author", { p_pen_name_id: PEN, p_email: "Writer@Example.com" });
+    expect(target.startsWith(PAGE)).toBe(true);
+    expect(messageOf(target, "success")).toBe("Author linked. Readers now see the writer's own author page.");
+  });
+
+  it("maps every refusal, and an unknown answer or an error to the generic message", async () => {
+    const cases: [unknown, unknown, string][] = [
+      ["no_match", null, "No author name on that account matches this author's name exactly. Nothing was linked."],
+      ["no_account", null, "No account has that email."],
+      ["not_author", null, "That account is not a writer's own author account."],
+      ["same_account", null, "That email belongs to this house's own account."],
+      ["already_linked", null, "That author is already linked. Unlink it first."],
+      ["not_house_author", null, "That author can't be linked."],
+      ["something_else", null, "The author link could not be changed. Please try again."],
+      ["toString", null, "The author link could not be changed. Please try again."],
+      [null, { code: "42501" }, "The author link could not be changed. Please try again."],
+    ];
+    for (const [data, error, message] of cases) {
+      mockRpc.mockResolvedValue({ data, error });
+      const target = await redirectOf(() => linkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: PEN, email: "w@example.com" })));
+      expect(messageOf(target, "error")).toBe(message);
+    }
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("w@example.com");
+  });
+
+  it("refuses an empty email or a bad id without calling the RPC", async () => {
+    let target = await redirectOf(() => linkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: PEN, email: "  " })));
+    expect(messageOf(target, "error")).toBe("No account has that email.");
+    target = await redirectOf(() => linkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: "x", email: "w@example.com" })));
+    expect(messageOf(target, "error")).toBe("The author link could not be changed. Please try again.");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("unlinks through the staff session; already unlinked counts as done", async () => {
+    for (const data of ["unlinked", "not_linked"]) {
+      mockRpc.mockResolvedValue({ data, error: null });
+      const target = await redirectOf(() => unlinkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: PEN })));
+      expect(mockRpc).toHaveBeenLastCalledWith("staff_unlink_house_author", { p_pen_name_id: PEN });
+      expect(messageOf(target, "success")).toBe("Author unlinked. The house's own author page is back.");
+    }
+    mockRpc.mockResolvedValue({ data: "not_found", error: null });
+    const target = await redirectOf(() => unlinkHouseAuthorAsStaff(form({ userId: ANA, pen_name_id: PEN })));
+    expect(messageOf(target, "error")).toBe("The author link could not be changed. Please try again.");
   });
 });

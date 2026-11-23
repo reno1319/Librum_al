@@ -26,6 +26,7 @@ import {
   readUserId,
   validateSuspendForm,
 } from "../suspension-logic";
+import { isUuid } from "../../books/book-admin-logic";
 
 // PEOPLE-2 (1a, 2a): Suspend, Lift, and "Try again" for the sign-in step.
 // Same shape as the book takedown actions (books/actions.ts): the
@@ -231,4 +232,77 @@ export async function retryAccountAccessAsStaff(formData: FormData) {
   const ok = await setBan(userId, fix === "ban" ? SUSPEND_BAN_DURATION : LIFT_BAN_DURATION);
   revalidateEverything(userId);
   redirect(withQuery(backTo, ok ? "success" : "error", ok ? ACCESS_FIXED_SUCCESS_MESSAGE : ACCESS_RETRY_FAILED_MESSAGE));
+}
+
+// BUILD 2b (b4 c): staff link one of a publishing house's authors to the
+// SAME name on the writer's own author account, and unlink it. The RPCs
+// run through the staff member's own session (auth.uid() is the staff
+// member; they re-check people.manage, the house, the account and the
+// name match) and write the audit log. The email is never logged.
+const HOUSE_AUTHOR_LINKED_MESSAGE = "Author linked. Readers now see the writer's own author page.";
+const HOUSE_AUTHOR_UNLINKED_MESSAGE = "Author unlinked. The house's own author page is back.";
+const HOUSE_AUTHOR_GENERIC_ERROR = "The author link could not be changed. Please try again.";
+const HOUSE_AUTHOR_NO_ACCOUNT = "No account has that email.";
+const HOUSE_AUTHOR_LINK_ERRORS: Record<string, string> = {
+  generic: HOUSE_AUTHOR_GENERIC_ERROR,
+  not_found: "That author can't be linked.",
+  not_house_author: "That author can't be linked.",
+  already_linked: "That author is already linked. Unlink it first.",
+  no_account: HOUSE_AUTHOR_NO_ACCOUNT,
+  same_account: "That email belongs to this house's own account.",
+  not_author: "That account is not a writer's own author account.",
+  no_match: "No author name on that account matches this author's name exactly. Nothing was linked.",
+};
+
+function readPenNameId(formData: FormData): string | null {
+  const value = formData.get("pen_name_id");
+  return isUuid(value) ? value : null;
+}
+
+export async function linkHouseAuthorAsStaff(formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/people");
+  }
+  await requireStaff("people.manage");
+
+  const userId = readUserId(formData);
+  if (!userId) redirect(withQuery("/admin/people", "error", HOUSE_AUTHOR_GENERIC_ERROR));
+  const back = personPath(userId);
+  const penNameId = readPenNameId(formData);
+  const email = String(formData.get("email") ?? "").trim();
+  if (!penNameId) redirect(withQuery(back, "error", HOUSE_AUTHOR_GENERIC_ERROR));
+  if (!email) redirect(withQuery(back, "error", HOUSE_AUTHOR_NO_ACCOUNT));
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("staff_link_house_author", { p_pen_name_id: penNameId, p_email: email });
+  if (error) console.error("linkHouseAuthorAsStaff: staff_link_house_author failed", { code: error.code ?? null });
+  if (error || data !== "linked") {
+    const code = !error && typeof data === "string" && Object.hasOwn(HOUSE_AUTHOR_LINK_ERRORS, data) ? data : "generic";
+    redirect(withQuery(back, "error", HOUSE_AUTHOR_LINK_ERRORS[code]));
+  }
+  revalidateEverything(userId);
+  redirect(withQuery(back, "success", HOUSE_AUTHOR_LINKED_MESSAGE));
+}
+
+export async function unlinkHouseAuthorAsStaff(formData: FormData) {
+  if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) {
+    redirectForMaintenance("/admin/people");
+  }
+  await requireStaff("people.manage");
+
+  const userId = readUserId(formData);
+  if (!userId) redirect(withQuery("/admin/people", "error", HOUSE_AUTHOR_GENERIC_ERROR));
+  const back = personPath(userId);
+  const penNameId = readPenNameId(formData);
+  if (!penNameId) redirect(withQuery(back, "error", HOUSE_AUTHOR_GENERIC_ERROR));
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("staff_unlink_house_author", { p_pen_name_id: penNameId });
+  if (error) console.error("unlinkHouseAuthorAsStaff: staff_unlink_house_author failed", { code: error.code ?? null });
+  // Already unlinked (another tab) counts as done.
+  if (error || (data !== "unlinked" && data !== "not_linked")) {
+    redirect(withQuery(back, "error", HOUSE_AUTHOR_GENERIC_ERROR));
+  }
+  revalidateEverything(userId);
+  redirect(withQuery(back, "success", HOUSE_AUTHOR_UNLINKED_MESSAGE));
 }

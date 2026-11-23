@@ -59,7 +59,10 @@ export function BookContentForm({
   aiUnreadable,
   live = false,
   markMissing = [],
+  housePublisher = null,
 }: {
+  // BUILD 2b (b6 a): a publishing house's name, shown read-only.
+  housePublisher?: string | null;
   action: (formData: FormData) => void | Promise<void>;
   // Upload notes 2 (Enkelejd 11-06): opened from the Pricing tab's to-do
   // list -- the boxes of what is still missing for the send are red.
@@ -167,19 +170,29 @@ export function BookContentForm({
             className={EDITOR_CONTROL_CLASSES}
           />
         </label>
-        <label className={EDITOR_FIELD_CLASSES}>
-          <span className={EDITOR_LABEL_CLASSES}>
-            Botuesi / shtëpia botuese
-            <Optional />
-          </span>
-          <input
-            name="publisher"
-            type="text"
-            defaultValue={book.publisher ?? ""}
-            maxLength={200}
-            className={EDITOR_CONTROL_CLASSES}
-          />
-        </label>
+        {/* BUILD 2b (g2 a): a house's own name, as plain text. */}
+        {housePublisher !== null ? (
+          <div className={EDITOR_FIELD_CLASSES} data-house-publisher>
+            <p className="text-sm text-foreground">
+              <span className="font-medium">Botuesi:</span> {housePublisher}
+            </p>
+            <p className="text-xs text-muted">Emri i shtëpisë suaj botuese vendoset vetë.</p>
+          </div>
+        ) : (
+          <label className={EDITOR_FIELD_CLASSES}>
+            <span className={EDITOR_LABEL_CLASSES}>
+              Botuesi / shtëpia botuese
+              <Optional />
+            </span>
+            <input
+              name="publisher"
+              type="text"
+              defaultValue={book.publisher ?? ""}
+              maxLength={200}
+              className={EDITOR_CONTROL_CLASSES}
+            />
+          </label>
+        )}
       </EditorSection>
 
       <EditorActionBar

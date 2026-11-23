@@ -356,16 +356,45 @@ export async function sendNewBookEmails(
   // names its uploader, so its pen name's followers get no email.
   if (book.pd_work_id && !book.pd_editor_credit) return;
 
-  const [{ data: penName }, { data: follows }] = await Promise.all([
+  // BUILD 2b (b3 a): a house book also goes to the followers of the
+  // house (its own pen name) and, for a house author that staff linked,
+  // of the writer's own name: both read from public_pen_names (no
+  // account column is read). One email per reader; a reader who follows
+  // only the house is told so in the footer.
+  const [{ data: penName }, { data: houseInfo }] = await Promise.all([
     admin
       .from("pen_names")
       .select("name")
       .eq("id", book.pen_name_id)
       .single<{ name: string }>(),
-    admin.from("pen_name_follows").select("follower_id").eq("pen_name_id", book.pen_name_id),
+    admin
+      .from("public_pen_names")
+      .select("house_id, linked_pen_name_id")
+      .eq("id", book.pen_name_id)
+      .maybeSingle<{ house_id: string | null; linked_pen_name_id: string | null }>(),
   ]);
-
-  if (!penName || !follows || follows.length === 0) return;
+  if (!penName) return;
+  const houseId = houseInfo?.house_id && houseInfo.house_id !== book.pen_name_id ? houseInfo.house_id : null;
+  const { data: house } = houseId
+    ? await admin.from("public_pen_names").select("id, name").eq("id", houseId).maybeSingle<{ id: string; name: string }>()
+    : { data: null };
+  const followedPenIds = [book.pen_name_id];
+  if (houseInfo?.linked_pen_name_id) followedPenIds.push(houseInfo.linked_pen_name_id);
+  if (house) followedPenIds.push(house.id);
+  const { data: followRows } = await admin
+    .from("pen_name_follows")
+    .select("follower_id, pen_name_id")
+    .in("pen_name_id", followedPenIds)
+    .returns<{ follower_id: string; pen_name_id: string }[]>();
+  // The followed name the footer gives: the author's, unless the reader
+  // follows the house only.
+  const viaHouseOnly = new Map<string, boolean>();
+  for (const row of followRows ?? []) {
+    const onlyHouse = house !== null && row.pen_name_id === house.id;
+    viaHouseOnly.set(row.follower_id, (viaHouseOnly.get(row.follower_id) ?? true) && onlyHouse);
+  }
+  const follows = Array.from(viaHouseOnly.keys()).map((followerId) => ({ follower_id: followerId }));
+  if (follows.length === 0) return;
 
   // BD16 P5 (D2): a follower who also asked "Më njofto" for this book
   // gets only the pre-order release email, never this one too. Any row
@@ -387,25 +416,28 @@ export async function sendNewBookEmails(
   const authorName = escapeEmailHtml(penName.name);
   const bookUrl = `${origin}/libra/${bookId}`;
   const subject = `${penName.name} publikoi një libër të ri`;
-  const html = `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+  const htmlFor = (followedName: string) => `<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
           <h1 style="font-size: 20px;">Libër i ri nga ${authorName}</h1>
           <p><strong>${escapeEmailHtml(book.title)}</strong> sapo doli në Librari.</p>
           <p><a href="${bookUrl}">Shikoni librin</a></p>
-          <p style="font-size: 12px; color: #666;">E morët këtë email sepse ndiqni ${authorName} në Librum. Që të mos merrni më email të tillë, hapni <a href="${origin}/following">Autorët që ndiqni</a> dhe shtypni "Mos ndiqni më".</p>
+          <p style="font-size: 12px; color: #666;">E morët këtë email sepse ndiqni ${followedName} në Librum. Që të mos merrni më email të tillë, hapni <a href="${origin}/following">Autorët që ndiqni</a> dhe shtypni "Mos ndiqni më".</p>
         </div>`;
+  const html = htmlFor(authorName);
+  const houseHtml = house ? htmlFor(escapeEmailHtml(house.name)) : html;
 
-  const emails: string[] = [];
+  const messages: { to: string; subject: string; html: string }[] = [];
   for (let start = 0; start < recipients.length; start += EMAIL_BATCH_SIZE) {
     const found = await Promise.all(
       recipients.slice(start, start + EMAIL_BATCH_SIZE).map(async ({ follower_id: followerId }) => {
         const { data: follower } = await admin.auth.admin.getUserById(followerId);
-        return follower?.user?.email ?? null;
+        const to = follower?.user?.email ?? null;
+        return to ? { to, subject, html: viaHouseOnly.get(followerId) ? houseHtml : html } : null;
       }),
     );
-    for (const email of found) if (email) emails.push(email);
+    for (const message of found) if (message) messages.push(message);
   }
 
-  await sendEmailBatch(emails.map((to) => ({ to, subject, html })));
+  await sendEmailBatch(messages);
 }
 
 // ADMIN-2-TAKEDOWN (S8): every author- or staff-supplied value in the

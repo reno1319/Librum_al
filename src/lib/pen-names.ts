@@ -23,6 +23,11 @@ export type PublicPenName = {
   bio: string | null;
   avatar_path: string | null;
   links: unknown;
+  // BUILD 2b (migration 20261123160000): on a publishing house's pen
+  // names only -- the house's own (default) pen name, and the writer's
+  // name a house author is linked to. Null everywhere else.
+  house_id?: string | null;
+  linked_pen_name_id?: string | null;
 };
 
 // The embed every book/series/bundle query uses for its pen name.
@@ -37,10 +42,24 @@ export type OwnPenName = {
   links: unknown;
   is_default: boolean;
   created_at: string;
+  // BUILD 2b: set by staff on a house author (b4 c); read on Autorët.
+  linked_pen_name_id?: string | null;
 };
 
 export function authorPagePath(penNameId: string): string {
   return `/autore/${penNameId}`;
+}
+
+// BUILD 2b (b1 a): a publishing house's public page, keyed by the
+// house's default pen name.
+export function housePagePath(housePenNameId: string): string {
+  return `/shtepi-botuese/${housePenNameId}`;
+}
+
+// The page a reader should land on for a pen name: the house page for a
+// house's own name, the author page otherwise.
+export function penNamePagePath(pen: Pick<PublicPenName, "id" | "house_id">): string {
+  return pen.house_id && pen.house_id === pen.id ? housePagePath(pen.id) : authorPagePath(pen.id);
 }
 
 // links is jsonb: only well-formed https strings are ever rendered, even
@@ -140,6 +159,10 @@ export const PEN_NAME_LOCKED_MESSAGE =
 export const PEN_NAME_TAKEN_MESSAGE =
   "Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.";
 
+// BUILD 2b (b7 a): a house author that staff linked keeps its name.
+export const PEN_NAME_LINKED_MESSAGE =
+  "Ky autor është i lidhur me faqen e vet. Për ta ndryshuar emrin, na shkruani.";
+
 export function penNameErrorMessage(error: { code?: string | null } | null | undefined): string | null {
   switch (error?.code) {
     case "LB451":
@@ -148,6 +171,8 @@ export function penNameErrorMessage(error: { code?: string | null } | null | und
       return PEN_NAME_LOCKED_MESSAGE;
     case "LB453":
       return PEN_NAME_TAKEN_MESSAGE;
+    case "LB530":
+      return PEN_NAME_LINKED_MESSAGE;
     default:
       return null;
   }

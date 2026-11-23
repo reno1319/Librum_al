@@ -56,6 +56,11 @@ function makeFakeAdmin(overrides: {
   follows?: { follower_id: string }[];
   waiters?: { user_id: string; book_cancelled_at: string | null }[];
   waitersError?: { code: string } | null;
+  // BUILD 2b: the book's pen name in public_pen_names, other public
+  // rows by id, and follows of other pen names.
+  publicPen?: { house_id: string | null; linked_pen_name_id: string | null } | null;
+  publicRows?: Record<string, { id: string; name: string }>;
+  otherFollows?: { follower_id: string; pen_name_id: string }[];
 }) {
   const {
     waiters = [],
@@ -63,6 +68,9 @@ function makeFakeAdmin(overrides: {
     book = { title: "Test Book", author_id: "author-1", pen_name_id: "pen-1" },
     penName = { name: "R. A. Nightingale" },
     follows = [],
+    publicPen = { house_id: null, linked_pen_name_id: null },
+    publicRows = {},
+    otherFollows = [],
   } = overrides;
   const reads: string[] = [];
 
@@ -81,11 +89,36 @@ function makeFakeAdmin(overrides: {
           }),
         };
       }
+      if (table === "public_pen_names") {
+        return {
+          select: (columns: string) => ({
+            eq: (_column: string, value: string) => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: columns.startsWith("house_id")
+                    ? value === book?.pen_name_id
+                      ? publicPen
+                      : null
+                    : (publicRows[value] ?? null),
+                }),
+            }),
+          }),
+        };
+      }
       if (table === "pen_name_follows") {
         return {
           select: () => ({
-            eq: (_column: string, value: string) =>
-              Promise.resolve({ data: value === book?.pen_name_id ? follows : [] }),
+            in: (_column: string, values: string[]) => ({
+              returns: () =>
+                Promise.resolve({
+                  data: [
+                    ...(values.includes(book?.pen_name_id ?? "")
+                      ? follows.map((f) => ({ ...f, pen_name_id: book!.pen_name_id! }))
+                      : []),
+                    ...otherFollows.filter((f) => values.includes(f.pen_name_id)),
+                  ],
+                }),
+            }),
           }),
         };
       }
@@ -211,6 +244,48 @@ describe("sendNewBookEmails", () => {
     const [batch] = batchMock.mock.calls[0];
     expect(batch.map((m) => m.to)).toEqual(["follower-1@example.com", "follower-2@example.com"]);
     for (const m of batch) expect(m.subject).toBe("R. A. Nightingale publikoi një libër të ri");
+  });
+
+  it("BUILD 2b (b3 a): a house author's book also reaches the house's and the linked writer's followers, once each", async () => {
+    const admin = makeFakeAdmin({
+      follows: [{ follower_id: "f-author" }, { follower_id: "f-both" }],
+      publicPen: { house_id: "house-pen", linked_pen_name_id: "writer-pen" },
+      publicRows: { "house-pen": { id: "house-pen", name: "Botime Test" } },
+      otherFollows: [
+        { follower_id: "f-house", pen_name_id: "house-pen" },
+        { follower_id: "f-both", pen_name_id: "house-pen" },
+        { follower_id: "f-writer", pen_name_id: "writer-pen" },
+        { follower_id: "f-elsewhere", pen_name_id: "other-pen" },
+      ],
+    });
+
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+
+    const [batch] = batchMock.mock.calls[0];
+    expect(batch.map((m) => m.to).sort()).toEqual(
+      ["f-author", "f-both", "f-house", "f-writer"].map((id) => `${id}@example.com`),
+    );
+    for (const m of batch) expect(m.subject).toBe("R. A. Nightingale publikoi një libër të ri");
+    const footer = (to: string) => batch.find((m) => m.to === to)!.html;
+    expect(footer("f-house@example.com")).toContain("sepse ndiqni Botime Test në Librum");
+    expect(footer("f-both@example.com")).toContain("sepse ndiqni R. A. Nightingale në Librum");
+    expect(footer("f-writer@example.com")).toContain("sepse ndiqni R. A. Nightingale në Librum");
+    expect(admin.reads).not.toContain("profiles");
+  });
+
+  it("BUILD 2b (b2 a): a book under the house's own name goes to the house's followers only", async () => {
+    const admin = makeFakeAdmin({
+      book: { title: "Test Book", author_id: "author-1", pen_name_id: "house-pen" },
+      follows: [{ follower_id: "f-house" }],
+      publicPen: { house_id: "house-pen", linked_pen_name_id: null },
+      otherFollows: [{ follower_id: "f-other", pen_name_id: "other-pen" }],
+    });
+
+    await sendNewBookEmails(admin, { bookId: "book-1", authorId: "author-1" });
+
+    const [batch] = batchMock.mock.calls[0];
+    expect(batch.map((m) => m.to)).toEqual(["f-house@example.com"]);
+    expect(batch[0].html).toContain("sepse ndiqni R. A. Nightingale në Librum");
   });
 });
 

@@ -89,7 +89,10 @@ export default async function EditProfilePage({
         userId={user!.id}
         photoUrl={photoUrl}
         bookCount={count}
-        used={count > 0 || usedBySeriesOrBundle.has(penName.id)}
+        used={
+          // BUILD 2b: the house page is there once the house has a book.
+          isMain && isHouse ? (books ?? []).length > 0 : count > 0 || usedBySeriesOrBundle.has(penName.id)
+        }
       />
     );
   }

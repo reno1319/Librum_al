@@ -8,6 +8,16 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // BUILD 2b: the staff author link (admin people page) and a linked
+  // house author's name (Autorët).
+  "That author can't be linked.",
+  "That author is already linked. Unlink it first.",
+  "No account has that email.",
+  "That email belongs to this house's own account.",
+  "That account is not a writer's own author account.",
+  "No author name on that account matches this author's name exactly. Nothing was linked.",
+  "The author link could not be changed. Please try again.",
+  "Ky autor është i lidhur me faqen e vet. Për ta ndryshuar emrin, na shkruani.",
   "A live article needs at least one keyword. Add one in Keywords and save.",
   "A review name has 2 to 40 characters.",
   "Arsyeja duhet të ketë më pak se 2000 karaktere.",
@@ -383,6 +393,9 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // BUILD 2b: the staff author link (admin people page).
+  "Author linked. Readers now see the writer's own author page.",
+  "Author unlinked. The house's own author page is back.",
   // Blog categories, patch B (2026-11-19).
   "Category created. It is last in the order: move it with the arrows.",
   "Category saved.",

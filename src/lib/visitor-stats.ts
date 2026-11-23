@@ -36,6 +36,8 @@ export const COUNTED_PATHS = [
   "/rimbursimet",
   "/rreth-nesh",
   "/seri",
+  // BUILD 2b: the public publishing house pages (like /autore).
+  "/shtepi-botuese",
   "/si-funksionon",
 ] as const;
 
