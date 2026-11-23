@@ -77,9 +77,7 @@ vi.mock("@/lib/supabase/admin", () => ({
             write.columns = columns;
             if (roleWriteResult) return roleWriteResult;
             const id = write.filters.find(([column]) => column === "id")?.[1];
-            // BUILD 2a-1: a house switch's answer carries the kind it wrote.
-            const kind = (write.values as { account_kind?: unknown }).account_kind;
-            return { data: [{ id, role: "author", ...(kind ? { account_kind: kind } : {}) }], error: null };
+            return { data: [{ id, role: "author" }], error: null };
           },
         };
         return chain;
@@ -1050,7 +1048,7 @@ describe("signup: SECURITY-9A server-side switch to author", () => {
     await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
     expect(lastRedirect()).toBe(
       `/account?error=${encodeURIComponent(
-        'Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni "Botoni librat tuaj" në këtë faqe.',
+        'Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni "Bëhuni autor" në këtë faqe.',
       )}`,
     );
     expect(JSON.stringify(logged.mock.calls)).not.toContain(CREATED_ID);
@@ -1081,81 +1079,6 @@ describe("signup: SECURITY-9A server-side switch to author", () => {
     mockSupabaseAuth.signUp.mockResolvedValue({ data: { session: { access_token: "tok" }, user: null }, error: null });
     await expect(signup(signupFormData())).rejects.toBeInstanceOf(RedirectSignal);
     expect(lastRedirect()).toMatch(/^\/account\?error=/);
-    expect(roleWrites).toHaveLength(0);
-  });
-});
-
-// BUILD 2a-1 (sg4 a, h2 b): "Shtëpi botuese" makes an author account of
-// the publishing-house kind, with the Terms record but no 18+ tick.
-describe("signup: publishing house", () => {
-  beforeEach(resetMocks);
-
-  function houseFormData(overrides: Record<string, string> = {}) {
-    return formData({
-      email: "house@example.com",
-      password: "hunter2",
-      displayName: " Botime Test ",
-      role: "publishing_house",
-      accept_terms: "on",
-      ...overrides,
-    });
-  }
-
-  it.each([
-    ["an immediate session", { access_token: "tok" }, "/dashboard"],
-    ["email confirmation pending", null, "/signup/check-email"],
-  ])("with %s: no 18+ tick needed, Terms recorded, then switched to a house author account", async (_label, session, target) => {
-    mockSupabaseAuth.signUp.mockResolvedValue(createdUser(session));
-    await expect(signup(houseFormData())).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect.mock.calls.at(-1)?.[0]).toBe(target);
-    const [, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
-    expect(Object.keys(attributes.app_metadata).sort()).toEqual(["terms_accepted_at", "terms_version"]);
-    expect(roleWrites).toEqual([
-      {
-        table: "profiles",
-        values: { role: "author", public_author_name: "Botime Test", account_kind: "publishing_house" },
-        filters: [
-          ["id", CREATED_ID],
-          ["role", "reader"],
-        ],
-        columns: "id, role, account_kind",
-      },
-    ]);
-    expect(order).toEqual(["record", "switch"]);
-  });
-
-  it("a ticked 18+ box sent with a house is ignored: no 18+ record", async () => {
-    await expect(signup(houseFormData({ confirm_author_age: "on" }))).rejects.toBeInstanceOf(RedirectSignal);
-    const [, attributes] = mockUpdateUserById.mock.calls[0] as [string, { app_metadata: Record<string, unknown> }];
-    expect(attributes.app_metadata.author_age_confirmed_at).toBeUndefined();
-  });
-
-  it.each([
-    ["the kind missing from the answer", { data: [{ id: CREATED_ID, role: "author" }], error: null }],
-    ["another kind in the answer", { data: [{ id: CREATED_ID, role: "author", account_kind: "person" }], error: null }],
-    ["no row", { data: [], error: null }],
-  ])("a house switch with %s fails closed to Account with the message", async (_label, result) => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    roleWriteResult = result;
-    await expect(signup(houseFormData())).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect.mock.calls.at(-1)?.[0]).toMatch(/^\/account\?error=/);
-    logged.mockRestore();
-  });
-
-  it("a stand-in user gets the plain answer: no record, no switch", async () => {
-    mockSupabaseAuth.signUp.mockResolvedValue({
-      data: { session: null, user: { id: CREATED_ID, identities: [] } },
-      error: null,
-    });
-    await expect(signup(houseFormData())).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect.mock.calls.at(-1)?.[0]).toBe("/signup/check-email");
-    expect(mockUpdateUserById).not.toHaveBeenCalled();
-    expect(roleWrites).toHaveLength(0);
-  });
-
-  it("an unknown choice is a reader (never switched)", async () => {
-    await expect(signup(houseFormData({ role: "admin" }))).rejects.toBeInstanceOf(RedirectSignal);
-    expect(mockRedirect.mock.calls.at(-1)?.[0]).toBe("/");
     expect(roleWrites).toHaveLength(0);
   });
 });

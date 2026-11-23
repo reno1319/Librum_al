@@ -12,10 +12,8 @@ import {
   GOOGLE_AUTHOR_INTENT_COOKIE,
   GOOGLE_AUTHOR_PENDING_MESSAGE,
   GOOGLE_CALLBACK_PARAM,
-  GOOGLE_HOUSE_INTENT_VALUE,
   finishGoogleSignIn,
 } from "@/lib/google-sign-in";
-import type { AccountKind } from "@/lib/types";
 
 // LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
 // `redirectType` field to exchangeCodeForSession()'s resolved data when
@@ -181,22 +179,18 @@ export async function GET(request: Request) {
   return NextResponse.redirect(buildFailureRedirect(origin, type, next));
 }
 
-// K7: the author hint cookie set by signInWithGoogle() (the sign-up
-// page, "Autor" + 18+ ticked): null when absent. BUILD 2a-1: the value
-// GOOGLE_HOUSE_INTENT_VALUE is "Shtëpi botuese" (no tick, h2 b).
-function readGoogleAuthorIntent(request: Request): AccountKind | null {
+// K7: true when the request carries the author hint cookie set by
+// signInWithGoogle() (the sign-up page, "Autor" + 18+ ticked).
+function hasGoogleAuthorIntent(request: Request): boolean {
   const header = request.headers.get("cookie") ?? "";
-  for (const part of header.split(";")) {
+  return header.split(";").some((part) => {
     const [name, value] = part.trim().split("=");
-    if (name !== GOOGLE_AUTHOR_INTENT_COOKIE) continue;
-    if (value === "1") return "person";
-    if (value === GOOGLE_HOUSE_INTENT_VALUE) return "publishing_house";
-  }
-  return null;
+    return name === GOOGLE_AUTHOR_INTENT_COOKIE && value === "1";
+  });
 }
 
 async function googleCallback(request: Request, origin: string, code: string | null, next: string) {
-  const intent = readGoogleAuthorIntent(request);
+  const wantsAuthor = hasGoogleAuthorIntent(request);
   let response: NextResponse;
   const supabase = code ? await createClient() : null;
   const exchange = supabase && code ? await supabase.auth.exchangeCodeForSession(code) : null;
@@ -213,7 +207,7 @@ async function googleCallback(request: Request, origin: string, code: string | n
     response = NextResponse.redirect(`${origin}/reset-password`);
     setRecoverySession(response.cookies);
   } else {
-    const finish = await finishGoogleSignIn(user, intent !== null, intent ?? "person");
+    const finish = await finishGoogleSignIn(user, wantsAuthor);
     const target =
       finish === "author"
         ? "/dashboard"

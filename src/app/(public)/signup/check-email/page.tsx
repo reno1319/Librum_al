@@ -24,7 +24,7 @@ export default async function CheckEmailPage({
       {author === "pending" && (
         <p className="mt-3 text-sm text-muted">
           Llogaria juaj u krijua si llogari lexuesi. Për të botuar, hyni dhe përdorni
-          &ldquo;Botoni librat tuaj&rdquo; te faqja Llogaria.
+          &ldquo;Bëhuni autor&rdquo; te faqja Llogaria.
         </p>
       )}
       {/* N2 (rs3 a): a lost confirmation email. */}

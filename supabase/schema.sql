@@ -22170,15 +22170,3 @@ revoke all on function public.update_blog_post(uuid, text, text, text, text, tex
   from public, anon, authenticated;
 grant execute on function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
   to authenticated, service_role;
-
--- ============================================================
--- BUILD 2a-1 publishing houses (migration 20261123140000_publishing_house_account_kind)
--- ============================================================
-alter table public.profiles
-  add column account_kind text not null default 'person'
-    constraint profiles_account_kind_check
-      check (account_kind in ('person', 'publishing_house'));
-
-alter table public.profiles
-  add constraint profiles_publishing_house_is_author
-    check (account_kind = 'person' or role = 'author');

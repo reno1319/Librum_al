@@ -55,25 +55,6 @@ export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
   },
 ];
 
-// BUILD 2a-2 (approved picture 7): a publishing house's Profili group
-// has two pages, Profili and Autorët, on a second row. Everything else
-// is the same menu.
-export const HOUSE_DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = DASHBOARD_MENU_GROUPS.map((group) =>
-  group.label === "Profili"
-    ? {
-        label: "Profili",
-        items: [
-          { href: "/dashboard/profile", label: "Profili", nested: true },
-          { href: "/dashboard/authors", label: "Autorët", nested: true },
-        ],
-      }
-    : group,
-);
-
-export function dashboardMenuGroups(isHouse: boolean): DashboardMenuGroup[] {
-  return isHouse ? HOUSE_DASHBOARD_MENU_GROUPS : DASHBOARD_MENU_GROUPS;
-}
-
 // True when `pathname` is `base` or lies below it on a path-segment
 // boundary: /dashboard/books matches /dashboard/books/x, never
 // /dashboard/booksx.
@@ -100,12 +81,9 @@ export type DashboardMenuMatch = {
 
 // The group and item the current page belongs to; null for a path the
 // menu doesn't know (then nothing is marked).
-export function findDashboardMenuMatch(
-  pathname: string,
-  groups: DashboardMenuGroup[] = DASHBOARD_MENU_GROUPS,
-): DashboardMenuMatch | null {
+export function findDashboardMenuMatch(pathname: string): DashboardMenuMatch | null {
   const path = normalize(pathname);
-  for (const group of groups) {
+  for (const group of DASHBOARD_MENU_GROUPS) {
     for (const item of group.items) {
       if (itemMatches(item, path)) {
         return { group, item };

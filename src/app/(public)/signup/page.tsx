@@ -43,8 +43,11 @@ export default async function SignupPage({
             maxLength={ACCOUNT_NAME_MAX_LENGTH}
             className={formControlClasses}
           />
-          {/* BUILD 2a-1 (Renato's exact hint, sg4 a). */}
-          <span className="text-sm text-muted">Nëse jeni shtëpi botuese vendosni emrin e kompanisë suaj.</span>
+          {/* PEN-NAMES-1 (6a). */}
+          <span className="text-sm text-muted">
+            Nëse regjistroheni si autor, lexuesit e shohin këtë si emrin tuaj të autorit. Pseudonimin
+            mund ta vendosni më vonë.
+          </span>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
@@ -104,12 +107,6 @@ export default async function SignupPage({
             />
             <label htmlFor={AUTHOR_AGE_FIELD}>{AUTHOR_AGE_STATEMENT}</label>
           </div>
-          {/* BUILD 2a-1 (sg4 a): an author account of the publishing-house
-              kind. No 18+ tick (h2 b): the box above shows for "Autor" only. */}
-          <label className="flex items-center gap-2">
-            <input type="radio" name="role" value="publishing_house" />
-            Shtëpi botuese: dua të shes librat e shtëpisë sime botuese
-          </label>
         </fieldset>
 
         <div className="flex items-start gap-2 text-sm">

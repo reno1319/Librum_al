@@ -37,7 +37,7 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role, account_kind")
+    .select("role")
     .eq("id", user.id)
     .single();
 
@@ -58,7 +58,7 @@ export default async function DashboardLayout({
   return (
     <>
       <div className="page-container pt-5 sm:pt-10">
-        <DashboardMenu isHouse={profile.account_kind === "publishing_house"} />
+        <DashboardMenu />
       </div>
       {children}
     </>

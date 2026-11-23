@@ -169,7 +169,7 @@ export default async function AdminPersonPage({
       .eq("user_id", id)
       .order("suspended_at", { ascending: false })
       .returns<SuspensionRow[]>(),
-    admin.from("profiles").select("review_name, account_kind").eq("id", id).returns<{ review_name: string | null; account_kind: string | null }[]>(),
+    admin.from("profiles").select("review_name").eq("id", id).returns<{ review_name: string | null }[]>(),
   ]);
 
   const books = booksResult.data ?? [];
@@ -254,12 +254,10 @@ export default async function AdminPersonPage({
   const status = personStatusLabel(person);
   const pens = pensResult.data ?? [];
   const reviewName = reviewNameResult.data?.[0]?.review_name ?? null;
-  // BUILD 2a-1: "Publishing house" for a house account.
-  const typeLabel = personTypeLabel(person, reviewNameResult.data?.[0]?.account_kind ?? null);
 
   const facts: [string, string][] = [
     ["Email", person.email ?? "No email"],
-    ["Type", typeLabel],
+    ["Type", personTypeLabel(person)],
     ["Joined", formatTimestampAsDate(person.joined_at)],
     ["Status", status],
     ["Paid sales", personSalesLabel(person)],
@@ -274,7 +272,7 @@ export default async function AdminPersonPage({
           ← People
         </Link>
         <p className="mt-2 text-xs font-semibold tracking-[0.14em] text-[#806510] uppercase md:text-[0.8125rem]">
-          {typeLabel} · {status}
+          {personTypeLabel(person)} · {status}
         </p>
         <h1 className="mt-1 font-serif text-[2rem] font-bold break-words text-primary md:text-[2.5rem]">{person.display_name}</h1>
       </div>

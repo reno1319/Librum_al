@@ -21,8 +21,7 @@ describe("check-email page", () => {
   it("with author=pending, says to use Become an author", async () => {
     const html = await render({ author: "pending" });
     expect(html).toContain("Llogaria juaj u krijua si llogari lexuesi.");
-    // BUILD 2a-1 (h5 b): the account card's button is now "Vazhdoni".
-    expect(html).toContain("Botoni librat tuaj");
+    expect(html).toContain("Bëhuni autor");
   });
 
   it("any other value shows no extra line", async () => {
