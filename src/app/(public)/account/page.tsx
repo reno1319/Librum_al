@@ -46,19 +46,12 @@ export default async function AccountPage({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, role, account_kind")
+    .select("display_name, role")
     .eq("id", user.id)
     .single();
 
   const isAuthor = profile?.role === "author";
-  // BUILD 2a-1: a publishing house is an author account of the house kind.
-  const roleLabel = isAuthor
-    ? profile?.account_kind === "publishing_house"
-      ? "Shtëpi botuese"
-      : "Autor"
-    : profile?.role === "reader"
-      ? "Lexues"
-      : null;
+  const roleLabel = isAuthor ? "Autor" : profile?.role === "reader" ? "Lexues" : null;
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-10 sm:px-6 sm:pt-10">
@@ -136,34 +129,21 @@ export default async function AccountPage({
           <SurfaceCard className="mt-4">
             <h2 className="font-serif text-lg font-normal">Botoni librat tuaj</h2>
             <p className="mt-1 text-sm text-muted">
-              Kaloni në llogari autori ose shtëpie botuese për të botuar dhe shitur libra elektronikë. Biblioteka
-              dhe blerjet tuaja mbeten. Emri publik do të jetë fillimisht{" "}
-              <span className="font-medium text-foreground">{profile.display_name}</span>; mund ta ndryshoni te
-              Profili. Një llogari e tillë nuk mund të kthehet më në llogari lexuesi.
+              Kaloni në llogari autori për të botuar dhe shitur libra elektronikë. Biblioteka
+              dhe blerjet tuaja mbeten. Emri juaj publik i autorit do të jetë fillimisht{" "}
+              <span className="font-medium text-foreground">{profile.display_name}</span>;
+              mund ta ndryshoni te profili i autorit. Një llogari autori nuk mund të
+              kthehet më në llogari lexuesi.
             </p>
-            {/* BUILD 2a-1 (pf3 a, h5 b): one card, the sign-up page's two
-                publishing choices. AUTHOR-AGE-1: the 18+ tick shows only while
-                "Autor" is chosen (CSS :has(), no script) and is not
-                browser-required, so a house can send the form; becomeAuthor
-                checks it on the server for an author and records it. Houses
-                have no 18+ tick (h2 b). SECURITY-9A adds the Terms tick. */}
-            <form action={becomeAuthor} className="group mt-3">
-              <fieldset className="mb-3 flex flex-col gap-2 text-sm">
-                <legend className="sr-only">Kaloni në llogari</legend>
-                <label className="flex items-center gap-2">
-                  <input type="radio" name="become_as" value="author" defaultChecked />
-                  Autor: dua të botoj dhe të shes libra elektronikë
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" name="become_as" value="publishing_house" />
-                  Shtëpi botuese: dua të shes librat e shtëpisë sime botuese
-                </label>
-              </fieldset>
-              <div className="mb-3 hidden items-start gap-2 text-sm group-has-[[value=author]:checked]:flex">
+            {/* AUTHOR-AGE-1: the Terms' 18+ rule; becomeAuthor checks the
+                tick again and records it. SECURITY-9A adds the Terms tick. */}
+            <form action={becomeAuthor} className="mt-3">
+              <div className="mb-3 flex items-start gap-2 text-sm">
                 <input
                   id={AUTHOR_AGE_FIELD}
                   name={AUTHOR_AGE_FIELD}
                   type="checkbox"
+                  required
                   className="focus-ring mt-1 size-4"
                 />
                 <label htmlFor={AUTHOR_AGE_FIELD}>{AUTHOR_AGE_STATEMENT}</label>
@@ -187,7 +167,7 @@ export default async function AccountPage({
                 </label>
               </div>
               <button type="submit" className={buttonClasses("primary", "sm")}>
-                Vazhdoni
+                Bëhuni autor
               </button>
             </form>
           </SurfaceCard>

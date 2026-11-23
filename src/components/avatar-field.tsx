@@ -43,15 +43,12 @@ const UNSUPPORTED_FORMAT_ERROR = "Format imazhi i papranuar. Përdorni JPEG ose 
 export function AvatarField({
   userId,
   existingAvatarUrl,
-  label = "Fotoja (JPEG ose PNG, deri në 5 MB)",
 }: {
   // The signed-in user's own id -- used only to namespace this
   // upload's temporary Storage path, same convention as
   // cover-field.tsx/manuscript-field.tsx.
   userId: string;
   existingAvatarUrl: string | null;
-  // BUILD 2a-2: a publishing house's card says "Logoja".
-  label?: string;
 }) {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -221,7 +218,7 @@ export function AvatarField({
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <label className="flex flex-col gap-1 text-sm">
-          {label}
+          Fotoja (JPEG ose PNG, deri në 5 MB)
           <input
             type="file"
             accept="image/png,image/jpeg"

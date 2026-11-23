@@ -33,8 +33,6 @@ const {
   sendBookApprovedEmail,
   sendAuthorWelcomeEmail,
   authorWelcomeEmail,
-  sendHouseWelcomeEmail,
-  houseWelcomeEmail,
   sendBookChangesApprovedEmail,
   sendBookSentBackEmail,
   sendAccountSuspendedEmail,
@@ -653,64 +651,6 @@ describe("author welcome email", () => {
   it("escapes the name in the text and keeps the subject on one line", () => {
     const { subject, html } = authorWelcomeEmail({ name: "<i>A</i>\r\nBcc: x" });
     expect(subject).toBe("Mirë se erdhe në Librum, <i>A</i> Bcc: x! Udhëtimi yt letrar digjital nis këtu 📚");
-    expect(subject).not.toMatch(/[\r\n]/);
-    expect(html).toContain("&lt;i&gt;A&lt;/i&gt; Bcc: x");
-    expect(html).not.toContain("<i>A</i>");
-  });
-});
-
-// BUILD 2a-2 (Renato 11-23, h4 ok): the one-time publishing house welcome.
-describe("publishing house welcome email", () => {
-  beforeEach(() => sendMock.mockClear());
-
-  it("uses the approved text in the ju form, links Profili, Autorët, a new book and help, replies to support", async () => {
-    await sendHouseWelcomeEmail("botime@example.com", { name: "Botime Test" });
-    const args = sendMock.mock.calls[0][0];
-    expect(args.to).toBe("botime@example.com");
-    expect(args.replyTo).toBe("support@librum.al");
-    expect(args.subject).toBe("Mirë se erdhët në Librum, Botime Test! Librat tuaj, tani edhe digjitalë 📚");
-    expect(args.html).toContain("<p>Përshëndetje, Botime Test,</p>");
-    expect(args.html).toContain(
-      "<p>Mirë se erdhët zyrtarisht në Librum! Jemi jashtëzakonisht të lumtur dhe krenarë që shtëpia juaj botuese u bë pjesë e komunitetit tonë.</p>",
-    );
-    expect(args.html).toContain(
-      "<p>Librum lindi si një hapësirë e dedikuar për ta sjellë librin shqip digjital (e-book) te lexuesit në Shqipëri, Kosovë dhe diasporë, pa burokraci të panevojshme dhe me kontroll të plotë mbi botimet tuaja.</p>",
-    );
-    expect(args.html).toContain("<p><strong>Çfarë mund të bëni tani?</strong></p>");
-    expect(args.html).toContain(
-      "<p>Për ta nisur këtë rrugëtim sa më mbarë, ja tre hapa të thjeshtë që mund të ndërmerrni që sot:</p>",
-    );
-    expect(args.html).toContain(
-      ">Plotësoni Profilin e shtëpisë botuese</a>: Shtoni logon, disa fjalë për shtëpinë tuaj botuese dhe lidhjet tuaja, që lexuesit t'ju njohin më mirë.</li>",
-    );
-    expect(args.html).toContain(">Shtoni autorët tuaj</a>: Çdo autor ka faqen e vet, me librat e tij.</li>");
-    expect(args.html).toContain(
-      ">Gati për botim?</a> Nëse i keni librat gati në Word (.docx) ose ePub, mund të nisni shumë shpejt ngarkimin e tyre në platformë duke ndjekur hapat tanë udhëzues.</li>",
-    );
-    expect(args.html).toContain(
-      "<p>Nëse keni ndonjë pyetje, paqartësi apo sugjerim, dera jonë është gjithmonë e hapur. Mund të na shkruani në çdo kohë direkt në këtë adresë e-maili ose të vizitoni <a ",
-    );
-    expect(args.html).toContain(">faqen tonë të ndihmës</a>.</p>");
-    expect(args.html).toContain("<p>Ju urojmë mbarësi dhe suksese me botimet tuaja!</p>");
-    expect(args.html).toContain("<p>Me respekt,<br>Ekipi i Librum<br>");
-    expect(args.html).toContain(">librum.al</a>");
-    for (const path of ["/dashboard/profile", "/dashboard/authors", "/dashboard/books/new", "/ndihme"]) {
-      expect(args.html).toMatch(new RegExp(`href="[^"]*${path.replace(/\//g, "\\/")}"`));
-    }
-    // "ju" form only: none of the author email's "ti" lines.
-    expect(args.html).not.toContain("Mirë se erdhe ");
-    expect(args.html).not.toContain("/blog");
-  });
-
-  it("with no name: a plain greeting and a subject without one", () => {
-    const { subject, html } = houseWelcomeEmail({ name: null });
-    expect(subject).toBe("Mirë se erdhët në Librum! Librat tuaj, tani edhe digjitalë 📚");
-    expect(html).toContain("<p>Përshëndetje,</p>");
-  });
-
-  it("escapes the name in the text and keeps the subject on one line", () => {
-    const { subject, html } = houseWelcomeEmail({ name: "<i>A</i>\r\nBcc: x" });
-    expect(subject).toBe("Mirë se erdhët në Librum, <i>A</i> Bcc: x! Librat tuaj, tani edhe digjitalë 📚");
     expect(subject).not.toMatch(/[\r\n]/);
     expect(html).toContain("&lt;i&gt;A&lt;/i&gt; Bcc: x");
     expect(html).not.toContain("<i>A</i>");

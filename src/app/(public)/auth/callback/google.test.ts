@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 const mockFinish = vi.fn();
 vi.mock("@/lib/google-sign-in", async (orig) => ({
   ...(await orig<typeof import("@/lib/google-sign-in")>()),
-  finishGoogleSignIn: (u: unknown, a: boolean, k: unknown) => mockFinish(u, a, k),
+  finishGoogleSignIn: (u: unknown, a: boolean) => mockFinish(u, a),
 }));
 
 const mockScheduleAuthorWelcome = vi.fn();
@@ -38,7 +38,7 @@ describe("GET /auth/callback?google=1", () => {
   it("reader: goes to next, clears a stale recovery marker and the hint, never sets recovery", async () => {
     const res = await get("google=1&code=c&next=/library");
     expect(res.headers.get("location")).toBe("https://librum.example/library");
-    expect(mockFinish).toHaveBeenCalledWith(USER, false, "person");
+    expect(mockFinish).toHaveBeenCalledWith(USER, false);
     const sc = res.headers.get("set-cookie") ?? "";
     expect(sc).toContain(RECOVERY_COOKIE_NAME);
     expect(sc).not.toContain(`${RECOVERY_COOKIE_NAME}=1`);
@@ -53,23 +53,14 @@ describe("GET /auth/callback?google=1", () => {
   it("the author hint cookie is passed on; an author goes to the dashboard", async () => {
     mockFinish.mockResolvedValue("author");
     const res = await get("google=1&code=c", "a=b; librum_google_author=1");
-    expect(mockFinish).toHaveBeenCalledWith(USER, true, "person");
-    expect(res.headers.get("location")).toBe("https://librum.example/dashboard");
-    expect(hintCleared(res)).toBe(true);
-  });
-
-  // BUILD 2a-1: the house hint ("house") asks for a house author account.
-  it("the house hint is passed on as the publishing-house kind; it goes to the dashboard", async () => {
-    mockFinish.mockResolvedValue("author");
-    const res = await get("google=1&code=c", "librum_google_author=house");
-    expect(mockFinish).toHaveBeenCalledWith(USER, true, "publishing_house");
+    expect(mockFinish).toHaveBeenCalledWith(USER, true);
     expect(res.headers.get("location")).toBe("https://librum.example/dashboard");
     expect(hintCleared(res)).toBe(true);
   });
 
   it("a hint with another value is no hint", async () => {
     await get("google=1&code=c", "librum_google_author=yes");
-    expect(mockFinish).toHaveBeenCalledWith(USER, false, "person");
+    expect(mockFinish).toHaveBeenCalledWith(USER, false);
   });
 
   it("author_failed: to /account with the reader-account message", async () => {
@@ -77,7 +68,7 @@ describe("GET /auth/callback?google=1", () => {
     const res = await get("google=1&code=c", "librum_google_author=1");
     const loc = new URL(res.headers.get("location")!);
     expect(loc.pathname).toBe("/account");
-    expect(loc.searchParams.get("error")).toContain("Botoni librat tuaj");
+    expect(loc.searchParams.get("error")).toContain("Bëhuni autor");
   });
 
   it.each([

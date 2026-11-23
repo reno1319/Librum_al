@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DismissableDetails } from "@/components/dismissable-details";
 import {
-  dashboardMenuGroups,
+  DASHBOARD_MENU_GROUPS,
   findDashboardMenuMatch,
   groupAriaCurrent,
   itemAriaCurrent,
@@ -15,11 +15,9 @@ import {
 // re-render on client navigation, so the current page comes from
 // usePathname(). Menu items are navigation, which the C1 underline rule
 // excludes; the current group/item has non-colour cues (bold, brass bar).
-// BUILD 2a-2: isHouse (a publishing house) adds Profili > Autorët.
-export function DashboardMenu({ isHouse = false }: { isHouse?: boolean }) {
+export function DashboardMenu() {
   const pathname = usePathname() ?? "";
-  const groups = dashboardMenuGroups(isHouse);
-  const match = findDashboardMenuMatch(pathname, groups);
+  const match = findDashboardMenuMatch(pathname);
   // DC 1 (Renato 11-13, a): a group may hide its second row on a
   // computer (Librat: "Seritë" is in the Mjetet boxes and each book's
   // "…" menu). The phone menu still lists every page.
@@ -32,7 +30,7 @@ export function DashboardMenu({ isHouse = false }: { isHouse?: boolean }) {
           pages on a second line. */}
       <div className="hidden md:block">
         <ul className="flex gap-1 border-b border-border">
-          {groups.map((group) => {
+          {DASHBOARD_MENU_GROUPS.map((group) => {
             const current = match?.group === group;
             return (
               <li key={group.label}>
@@ -98,7 +96,7 @@ export function DashboardMenu({ isHouse = false }: { isHouse?: boolean }) {
           </span>
         </summary>
         <div className="absolute inset-x-0 z-10 mt-1 rounded-control border border-border bg-surface py-2 shadow-md">
-          {groups.map((group, index) => {
+          {DASHBOARD_MENU_GROUPS.map((group, index) => {
             const labelId = `dashboard-menu-group-${index}`;
             return (
               <div key={group.label} className={index > 0 ? "mt-1 border-t border-border pt-1" : undefined}>

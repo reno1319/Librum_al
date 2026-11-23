@@ -13,7 +13,6 @@ import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { hasAuthorAgeTick } from "@/lib/author-age";
 import { hasTermsTick, recordAgreements } from "@/lib/agreement-records";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
-import type { AccountKind } from "@/lib/types";
 
 const FAILURE_PATH = `/account?error=${encodeURIComponent(
   "Nuk mundëm ta kalojmë llogarinë tuaj në llogari autori. Provoni përsëri.",
@@ -23,11 +22,6 @@ const FAILURE_PATH = `/account?error=${encodeURIComponent(
 // author name (dashboard/profile/actions.ts; that copy is translated with
 // the author dashboard).
 const EMPTY_NAME_PATH = `/account?error=${encodeURIComponent("Emri publik i autorit nuk mund të jetë bosh.")}`;
-
-const AUTHOR_SUCCESS_MESSAGE = "Llogaria juaj tani është llogari autori. Filloni duke shtuar librin tuaj të parë.";
-// BUILD 2a-1.
-const HOUSE_SUCCESS_MESSAGE =
-  "Llogaria juaj tani është llogari shtëpie botuese. Filloni duke shtuar librin e parë.";
 
 // AUTHOR-AGE-1: the "I'm 18 or older" tick was not sent.
 const AGE_REQUIRED_PATH = `/account?error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`;
@@ -112,18 +106,7 @@ async function copyLegacyPhotoToDefaultPenName(
 // by calling Supabase Auth directly, which never saw the sign-up's
 // Terms tick. If the role write then fails, the records stay: it is
 // still true that they agreed.
-//
-// BUILD 2a-1 (pf3 a, h5 b): the card's "become_as" choice picks author
-// (the default, also when nothing is sent) or "publishing_house": the
-// same switch, to an author account of the publishing-house kind
-// (account_kind written in the same row update and checked in the
-// answer). Like the house sign-up, no 18+ tick (h2 b); the Terms tick is
-// still required and recorded first. The reader's own account photo is
-// not copied: it would become the house's logo. Later changes between
-// author and house are staff-only.
 export async function becomeAuthor(formData: FormData) {
-  const kind: AccountKind = formData.get("become_as") === "publishing_house" ? "publishing_house" : "person";
-  const house = kind === "publishing_house";
   // Proxy already blocks /account while a recovery session is active;
   // this is the second layer against a crafted direct POST.
   await redirectIfRecoverySessionActive();
@@ -157,7 +140,7 @@ export async function becomeAuthor(formData: FormData) {
     );
   }
 
-  if (!house && !hasAuthorAgeTick(formData)) {
+  if (!hasAuthorAgeTick(formData)) {
     redirect(AGE_REQUIRED_PATH);
   }
 
@@ -180,32 +163,24 @@ export async function becomeAuthor(formData: FormData) {
     redirect(EMPTY_NAME_PATH);
   }
 
-  if (!(await recordAgreements(user.id, { authorAge: !house }))) {
+  if (!(await recordAgreements(user.id, { authorAge: true }))) {
     redirect(FAILURE_PATH);
   }
 
   const writer = createAuthorRoleWriteClient();
   const { data: rows, error: updateError } = await writer
     .from("profiles")
-    .update(
-      house
-        ? { role: "author", public_author_name: publicAuthorName, account_kind: "publishing_house" }
-        : { role: "author", public_author_name: publicAuthorName },
-    )
+    .update({ role: "author", public_author_name: publicAuthorName })
     .eq("id", user.id)
     .eq("role", "reader")
-    .select(house ? "id, role, account_kind" : "id, role");
-  const row = (Array.isArray(rows) ? rows[0] : undefined) as
-    | { id?: unknown; role?: unknown; account_kind?: unknown }
-    | undefined;
+    .select("id, role");
 
   if (
     updateError ||
     !Array.isArray(rows) ||
     rows.length !== 1 ||
-    row?.id !== user.id ||
-    row?.role !== "author" ||
-    (house && row?.account_kind !== "publishing_house")
+    rows[0]?.id !== user.id ||
+    rows[0]?.role !== "author"
   ) {
     if (updateError) {
       console.error("becomeAuthor: role update failed", { code: updateError.code ?? "unknown" });
@@ -218,7 +193,7 @@ export async function becomeAuthor(formData: FormData) {
   }
 
   const legacyPhoto: unknown = profile.avatar_path;
-  if (!house && isOwnCanonicalAvatarPath(legacyPhoto, user.id)) {
+  if (isOwnCanonicalAvatarPath(legacyPhoto, user.id)) {
     const extension: PenNamePhotoExtension = legacyPhoto.endsWith(".png") ? "png" : "jpg";
     await copyLegacyPhotoToDefaultPenName(user.id, legacyPhoto, extension);
   }
@@ -228,5 +203,9 @@ export async function becomeAuthor(formData: FormData) {
   scheduleAuthorWelcome(user.id);
 
   revalidatePath("/", "layout");
-  redirect(`/dashboard?success=${encodeURIComponent(house ? HOUSE_SUCCESS_MESSAGE : AUTHOR_SUCCESS_MESSAGE)}`);
+  redirect(
+    `/dashboard?success=${encodeURIComponent(
+      "Llogaria juaj tani është llogari autori. Filloni duke shtuar librin tuaj të parë.",
+    )}`,
+  );
 }
