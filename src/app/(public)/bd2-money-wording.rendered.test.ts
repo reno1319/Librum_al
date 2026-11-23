@@ -15,6 +15,9 @@ import {
 vi.mock("next/font/google", () => ({
   Playfair_Display: () => ({ className: "font-hero-letter" }),
   Ultra: () => ({ className: "font-hero-heavy" }),
+  // HOMEPAGE-2 fonts: the homepage loads Lora + Inter itself.
+  Lora: () => ({ style: { fontFamily: "Lora" } }),
+  Inter: () => ({ style: { fontFamily: "Inter" } }),
 }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ getAll: () => [], set: () => {} }) }));
 vi.mock("@/lib/supabase/server", () => ({

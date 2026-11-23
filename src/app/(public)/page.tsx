@@ -7,6 +7,7 @@ import type { PublicBook } from "@/lib/types";
 import { SECTION_CONTAINER } from "@/components/page-bands";
 import { CREAM, Photo, PhotoShapes, Wave } from "@/components/author-page-kit";
 import type { Metadata } from "next";
+import { Inter, Lora } from "next/font/google";
 import { isDayParam } from "@/lib/account-deletion-reasons";
 import { formatDateOnly } from "@/lib/book-detail-dates";
 
@@ -31,6 +32,17 @@ export const metadata: Metadata = {
   description:
     "Platforma e vetëbotimit e ndërtuar për autorët që shkruajnë shqip. Botoni në mënyrë të pavarur, vendosni vetë çmimin dhe arrini te lexuesit përmes Librum.",
 };
+
+// HOMEPAGE-2 fonts (Renato 2026-11-23, "Homepage only"): Lora for
+// headings and Inter for interface text, on the homepage only (its
+// header and footer too). The two variables the site theme reads
+// (--font-libre-caslon for font-serif, --font-libre-franklin for
+// font-sans) are pointed at Lora and Inter while this page is shown;
+// every other page keeps Libre Caslon and Libre Franklin. latin-ext
+// covers Albanian (ë, ç).
+const lora = Lora({ subsets: ["latin", "latin-ext"], weight: ["400", "700"] });
+const inter = Inter({ subsets: ["latin", "latin-ext"] });
+const HOME_FONTS_CSS = `html:root{--font-libre-caslon:${lora.style.fontFamily};--font-libre-franklin:${inter.style.fontFamily}}`;
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -122,6 +134,7 @@ export default async function Home({
 
   return (
     <main className="flex-1 overflow-x-hidden">
+      <style>{HOME_FONTS_CSS}</style>
       <PhotoShapes />
       {/* DEL (del1 a): the account is hidden, deleted 30 days later. */}
       {account === "deletion_requested" && (
