@@ -767,7 +767,7 @@ export function authorWelcomeEmail({ name }: { name: string | null }): { subject
         <p><strong>Çfarë mund të bësh tani?</strong></p>
         <p>Për ta nisur këtë rrugëtim sa më mbarë, ja tre hapa të thjeshtë që mund të ndërmarrësh që sot:</p>
         <ol>
-          <li>${emailLink(`${origin}/dashboard/pen-names`, "Plotëso Profilin Tënd")}: Shto një bio frymëzuese dhe foton tënde, që lexuesit të të njohin më mirë.</li>
+          <li>${emailLink(`${origin}/dashboard/profile`, "Plotëso Profilin Tënd")}: Shto një bio frymëzuese dhe foton tënde, që lexuesit të të njohin më mirë.</li>
           <li>${emailLink(`${origin}/blog`, "Eksploro Blogun e Librum")}: Vizito hapësirën tonë të dedikuar për artizanatin e shkrimit, ku do të gjesh këshilla praktike, artikuj mbi tregun e librit dhe frymëzim për çdo fazë të të shkruarit.</li>
           <li>${emailLink(`${origin}/dashboard/books/new`, "Gati për Botim?")} Nëse e ke librin gati në Word (.docx) ose ePub, mund të nisësh shumë shpejt procesin e ngarkimit të tij në platformë duke ndjekur hapat tanë udhëzues.</li>
         </ol>

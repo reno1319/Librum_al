@@ -65,13 +65,15 @@ describe("DashboardMenu", () => {
     expect(tabs).not.toMatch(/>Zbritjet</);
   });
 
-  // PEN-NAMES-1: Profile now has a second page, Pen names.
-  it("shows Profili and Pseudonimet on a second line under Profili", () => {
-    const html = render("/dashboard/pen-names");
+  // AUTHOR PROFILI (build 1): no Pseudonimet tab and no second line
+  // under Profili; pen names are inside the Profili page.
+  it("shows Profili with no second line and no Pseudonimet tab", () => {
+    const html = render("/dashboard/profile");
     const tabs = html.slice(0, html.indexOf("<details"));
-    expect(tabs.match(/<ul/g)).toHaveLength(2);
-    expect(linkTag(tabs, "Pseudonimet")).toContain('aria-current="page"');
-    expect(linkTag(tabs, "Pseudonimet")).toContain('href="/dashboard/pen-names"');
+    expect(tabs.match(/<ul/g)).toHaveLength(1);
+    expect(linkTag(tabs, "Profili")).toContain('aria-current="page"');
+    expect(html).not.toContain("Pseudonimet");
+    expect(html).not.toContain("/dashboard/pen-names");
   });
 
   // DC 1 (Renato 11-13, a): the Librat group has one row on a computer;
