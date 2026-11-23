@@ -38,7 +38,11 @@ const mockReturns = vi.fn((): Promise<{ data: unknown[] }> => Promise.resolve({ 
 const mockOrder = vi.fn((_column: string, _opts: { ascending: boolean }) => ({ returns: mockReturns }));
 const mockSelect = vi.fn((_columns: string) => ({ order: mockOrder }));
 const mockFrom = vi.fn((_table: string) => ({ select: mockSelect }));
-const mockCreateClient = vi.fn(() => Promise.resolve({ from: mockFrom }));
+// BR1 q6: the reaction totals for the live articles in the list.
+const mockRpcRows = vi.fn((): unknown[] => []);
+const mockRpcError = vi.fn((): { code: string } | null => null);
+const mockRpc = vi.fn((_fn: string, _args: unknown) => Promise.resolve({ data: mockRpcRows(), error: mockRpcError() }));
+const mockCreateClient = vi.fn(() => Promise.resolve({ from: mockFrom, rpc: mockRpc }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
 const { default: AdminBlogListPage } = await import("./page");
@@ -51,6 +55,9 @@ describe("AdminBlogListPage", () => {
     mockSelect.mockClear();
     mockOrder.mockClear();
     mockReturns.mockReset().mockResolvedValue({ data: [] });
+    mockRpc.mockClear();
+    mockRpcRows.mockReset().mockReturnValue([]);
+    mockRpcError.mockReset().mockReturnValue(null);
   });
 
   it("gates on requireStaff('blog.view')", async () => {
@@ -141,4 +148,71 @@ describe("AdminBlogListPage", () => {
     expect(selectArg).toContain("id");
     expect(selectArg).toContain("status");
   });
+
+  it("BR1 q6: each live article shows its three reaction totals (zeros too); drafts show none and are never asked for", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "editor" });
+    mockHasPermission.mockResolvedValue(false);
+    const now = new Date();
+    mockReturns.mockResolvedValueOnce({
+      data: [
+        { id: "live-1", title: "Live", slug: "live", status: "published", featured: false, category: "zeja", is_editorial: false, published_at: new Date(now.getTime() - 86400000).toISOString(), updated_at: now.toISOString() },
+        { id: "draft-1", title: "Draft", slug: "draft", status: "draft", featured: false, category: "zeja", is_editorial: false, published_at: null, updated_at: now.toISOString() },
+      ],
+    });
+    mockRpcRows.mockReturnValue([
+      { post_id: "live-1", reaction: "like", total: 12 },
+      { post_id: "live-1", reaction: "helpful", total: 7 },
+    ]);
+
+    const page = await AdminBlogListPage({ searchParams: Promise.resolve({}) });
+
+    expect(mockRpc).toHaveBeenCalledWith("blog_post_reaction_counts", { p_post_ids: ["live-1"] });
+    const text = textOf(page);
+    expect(text).toContain("Reactions: 👍Më pëlqen 12 · 💡E dobishme 7 · ✨Më frymëzoi 0");
+    expect(text.match(/Reactions:/g)).toHaveLength(1);
+  });
+
+  it("audit L1: a failed totals read shows a dash, never a wrong 0", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "editor" });
+    mockHasPermission.mockResolvedValue(false);
+    const now = new Date();
+    mockReturns.mockResolvedValueOnce({
+      data: [{ id: "live-1", title: "Live", slug: "live", status: "published", featured: false, category: "zeja", is_editorial: false, published_at: new Date(now.getTime() - 86400000).toISOString(), updated_at: now.toISOString() }],
+    });
+    mockRpcError.mockReturnValue({ code: "42883" });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const page = await AdminBlogListPage({ searchParams: Promise.resolve({}) });
+    expect(textOf(page)).toContain("Reactions: 👍Më pëlqen — · 💡E dobishme — · ✨Më frymëzoi —");
+    expect(errorSpy).toHaveBeenCalledWith("admin blog: reaction counts read failed", { code: "42883" });
+    errorSpy.mockRestore();
+  });
+
+  it("audit L1: more than 500 live articles are asked for 500 at a time", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "editor" });
+    mockHasPermission.mockResolvedValue(false);
+    const past = new Date(Date.now() - 86400000).toISOString();
+    mockReturns.mockResolvedValueOnce({
+      data: Array.from({ length: 1001 }, (_, i) => ({ id: `p-${i}`, title: `T${i}`, slug: `s-${i}`, status: "published", featured: false, category: "zeja", is_editorial: false, published_at: past, updated_at: past })),
+    });
+    await AdminBlogListPage({ searchParams: Promise.resolve({}) });
+    const sizes = mockRpc.mock.calls.map((call) => (call[1] as { p_post_ids: string[] }).p_post_ids.length);
+    expect(sizes).toEqual([500, 500, 1]);
+  });
+
+  it("BR1 q6: with no live article the totals are never asked for", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: "staff-1", role: "editor" });
+    mockHasPermission.mockResolvedValue(false);
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    await AdminBlogListPage({ searchParams: Promise.resolve({}) });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
 });
+
+function textOf(node: unknown): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node !== "object" || !("props" in (node as object))) return "";
+  const element = node as ReactElement<Record<string, unknown>>;
+  return textOf(element.props.children);
+}

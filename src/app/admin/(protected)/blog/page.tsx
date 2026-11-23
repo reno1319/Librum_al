@@ -9,6 +9,13 @@ import { getBlogCategories } from "@/lib/blog-categories-server";
 import { blogPublishState, formatTiranaDateTime, type BlogPublishState } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import {
+  BLOG_REACTIONS,
+  BLOG_REACTION_COUNTS_MAX_IDS,
+  groupBlogReactionCounts,
+  type BlogReactionCountRow,
+  type BlogReactionCounts,
+} from "@/lib/blog-reactions";
 
 export const metadata: Metadata = {
   title: "Blog",
@@ -83,6 +90,24 @@ export default async function AdminBlogListPage({
   const now = new Date();
   const allPosts = (posts ?? []).map((p) => ({ ...p, state: blogPublishState(p, now) }));
   const visiblePosts = activeFilter === "all" ? allPosts : allPosts.filter((p) => p.state === activeFilter);
+
+  // BR1 q6 (2026-11-23): reaction totals per live article -- numbers
+  // only, never which reader reacted.
+  const livePostIds = visiblePosts.filter((p) => p.state === "published").map((p) => p.id);
+  // Audit L1: asked 500 at a time (the function's limit); a failed read
+  // shows "—" for that article, never a wrong 0.
+  const reactionCounts = new Map<string, BlogReactionCounts>();
+  const unknownReactionIds = new Set<string>();
+  for (let start = 0; start < livePostIds.length; start += BLOG_REACTION_COUNTS_MAX_IDS) {
+    const ids = livePostIds.slice(start, start + BLOG_REACTION_COUNTS_MAX_IDS);
+    const { data, error } = await supabase.rpc("blog_post_reaction_counts", { p_post_ids: ids });
+    if (error) {
+      console.error("admin blog: reaction counts read failed", { code: error.code });
+      ids.forEach((id) => unknownReactionIds.add(id));
+      continue;
+    }
+    groupBlogReactionCounts(data as BlogReactionCountRow[] | null).forEach((counts, id) => reactionCounts.set(id, counts));
+  }
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -200,6 +225,21 @@ export default async function AdminBlogListPage({
                     </>
                   )}
                 </p>
+                {post.state === "published" && (
+                  <p className="mt-1 text-xs text-muted">
+                    Reactions:{" "}
+                    {BLOG_REACTIONS.map((reaction, index) => (
+                      <span key={reaction.key} title={reaction.label}>
+                        {index > 0 && " · "}
+                        <span aria-hidden="true">{reaction.emoji}</span>
+                        <span className="sr-only">{reaction.label}</span>{" "}
+                        <span className="tabular-nums">
+                          {unknownReactionIds.has(post.id) ? "—" : (reactionCounts.get(post.id)?.[reaction.key] ?? 0)}
+                        </span>
+                      </span>
+                    ))}
+                  </p>
+                )}
               </div>
 
               <div className="flex shrink-0 items-center gap-3">

@@ -279,14 +279,16 @@ select pg_temp.assert(
   -- the number on the book page for signed-out visitors (a count, no one named).
   -- Blog search (migration 20261117230000): search_blog_posts(text,integer),
   -- published posts only, SECURITY INVOKER like search_books.
-  = 'book_download_count(uuid) ; book_is_publicly_listed(books) ; book_makes_pen_name_public(books) ; '
+  -- Blog reactions (migration 20261123190000): blog_post_reaction_counts(uuid[]),
+  -- totals for live articles (numbers, no one named).
+  = 'blog_post_reaction_counts(uuid[]) ; book_download_count(uuid) ; book_is_publicly_listed(books) ; book_makes_pen_name_public(books) ; '
     || 'enforce_author_payouts_immutability() ; enforce_book_rights_declarations_append_only() ; '
     || 'enforce_bundle_checkout_snapshots_financial_facts_immutability() ; enforce_payout_reversal_matches_original() ; '
     || 'pd_edition_redirect(uuid) ; '
     || 'pen_name_links_valid(jsonb) ; reject_payout_destination_snapshot_mutation() ; '
     || 'search_blog_posts(text,integer) ; '
     || 'search_books(text,text,integer,integer,integer) ; staff_has_permission(text) ; user_owns_book(uuid)',
-  'part4: anon can EXECUTE exactly the fourteen allowed public functions');
+  'part4: anon can EXECUTE exactly the fifteen allowed public functions');
 
 do $$
 begin
