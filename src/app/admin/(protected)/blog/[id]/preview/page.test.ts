@@ -94,7 +94,7 @@ describe("PreviewBlogPostPage", () => {
     expect(page).toBeTruthy();
   });
 
-  it("pv1 b: the byline matches the live page (typed name, else Librum on Editorial, else none)", async () => {
+  it("pv1 b: the byline matches the live page (typed name, else Librum on every article)", async () => {
     const base = {
       id: "post-1",
       title: "T",
@@ -123,7 +123,7 @@ describe("PreviewBlogPostPage", () => {
     expect(named).not.toContain("By Librum Editorial");
     expect(await text({ ...base, is_editorial: true, author_name: null })).toContain("Nga Librum · ");
     const none = await text({ ...base, is_editorial: false, author_name: null });
-    expect(none).not.toContain("Nga ");
+    expect(none).toContain("Nga Librum · ");
     expect(none).not.toContain("By Librum Editorial");
   });
 

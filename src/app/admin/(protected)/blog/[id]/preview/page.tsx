@@ -57,7 +57,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
     : null;
   const readingMinutes = calculateReadingTime(post.content_markdown);
   // pv1 b (Renato 2026-11-22): the same byline as the live article page
-  // (au2 a): the typed name, else "Librum" on Editorial, else none.
+  // (au2 reversed 2026-11-23): the typed name, else "Librum".
   const bylineName = blogBylineName(post);
 
   // e3: a scheduled article is published with its time still ahead.
@@ -88,7 +88,7 @@ export default async function PreviewBlogPostPage({ params }: { params: Promise<
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>
 
         <p className="mt-4 text-sm text-muted">
-          {bylineName && `Nga ${bylineName} · `}
+          {`Nga ${bylineName} · `}
           {post.status === "published" && post.published_at && (
             <>
               {new Date(post.published_at).toLocaleDateString(undefined, {

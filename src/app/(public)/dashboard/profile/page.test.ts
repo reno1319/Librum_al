@@ -2,68 +2,51 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 
-// LIBRUM 2.0 AUTHOR-1A: source-level regression coverage for the
-// Account name / Public author name split on /dashboard/profile. Same
-// convention already established for pages with no DOM-rendering
-// harness (see src/app/books/[id]/book-detail-metadata.test.ts) --
-// these assert directly on the real page.tsx text, not a rendered tree.
+// Source-level coverage for Dashboard > Profili (same convention as other
+// pages with no DOM-rendering harness: assertions on the real page.tsx).
+// AUTHOR PROFILI (build 1, approved picture sp2 a): one page with the
+// account name, the main author name card and the pen names.
 const source = readFileSync(path.join(__dirname, "page.tsx"), "utf8");
+const pick = (from: string, to: string) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
 
-describe("Dashboard Profile: Account name / Public author name split", () => {
-  it("labels the display_name field 'Account name', not 'Name' or 'Legal name'", () => {
-    // ALBANIAN-10: the labels are Albanian ("Emri i llogarisë" / "Emri publik i autorit").
+describe("Dashboard Profili (one page for authors)", () => {
+  it("has the approved title and intro", () => {
+    expect(source).toContain('title="Profili"');
+    expect(source).toContain("Emri i llogarisë, emri juaj i autorit dhe pseudonimet, nëse keni.");
+  });
+
+  it("labels display_name 'Emri i llogarisë' with the private hint, never 'Legal name'", () => {
     expect(source).toContain("Emri i llogarisë");
-    expect(source).not.toMatch(/>\s*Emri\s*</);
-    expect(source).not.toMatch(/>\s*Name\s*</);
-    // "Legal name" is allowed to appear inside a comment explaining it's
-    // deliberately NOT used as a label (Librum has no legal-name/KYC
-    // verification) -- what must never exist is the literal JSX label.
+    expect(source).toContain("Vetëm për llogarinë tuaj. Lexuesit nuk e shohin.");
     expect(source).not.toMatch(/>\s*Legal name\s*</);
   });
 
-  it("gates the Public author name field on role === 'author'", () => {
-    expect(source).toContain('profile?.role === "author"');
+  it("Q1 b: the account name belongs to the main card's form, so its one Ruani saves both", () => {
+    const field = pick('name="displayName"', "/>");
+    expect(field).toContain("form={mainPenName ? MAIN_CARD_FORM_ID : undefined}");
+    expect(source).toContain("id={isMain ? MAIN_CARD_FORM_ID : undefined}");
   });
 
-  it("Public author name field resolves its defaultValue through resolvePublicAuthorName(), never a raw display_name fallback", () => {
-    expect(source).toContain("import { resolvePublicAuthorName } from \"@/lib/author-name\";");
-    expect(source).toContain("resolvePublicAuthorName(profile)");
+  it("one writer for the author name: no publicAuthorName field; the main card edits the default pen name", () => {
+    expect(source).not.toContain("publicAuthorName");
+    expect(source).toContain("action={updatePenName.bind(null, penName.id)}");
+    expect(source).toContain('{isMain ? "Emri juaj i autorit" : "Emri"}');
+    expect(source).toContain("Ky emër shfaqet te librat tuaj dhe te faqja juaj e autorit.");
   });
 
-  it("the reader-facing supporting copy sits under Public author name, not under Account name", () => {
-    const accountBlock = source.slice(
-      source.indexOf("Emri i llogarisë"),
-      source.indexOf("Emri publik i autorit"),
+  it("the pen names section: heading, text, '+ Shto pseudonim' opening a name box (Q2 a)", () => {
+    expect(source).toContain("Pseudonimet (opsionale)");
+    expect(source).toContain(
+      "Botoni me një emër tjetër? Shtoni një pseudonim. Çdo pseudonim ka faqen e vet; e zgjidhni për çdo libër.",
     );
-    const publicNameBlock = source.slice(
-      source.indexOf("Emri publik i autorit"),
-      source.indexOf("<button"),
-    );
-    expect(accountBlock).not.toContain("lexuesit do të shohin");
-    expect(publicNameBlock).toContain("Ky është emri që lexuesit do të shohin te librat tuaj dhe te faqja juaj e autorit.");
+    const box = pick("<details", "</details>");
+    expect(box).toContain("+ Shto pseudonim");
+    expect(box).toContain("action={createPenName}");
+    expect(box).toMatch(/name="name"[^>]*required/);
   });
 
-  it("includes the EPUB pen-name timing note near the Public author name field, concise and non-alarmist", () => {
-    const publicNameBlock = source.slice(
-      source.indexOf("Emri publik i autorit"),
-      source.indexOf("<button"),
-    );
-    expect(publicNameBlock).toContain("Nëse botoni me pseudonim, vendoseni para publikimit.");
-    expect(publicNameBlock).toContain("futet brenda skedarit tuaj EPUB");
-  });
-
-  it("PEN-NAMES-1 r4 (18a): no Bio box and no photo field -- both are edited per pen name", () => {
-    expect(source).not.toContain('name="bio"');
-    expect(source).not.toContain("AvatarField");
-    expect(source).not.toContain("avatar_path");
-    expect(source).toContain('href="/dashboard/pen-names"');
-  });
-
-  it("the public author name input is required when rendered (an author's form never submits it blank by omission)", () => {
-    const publicNameFieldBlock = source.slice(
-      source.indexOf('name="publicAuthorName"'),
-      source.indexOf('name="publicAuthorName"') + 300,
-    );
-    expect(publicNameFieldBlock).toContain("required");
+  it("only a non-default, unused pen name can be deleted", () => {
+    expect(source).toContain("{!isMain && !used && (");
+    expect(source).toContain("Fshini pseudonimin");
   });
 });

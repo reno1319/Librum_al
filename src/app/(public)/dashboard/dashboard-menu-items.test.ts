@@ -19,8 +19,8 @@ describe("dashboard menu groups", () => {
       ["Librat", ["Librat /dashboard", "Seritë /dashboard/series"]],
       ["Paratë", ["Shitjet /dashboard/sales", "Bilanci /dashboard/balance"]],
       ["Promovimi", ["Paketat /dashboard/bundles", "Zbritjet /dashboard/discounts"]],
-      // PEN-NAMES-1: Pen names joins the Profile group.
-      ["Profili", ["Profili /dashboard/profile", "Pseudonimet /dashboard/pen-names"]],
+      // AUTHOR PROFILI (build 1): pen names live inside Profili.
+      ["Profili", ["Profili /dashboard/profile"]],
     ]);
   });
 
@@ -45,7 +45,6 @@ describe("findDashboardMenuMatch", () => {
     ["/dashboard/bundles/abc/edit", "Promovimi/Paketat"],
     ["/dashboard/discounts", "Promovimi/Zbritjet"],
     ["/dashboard/profile", "Profili/Profili"],
-    ["/dashboard/pen-names", "Profili/Pseudonimet"],
   ])("%s -> %s", (pathname, expected) => {
     expect(labels(pathname)).toBe(expected);
   });
@@ -87,7 +86,7 @@ describe("aria-current", () => {
     // DC 1: Librat has no second row, so its tab is the page itself.
     expect(current("/dashboard")).toEqual({
       groups: ["page", undefined, undefined, undefined],
-      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined, undefined],
+      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined],
     });
     expect(current("/dashboard/balance").items[3]).toBe("page");
     expect(current("/dashboard/balance").groups).toEqual([undefined, "true", undefined, undefined]);
@@ -108,13 +107,11 @@ describe("aria-current", () => {
     expect(current("/dashboard/bundles/abc/edit").groups[2]).toBe("true");
   });
 
-  // PEN-NAMES-1: Profile now has two items (Profile, Pen names), so its
-  // tab is 'true' like the other groups and each item is 'page' on its own.
-  it("the Profili group is 'true'; Profili and Pseudonimet are each 'page' on their own page", () => {
-    expect(current("/dashboard/profile").groups[3]).toBe("true");
+  // AUTHOR PROFILI (build 1): Profili is a one-item group again, so its
+  // tab is the page itself.
+  it("the Profili tab and its item are 'page' on /dashboard/profile", () => {
+    expect(current("/dashboard/profile").groups[3]).toBe("page");
     expect(current("/dashboard/profile").items[6]).toBe("page");
-    expect(current("/dashboard/pen-names").groups[3]).toBe("true");
-    expect(current("/dashboard/pen-names").items[7]).toBe("page");
   });
 
   it("an unknown path marks nothing", () => {

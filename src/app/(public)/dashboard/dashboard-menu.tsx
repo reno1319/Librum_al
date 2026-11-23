@@ -25,7 +25,7 @@ export function DashboardMenu() {
     match && match.group.items.length > 1 && match.group.desktopSubRow !== false ? match.group.items : null;
 
   return (
-    <nav aria-label="Paneli i autorit">
+    <nav aria-label="Paneli">
       {/* Computer and tablet: the four groups, then the current group's
           pages on a second line. */}
       <div className="hidden md:block">

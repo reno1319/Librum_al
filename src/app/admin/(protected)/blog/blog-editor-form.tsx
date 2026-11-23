@@ -171,13 +171,14 @@ export function BlogEditorForm({
         <span>
           Editorial
           <span className="block text-muted">
-            Adds the yellow &ldquo;Nga Librum&rdquo; tag and byline. The article shows in the
+            Adds the yellow &ldquo;Nga Librum&rdquo; tag. The article shows in the
             Editorial section and in its category above.
           </span>
         </span>
       </label>
 
-      {/* au1 a / au2 a (Renato 2026-11-22): any name staff type, not an account. */}
+      {/* au1 a (Renato 2026-11-22): any name staff type, not an account.
+          au2 reversed (2026-11-23): empty shows "Nga Librum" on every article. */}
       <label className="flex flex-col gap-1 text-sm">
         Written by (optional)
         <input
@@ -191,7 +192,7 @@ export function BlogEditorForm({
         />
         <span className="text-sm text-muted">
           Shown under the title as &ldquo;Nga {authorName.trim() || "\u2026"}&rdquo;. Leave empty:
-          Editorial articles show &ldquo;Nga Librum&rdquo;, other articles show no name.
+          shows &ldquo;Nga Librum&rdquo;.
         </span>
       </label>
 
