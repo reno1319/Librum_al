@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DismissableDetails } from "@/components/dismissable-details";
 import {
-  DASHBOARD_MENU_GROUPS,
+  dashboardMenuGroups,
   findDashboardMenuMatch,
   groupAriaCurrent,
   itemAriaCurrent,
@@ -15,9 +15,11 @@ import {
 // re-render on client navigation, so the current page comes from
 // usePathname(). Menu items are navigation, which the C1 underline rule
 // excludes; the current group/item has non-colour cues (bold, brass bar).
-export function DashboardMenu() {
+// BUILD 2a-2: isHouse (a publishing house) adds Profili > Autorët.
+export function DashboardMenu({ isHouse = false }: { isHouse?: boolean }) {
   const pathname = usePathname() ?? "";
-  const match = findDashboardMenuMatch(pathname);
+  const groups = dashboardMenuGroups(isHouse);
+  const match = findDashboardMenuMatch(pathname, groups);
   // DC 1 (Renato 11-13, a): a group may hide its second row on a
   // computer (Librat: "Seritë" is in the Mjetet boxes and each book's
   // "…" menu). The phone menu still lists every page.
@@ -25,12 +27,12 @@ export function DashboardMenu() {
     match && match.group.items.length > 1 && match.group.desktopSubRow !== false ? match.group.items : null;
 
   return (
-    <nav aria-label="Paneli i autorit">
+    <nav aria-label="Paneli">
       {/* Computer and tablet: the four groups, then the current group's
           pages on a second line. */}
       <div className="hidden md:block">
         <ul className="flex gap-1 border-b border-border">
-          {DASHBOARD_MENU_GROUPS.map((group) => {
+          {groups.map((group) => {
             const current = match?.group === group;
             return (
               <li key={group.label}>
@@ -96,7 +98,7 @@ export function DashboardMenu() {
           </span>
         </summary>
         <div className="absolute inset-x-0 z-10 mt-1 rounded-control border border-border bg-surface py-2 shadow-md">
-          {DASHBOARD_MENU_GROUPS.map((group, index) => {
+          {groups.map((group, index) => {
             const labelId = `dashboard-menu-group-${index}`;
             return (
               <div key={group.label} className={index > 0 ? "mt-1 border-t border-border pt-1" : undefined}>

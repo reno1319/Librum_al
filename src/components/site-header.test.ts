@@ -27,7 +27,7 @@ describe("buildSiteHeaderNav", () => {
       "Blog",
     ]);
     expect(nav.primaryLinks.some((l) => l.label === "Biblioteka ime")).toBe(false);
-    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli")).toBe(false);
     expect(nav.headerName).toBeNull();
     expect(nav.showLogout).toBe(false);
     expect(nav.showAccountLink).toBe(true);
@@ -48,7 +48,7 @@ describe("buildSiteHeaderNav", () => {
       true,
     );
     expect(nav.primaryLinks.some((l) => l.href === "/blog" && l.label === "Blog")).toBe(true);
-    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli")).toBe(false);
     expect(nav.headerName).not.toBeNull();
     expect(nav.showAccountLink).toBe(true);
     expect(nav.showLogout).toBe(true);
@@ -66,7 +66,7 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(
-      nav.primaryLinks.some((l) => l.href === "/dashboard" && l.label === "Paneli i autorit"),
+      nav.primaryLinks.some((l) => l.href === "/dashboard" && l.label === "Paneli"),
     ).toBe(true);
     expect(nav.primaryLinks.some((l) => l.label === "Biblioteka ime")).toBe(false);
     expect(nav.headerName).not.toBeNull();
@@ -99,7 +99,7 @@ describe("buildSiteHeaderNav", () => {
     });
 
     expect(nav.primaryLinks).toEqual([]);
-    expect(nav.primaryLinks.some((l) => l.label === "Paneli i autorit")).toBe(false);
+    expect(nav.primaryLinks.some((l) => l.label === "Paneli")).toBe(false);
     expect(nav.headerName).toBeNull();
     expect(nav.showAccountLink).toBe(false);
     expect(nav.showLogout).toBe(true);

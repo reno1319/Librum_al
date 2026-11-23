@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DASHBOARD_MENU_GROUPS,
+  HOUSE_DASHBOARD_MENU_GROUPS,
+  dashboardMenuGroups,
   findDashboardMenuMatch,
   groupAriaCurrent,
   isAtOrBelow,
@@ -126,5 +128,46 @@ describe("aria-current", () => {
       "Promovimi",
       "Profili",
     ]);
+  });
+});
+
+// BUILD 2a-2 (approved picture 7): a publishing house's Profili group
+// is Profili | Autorët; nothing else changes.
+describe("publishing house menu", () => {
+  it("adds Autorët under Profili, keeps every other group as it is", () => {
+    expect(HOUSE_DASHBOARD_MENU_GROUPS.map((g) => [g.label, g.items.map((i) => `${i.label} ${i.href}`)])).toEqual([
+      ["Librat", ["Librat /dashboard", "Seritë /dashboard/series"]],
+      ["Paratë", ["Shitjet /dashboard/sales", "Bilanci /dashboard/balance"]],
+      ["Promovimi", ["Paketat /dashboard/bundles", "Zbritjet /dashboard/discounts"]],
+      ["Profili", ["Profili /dashboard/profile", "Autorët /dashboard/authors"]],
+    ]);
+    expect(HOUSE_DASHBOARD_MENU_GROUPS.slice(0, 3)).toEqual(DASHBOARD_MENU_GROUPS.slice(0, 3));
+    expect(HOUSE_DASHBOARD_MENU_GROUPS[3].desktopSubRow).toBeUndefined();
+  });
+
+  it("picks the menu by account kind", () => {
+    expect(dashboardMenuGroups(true)).toBe(HOUSE_DASHBOARD_MENU_GROUPS);
+    expect(dashboardMenuGroups(false)).toBe(DASHBOARD_MENU_GROUPS);
+  });
+
+  it.each([
+    ["/dashboard/profile", "Profili/Profili"],
+    ["/dashboard/authors", "Profili/Autorët"],
+    ["/dashboard/authors/", "Profili/Autorët"],
+  ])("%s -> %s", (pathname, expected) => {
+    const match = findDashboardMenuMatch(pathname, HOUSE_DASHBOARD_MENU_GROUPS);
+    expect(match ? `${match.group.label}/${match.item.label}` : null).toBe(expected);
+  });
+
+  it("the person menu does not know /dashboard/authors", () => {
+    expect(findDashboardMenuMatch("/dashboard/authors")).toBeNull();
+  });
+
+  it("on Autorët the Profili tab is 'true' and Autorët is the page", () => {
+    const match = findDashboardMenuMatch("/dashboard/authors", HOUSE_DASHBOARD_MENU_GROUPS);
+    const profile = HOUSE_DASHBOARD_MENU_GROUPS[3];
+    expect(groupAriaCurrent(profile, match, "/dashboard/authors")).toBe("true");
+    expect(itemAriaCurrent(profile.items[1], match, "/dashboard/authors")).toBe("page");
+    expect(itemAriaCurrent(profile.items[0], match, "/dashboard/authors")).toBeUndefined();
   });
 });
