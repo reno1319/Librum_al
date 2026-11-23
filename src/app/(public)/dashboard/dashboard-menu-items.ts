@@ -49,11 +49,9 @@ export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
   },
   {
     label: "Profili",
-    // PEN-NAMES-1: each pen name's own name, bio, photo and links.
-    items: [
-      { href: "/dashboard/profile", label: "Profili", nested: true },
-      { href: "/dashboard/pen-names", label: "Pseudonimet", nested: true },
-    ],
+    // AUTHOR PROFILI (build 1): one page, pen names inside it, so no
+    // second row; the old Pen names address redirects here.
+    items: [{ href: "/dashboard/profile", label: "Profili", nested: true }],
   },
 ];
 

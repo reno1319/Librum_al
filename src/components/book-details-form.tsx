@@ -373,7 +373,7 @@ export function BookDetailsForm({
             <span className={EDITOR_HINT_CLASSES}>
               Shtoni ose ndryshoni emra te{" "}
               <Link
-                href="/dashboard/pen-names"
+                href="/dashboard/profile"
                 target="_blank"
                 rel="noopener"
                 onClick={() => {
@@ -381,7 +381,7 @@ export function BookDetailsForm({
                 }}
                 className={TEXT_LINK_CLASSES}
               >
-                Profili → Emrat e autorit
+                Profili
                 <span className="sr-only"> (hapet në një skedë të re)</span>
               </Link>
               .

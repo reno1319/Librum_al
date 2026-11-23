@@ -635,7 +635,8 @@ describe("author welcome email", () => {
     expect(args.html).toContain("Nëse e ke librin gati në Word (.docx) ose ePub");
     expect(args.html).toContain("krijimtarinë tënde!");
     expect(args.html).not.toContain("krijimtarinë tuaj");
-    for (const path of ["/dashboard/pen-names", "/blog", "/dashboard/books/new", "/ndihme"]) {
+    expect(args.html).not.toContain("/dashboard/pen-names");
+    for (const path of ["/dashboard/profile", "/blog", "/dashboard/books/new", "/ndihme"]) {
       expect(args.html).toMatch(new RegExp(`href="[^"]*${path.replace(/\//g, "\\/")}"`));
     }
     expect(args.html).toContain(">librum.al</a>");

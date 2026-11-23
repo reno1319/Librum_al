@@ -312,8 +312,9 @@ describe("BookDetailsForm: a picked public-domain edition (N5)", () => {
 
 // Upload notes 1 and 2 (Enkelejd 11-06).
 describe("BookDetailsForm: upload notes", () => {
+  // AUTHOR PROFILI (build 1): pen names are managed on Profili.
   it("the pen-name page opens in a new tab, and says so", () => {
-    const link = render().match(/<a[^>]*href="\/dashboard\/pen-names"[^>]*>[\s\S]*?<\/a>/)![0];
+    const link = render().match(/<a[^>]*href="\/dashboard\/profile"[^>]*>[\s\S]*?<\/a>/)![0];
     expect(link).toContain('target="_blank"');
     expect(link).toContain('rel="noopener"');
     expect(link).toContain("(hapet në një skedë të re)");

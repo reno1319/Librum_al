@@ -8,8 +8,9 @@ import { groupAllDigits } from "@/lib/catalog-price";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { IMAGE_CACHE_CONTROL_SECONDS, PEN_NAME_PHOTO_SIZE, shrinkImageToJpeg } from "@/lib/cover-resize";
 import { AVATARS_BUCKET } from "@/lib/avatar-path";
-import { createPenNameWriteClient } from "@/lib/pen-name-write-client";
+import { createPenNameWriteClient, resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { canonicalPenNamePhotoPath, isPenNamePhotoPath } from "@/lib/pen-name-photo-path";
+import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
 import {
   PEN_NAME_BIO_MAX_LENGTH,
   PEN_NAME_PHOTO_MAX_BYTES,
@@ -29,11 +30,18 @@ import {
 //     (src/lib/pen-name-photo-path.ts) so its address never names the
 //     account (9a);
 //   * delete: only an unused (no book, series or bundle), non-default pen
-//     name, through the same writer, filtered by id AND author.
+//     name, through the same writer, filtered by id AND author;
+//   * create (AUTHOR PROFILI build 1, "+ Shto pseudonim"): the same
+//     resolveOwnPenNameId path the per-book pen name box uses.
+//
+// AUTHOR PROFILI (build 1): these forms live on Dashboard > Profili now;
+// /dashboard/pen-names only redirects there.
 
-const PAGE = "/dashboard/pen-names";
+const PAGE = "/dashboard/profile";
 const SAVE_ERROR = "Pseudonimi nuk u ruajt dot. Provoni përsëri.";
 const PHOTO_ERROR = "Fotoja nuk u ruajt dot. Provoni përsëri.";
+const PROFILE_SAVE_ERROR = "Profili nuk u ruajt dot. Provoni përsëri.";
+const CREATE_ERROR = "Pseudonimi nuk u shtua dot. Provoni përsëri.";
 const DELETE_ERROR = "Pseudonimi nuk u fshi dot. Provoni përsëri.";
 const IN_USE_MESSAGE = "Ky pseudonim përdoret ende nga një libër, seri ose paketë, ndaj nuk mund të fshihet.";
 // Same private staging area and key shape AvatarField uses.
@@ -106,9 +114,42 @@ export async function updatePenName(penNameId: string, formData: FormData) {
   const links = parsePenNameLinks(formData.getAll("links"));
   if (!links.ok) fail(links.message);
 
+  // AUTHOR PROFILI (build 1, Renato's Q1 b): on Profili the main card's
+  // one Ruani also saves the account name, which sits above the card.
+  // Only the default pen name's form carries it. It is checked with
+  // everything else before any write, and written first, on the session
+  // client, to exactly the caller's own row (display_name only: the
+  // author name is this pen name's own name, synced to the profile by
+  // the database).
+  let displayName: string | null = null;
+  if (row.is_default && formData.has("displayName")) {
+    displayName = String(formData.get("displayName") ?? "").trim();
+    if (!displayName) fail("Emri nuk mund të jetë bosh");
+    if (displayName.length > ACCOUNT_NAME_MAX_LENGTH) fail(ACCOUNT_NAME_TOO_LONG_MESSAGE);
+  }
+
   const tempPhotoPath = String(formData.get("avatarStoragePath") ?? "").trim();
   const removePhoto = formData.get("removePhoto") === "on";
   const photo = tempPhotoPath ? await readStagedPhoto(supabase, user.id, tempPhotoPath) : null;
+
+  if (displayName !== null) {
+    const { data: profileRows, error: profileError } = await supabase
+      .from("profiles")
+      .update({ display_name: displayName })
+      .eq("id", user.id)
+      .select("id");
+    if (
+      profileError ||
+      !Array.isArray(profileRows) ||
+      profileRows.length !== 1 ||
+      (profileRows[0] as { id?: unknown }).id !== user.id
+    ) {
+      console.error("updatePenName: account name update failed", {
+        code: (profileError as { code?: string } | null)?.code ?? null,
+      });
+      fail(PROFILE_SAVE_ERROR);
+    }
+  }
 
   const { data: written, error: updateError } = await supabase
     .from("pen_names")
@@ -177,9 +218,10 @@ export async function updatePenName(penNameId: string, formData: FormData) {
     if (cleanupError) console.error("updatePenName: staged photo cleanup failed:", cleanupError);
   }
 
+  if (displayName !== null) revalidatePath("/", "layout");
   revalidatePath(PAGE);
   revalidatePath(authorPagePath(row.id));
-  redirect(`${PAGE}?success=${encodeURIComponent("Pseudonimi u ruajt.")}`);
+  redirect(`${PAGE}?success=${encodeURIComponent(row.is_default ? "Profili u ruajt." : "Pseudonimi u ruajt.")}`);
 }
 
 export async function deletePenName(penNameId: string) {
@@ -217,4 +259,33 @@ export async function deletePenName(penNameId: string) {
 
   revalidatePath(PAGE);
   redirect(`${PAGE}?success=${encodeURIComponent("Pseudonimi u fshi.")}`);
+}
+
+// AUTHOR PROFILI (build 1): "+ Shto pseudonim". The name follows the
+// per-book box's rules (parsePenNameName); the session author is the only
+// author passed. resolve_author_pen_name returns an existing pen name for
+// a name the author already uses (any case), so a returned id that was
+// already one of theirs means "taken", never a second pen name.
+export async function createPenName(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?next=${PAGE}`);
+
+  const name = parsePenNameName(formData.get("name"));
+  if (!name.ok) fail(name.message);
+
+  const [{ data: profile }, { data: existing, error: existingError }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user.id).single<{ role: string }>(),
+    supabase.from("pen_names").select("id").eq("author_id", user.id).returns<{ id: string }[]>(),
+  ]);
+  if (profile?.role !== "author" || existingError || !Array.isArray(existing)) fail(CREATE_ERROR);
+
+  const result = await resolveOwnPenNameId(user.id, name.name);
+  if (!result.ok) fail(result.reason === "invalid" ? result.message : CREATE_ERROR);
+  if (existing.some((row) => row.id === result.penNameId)) fail(PEN_NAME_TAKEN_MESSAGE);
+
+  revalidatePath(PAGE);
+  redirect(`${PAGE}?success=${encodeURIComponent("Pseudonimi u shtua.")}`);
 }

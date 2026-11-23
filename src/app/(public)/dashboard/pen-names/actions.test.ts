@@ -70,6 +70,7 @@ function recordingClient(client: Query["client"]) {
 
 const USER_ID = "a1b2c3d4-1111-4111-8111-abcdef111111";
 const PEN_ID = "f0000000-0000-4000-8000-000000000002";
+const NEW_ID = "f0000000-0000-4000-8000-000000000003";
 const OLD_PHOTO = "d0000000-0000-4000-8000-000000000009/pen-name.png";
 
 const sessionClient = {
@@ -78,16 +79,26 @@ const sessionClient = {
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
 const writerClient = recordingClient("writer");
-vi.mock("@/lib/pen-name-write-client", () => ({ createPenNameWriteClient: () => writerClient }));
+let resolveCalls: unknown[][] = [];
+let resolveResult: unknown;
+vi.mock("@/lib/pen-name-write-client", () => ({
+  createPenNameWriteClient: () => writerClient,
+  resolveOwnPenNameId: async (...args: unknown[]) => (resolveCalls.push(args), resolveResult),
+}));
 
-const { updatePenName, deletePenName } = await import("./actions");
+const { updatePenName, deletePenName, createPenName } = await import("./actions");
 
 let ownRow: Record<string, unknown> | null;
+let profileRole: string;
+let ownPenNameIds: string[];
+let profileWriteRows: unknown;
 
 function defaultRespond(q: Query): Result {
   if (q.client === "session" && q.table === "pen_names" && method(q, "select") && !method(q, "update")) {
-    return { data: ownRow };
+    return method(q, "maybeSingle") ? { data: ownRow } : { data: ownPenNameIds.map((id) => ({ id })) };
   }
+  if (q.client === "session" && q.table === "profiles" && method(q, "update")) return { data: profileWriteRows };
+  if (q.client === "session" && q.table === "profiles") return { data: { role: profileRole } };
   if (q.client === "session" && q.table === "pen_names" && method(q, "update")) return { data: [{ id: PEN_ID }] };
   if (q.client === "writer" && q.table === "pen_names" && method(q, "update")) {
     const avatar = (method(q, "update")!.args[0] as { avatar_path: unknown }).avatar_path;
@@ -125,6 +136,11 @@ beforeEach(() => {
   stagedBytes = null;
   respond = defaultRespond;
   ownRow = { id: PEN_ID, is_default: false, avatar_path: null };
+  profileRole = "author";
+  ownPenNameIds = [PEN_ID];
+  profileWriteRows = [{ id: USER_ID }];
+  resolveCalls = [];
+  resolveResult = { ok: true, penNameId: NEW_ID };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -133,7 +149,7 @@ describe("updatePenName", () => {
     const target = await redirectOf(
       updatePenName(PEN_ID, form({ name: "  Jo Pen ", bio: " Bio ", links: ["https://a.example", "", ""] })),
     );
-    expect(target).toBe("/dashboard/pen-names?success=Pseudonimi u ruajt.");
+    expect(target).toBe("/dashboard/profile?success=Pseudonimi u ruajt.");
     const update = queries.find((q) => q.client === "session" && method(q, "update"))!;
     expect(method(update, "update")!.args[0]).toEqual({ name: "Jo Pen", bio: "Bio", links: ["https://a.example"] });
     expect(update.ops).toContainEqual({ method: "eq", args: ["id", PEN_ID] });
@@ -159,7 +175,7 @@ describe("updatePenName", () => {
     respond = (q) =>
       q.client === "session" && method(q, "update") ? { data: null, error: { code: "23505" } } : defaultRespond(q);
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Taken" })))).toBe(
-      "/dashboard/pen-names?error=Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.",
+      "/dashboard/profile?error=Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.",
     );
   });
 
@@ -179,7 +195,7 @@ describe("updatePenName", () => {
     stagedBytes = PNG;
     const staged = `${USER_ID}/tmp/avatar/aaaaaaaa-0000-4000-8000-000000000001.png`;
     expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: staged })))).toBe(
-      "/dashboard/pen-names?success=Pseudonimi u ruajt.",
+      "/dashboard/profile?success=Pseudonimi u ruajt.",
     );
     const upload = storageCalls.find((c) => c.op === "upload")!;
     expect(upload.client).toBe("writer");
@@ -246,7 +262,7 @@ describe("updatePenName: a default pen name holding the profile photo", () => {
     stagedBytes = PNG;
     expect(
       await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` }))),
-    ).toBe("/dashboard/pen-names?success=Pseudonimi u ruajt.");
+    ).toBe("/dashboard/profile?success=Profili u ruajt.");
     const removedAvatars = storageCalls.filter((c) => c.bucket === "avatars" && c.op === "remove");
     expect(removedAvatars).toEqual([]);
     const write = queries.find((q) => q.client === "writer" && method(q, "update"))!;
@@ -264,7 +280,7 @@ describe("updatePenName: a default pen name holding the profile photo", () => {
 
 describe("deletePenName", () => {
   it("deletes an unused, non-default pen name through the writer, by id, author and is_default=false", async () => {
-    expect(await redirectOf(deletePenName(PEN_ID))).toBe("/dashboard/pen-names?success=Pseudonimi u fshi.");
+    expect(await redirectOf(deletePenName(PEN_ID))).toBe("/dashboard/profile?success=Pseudonimi u fshi.");
     const del = queries.find((q) => q.client === "writer" && method(q, "delete"))!;
     expect(del.ops).toContainEqual({ method: "eq", args: ["id", PEN_ID] });
     expect(del.ops).toContainEqual({ method: "eq", args: ["author_id", USER_ID] });
@@ -292,5 +308,93 @@ describe("deletePenName", () => {
     ownRow = { id: PEN_ID, is_default: false, avatar_path: OLD_PHOTO };
     await redirectOf(deletePenName(PEN_ID));
     expect(storageCalls).toEqual([{ client: "writer", bucket: "avatars", op: "remove", path: [OLD_PHOTO] }]);
+  });
+});
+
+// AUTHOR PROFILI (build 1, Q1 b): the main card's Ruani also saves the
+// account name, which only the default pen name's form carries.
+describe("updatePenName: the account name on the main card", () => {
+  it("default card: writes display_name (session client, own row) first, then the pen name", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    const target = await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", displayName: "  Ana Test " })));
+    expect(target).toBe("/dashboard/profile?success=Profili u ruajt.");
+    const profileWrite = queries.findIndex((q) => q.table === "profiles" && method(q, "update"));
+    const penWrite = queries.findIndex((q) => q.table === "pen_names" && method(q, "update"));
+    expect(profileWrite).toBeGreaterThan(-1);
+    expect(profileWrite).toBeLessThan(penWrite);
+    const q = queries[profileWrite];
+    expect(q.client).toBe("session");
+    expect(method(q, "update")!.args[0]).toEqual({ display_name: "Ana Test" });
+    expect(q.ops).toContainEqual({ method: "eq", args: ["id", USER_ID] });
+  });
+
+  it("a blank or too long account name is refused before any write", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", displayName: "  " })))).toBe(
+      "/dashboard/profile?error=Emri nuk mund të jetë bosh",
+    );
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", displayName: "x".repeat(121) })))).toBe(
+      "/dashboard/profile?error=Emri mund të ketë deri në 120 karaktere",
+    );
+    expect(queries.some((q) => method(q, "update"))).toBe(false);
+  });
+
+  it("a bad pen name field stops the save before the account name is written", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    await redirectOf(updatePenName(PEN_ID, form({ name: " ", displayName: "Ana" })));
+    expect(queries.some((q) => method(q, "update"))).toBe(false);
+  });
+
+  it("an account name write that doesn't return exactly the own row fails; the pen name is not written", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    profileWriteRows = [];
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", displayName: "Ana" })))).toBe(
+      "/dashboard/profile?error=Profili nuk u ruajt dot. Provoni përsëri.",
+    );
+    expect(queries.some((q) => q.table === "pen_names" && method(q, "update"))).toBe(false);
+  });
+
+  it("another pen name's form never writes the account name, even if the field is sent", async () => {
+    await redirectOf(updatePenName(PEN_ID, form({ name: "Jo", displayName: "Ana" })));
+    expect(queries.some((q) => q.table === "profiles")).toBe(false);
+  });
+});
+
+// AUTHOR PROFILI (build 1, Q2 a / Q3 a): "+ Shto pseudonim".
+describe("createPenName", () => {
+  it("creates through resolveOwnPenNameId with the session author and the trimmed name", async () => {
+    expect(await redirectOf(createPenName(form({ name: "  A. T. Hija " })))).toBe(
+      "/dashboard/profile?success=Pseudonimi u shtua.",
+    );
+    expect(resolveCalls).toEqual([[USER_ID, "A. T. Hija"]]);
+  });
+
+  it("an empty name is refused before anything is created", async () => {
+    expect(await redirectOf(createPenName(form({ name: "  " })))).toBe(
+      "/dashboard/profile?error=Pseudonimi nuk mund të jetë bosh.",
+    );
+    expect(resolveCalls).toEqual([]);
+  });
+
+  it("a name the author already uses gives the clear message, and no new pen name", async () => {
+    resolveResult = { ok: true, penNameId: PEN_ID };
+    expect(await redirectOf(createPenName(form({ name: "jo pen" })))).toBe(
+      "/dashboard/profile?error=Këtë emër e përdorni tashmë si një nga pseudonimet tuaja. Zgjidhni një emër tjetër, ose ndryshoni më parë emrin e atij pseudonimi.",
+    );
+  });
+
+  it("a reader (not an author) is refused before anything is created", async () => {
+    profileRole = "reader";
+    expect(await redirectOf(createPenName(form({ name: "Jo" })))).toBe(
+      "/dashboard/profile?error=Pseudonimi nuk u shtua dot. Provoni përsëri.",
+    );
+    expect(resolveCalls).toEqual([]);
+  });
+
+  it("a failed create gives the generic message", async () => {
+    resolveResult = { ok: false, reason: "failed" };
+    expect(await redirectOf(createPenName(form({ name: "Jo" })))).toBe(
+      "/dashboard/profile?error=Pseudonimi nuk u shtua dot. Provoni përsëri.",
+    );
   });
 });
