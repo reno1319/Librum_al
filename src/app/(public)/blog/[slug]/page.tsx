@@ -131,8 +131,9 @@ function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; ur
     datePublished: post.published_at ?? post.updated_at,
     dateModified: post.updated_at,
     // au3 (Renato 2026-11-22): a typed "Written by" name is the author;
-    // with none, only an Editorial post names one (audit F3, 2026-11-17).
-    ...(jsonLdAuthor ? { author: jsonLdAuthor } : {}),
+    // with none, Editorial names "Librum Editorial" (audit F3) and every
+    // other post "Librum" (au2 reversed 2026-11-23).
+    author: jsonLdAuthor,
     publisher: { "@type": "Organization", name: "Librum" },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     ...(coverUrl ? { image: [coverUrl] } : {}),
@@ -181,16 +182,15 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
 
   const readingMinutes = calculateReadingTime(post.content_markdown);
   // Blog categories (2026-11-17): Editorial posts carry the yellow
-  // "Nga Librum" tag, a thin gold line and the byline "Nga Librum"
-  // (blog1/blog3); every other post links its category name to the
-  // category page and has no byline. The bottom button follows the
-  // category (blog6). bs1: an Editorial post is the tick on top of a
+  // "Nga Librum" tag and a thin gold line (blog1/blog3); every other
+  // post links its category name to the category page. The bottom
+  // button follows the category (blog6). bs1: an Editorial post is the tick on top of a
   // real category, so it shows the tag AND its category link.
   const categories = await getBlogCategories();
   const categoryInfo = getBlogCategory(categories, post.category);
   const isEditorial = post.is_editorial === true;
-  // au2 a (2026-11-22): a typed name on any article, else "Librum" on
-  // Editorial only.
+  // A typed name on any article, else "Librum" on every article (au2
+  // reversed 2026-11-23).
   const bylineName = blogBylineName(post);
   const origin = resolveSiteOrigin();
   const url = `${origin}/blog/${post.slug}`;
@@ -238,7 +238,7 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         <p className="mt-3 text-lg text-muted">{post.excerpt}</p>
 
         <p className="mt-4 text-sm text-muted">
-          {bylineName && `Nga ${bylineName} · `}
+          {`Nga ${bylineName} · `}
           {post.published_at && `${formatTimestampAsDate(post.published_at)} · `}
           {readingMinutes} min lexim
         </p>

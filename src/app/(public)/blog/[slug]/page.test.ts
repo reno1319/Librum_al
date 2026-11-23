@@ -206,7 +206,7 @@ describe("BlogArticlePage", () => {
     expect(mockNotFound).toHaveBeenCalled();
   });
 
-  it("a published (non-Editorial) slug renders successfully with correct JSON-LD: Article shape, no author, Librum publisher, correct URL", async () => {
+  it("a published (non-Editorial) slug renders successfully with correct JSON-LD: Article shape, Librum author (au2 reversed), Librum publisher, correct URL", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
     mockReturns.mockResolvedValueOnce({ data: [] });
 
@@ -221,7 +221,7 @@ describe("BlogArticlePage", () => {
     expect(jsonLd.description).toBe(basePost.excerpt);
     expect(jsonLd.datePublished).toBe(basePost.published_at);
     expect(jsonLd.dateModified).toBe(basePost.updated_at);
-    expect(jsonLd.author).toBeUndefined();
+    expect(jsonLd.author).toEqual({ "@type": "Organization", name: "Librum" });
     expect(jsonLd.publisher).toEqual({ "@type": "Organization", name: "Librum" });
     expect(jsonLd.mainEntityOfPage).toEqual({
       "@type": "WebPage",
@@ -316,7 +316,7 @@ describe("BlogArticlePage", () => {
     expect(contentSelects).toHaveLength(1);
   });
 
-  it("a normal post: category name links to its category page, no byline, publish button for Zeja/Tregu", async () => {
+  it("a normal post: category name links to its category page, byline Nga Librum (au2 reversed), publish button for Zeja/Tregu", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, category: "zeja" } });
     mockReturns.mockResolvedValueOnce({ data: [] });
     const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
@@ -324,8 +324,7 @@ describe("BlogArticlePage", () => {
     const hrefs = collectLinkHrefs(page);
     expect(hrefs).toContain("/blog/kategoria/zeja-e-shkrimit");
     expect(text).toContain("Zeja e Shkrimit");
-    expect(text).not.toContain("Nga Librum");
-    expect(text).toContain("1 janar 2026 · ");
+    expect(text).toContain("Nga Librum · 1 janar 2026 · ");
     expect(hrefs).toContain("/signup?role=author");
     expect(hrefs).not.toContain("/librari");
   });
