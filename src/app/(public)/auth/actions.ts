@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { clearRecoverySession } from "@/lib/recovery-session";
 import { loginErrorPath, resolveSafeInternalPath } from "@/lib/safe-redirect";
-import type { SignupRole } from "@/lib/types";
+import type { SignupChoice } from "@/lib/types";
 import { hasAuthorAgeTick } from "@/lib/author-age";
 import { AUTHOR_AGE_REQUIRED_MESSAGE } from "@/lib/author-age-statement";
 import { recordAgreements } from "@/lib/agreement-records";
@@ -30,23 +30,25 @@ import {
 import {
   GOOGLE_AUTHOR_INTENT_COOKIE,
   GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS,
+  GOOGLE_HOUSE_INTENT_VALUE,
 } from "@/lib/google-sign-in";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
 const INVALID_CREDENTIALS_MESSAGE = "Invalid login credentials";
 
-// Never widen this beyond "author"/"reader" -- signup must never be
+// Never widen this beyond "author"/"reader" (+ "publishing_house", BUILD
+// 2a-1: an author account of the house kind) -- signup must never be
 // able to produce an "admin" profile. The database makes every new
 // account a reader (handle_new_user(), SECURITY-9A), and the only
 // switch below is reader -> author -- but this is the first line of
 // defense against a crafted form submission (formData isn't limited to
 // the <select>'s own two options; a raw POST to this Server Action could
 // submit anything).
-const SIGNUP_ROLES: readonly SignupRole[] = ["author", "reader"];
+const SIGNUP_ROLES: readonly SignupChoice[] = ["author", "reader", "publishing_house"];
 
-function resolveSignupRole(value: FormDataEntryValue | null): SignupRole {
+function resolveSignupRole(value: FormDataEntryValue | null): SignupChoice {
   return (SIGNUP_ROLES as readonly string[]).includes(value as string)
-    ? (value as SignupRole)
+    ? (value as SignupChoice)
     : "reader";
 }
 
@@ -58,6 +60,9 @@ export async function signup(formData: FormData) {
   const rawDisplayName = String(formData.get("displayName") ?? "");
   const displayName = rawDisplayName.trim();
   const role = resolveSignupRole(formData.get("role"));
+  // BUILD 2a-1 (h2 b, Renato 11-23): a publishing house becomes an author
+  // account like "Autor", without the 18+ tick (only authors tick it).
+  const publishes = role === "author" || role === "publishing_house";
 
   if (!email || !password || !rawDisplayName) {
     redirect(`/signup?error=${encodeURIComponent(AUTH_FILL_ALL_FIELDS_MESSAGE)}`);
@@ -132,14 +137,18 @@ export async function signup(formData: FormData) {
   let switchedToAuthor = false;
   if (newUser && created) {
     const recorded = await recordAgreements(newUser.id, { authorAge: role === "author" });
-    if (role === "author" && recorded) {
-      switchedToAuthor = await switchNewAccountToAuthor(newUser.id, displayName);
+    if (publishes && recorded) {
+      switchedToAuthor = await switchNewAccountToAuthor(
+        newUser.id,
+        displayName,
+        role === "publishing_house" ? "publishing_house" : "person",
+      );
     }
   }
   // Only for an account really created here: a stand-in user must get
   // exactly the ordinary answer, or the page would tell whether an
   // address already has an account.
-  const authorPending = role === "author" && created && !switchedToAuthor;
+  const authorPending = publishes && created && !switchedToAuthor;
 
   // If email confirmation is required, there's no session yet -- no
   // ordinary authenticated session exists here for a stale recovery
@@ -167,15 +176,15 @@ export async function signup(formData: FormData) {
   // usual path sends the welcome from /auth/callback.
   if (switchedToAuthor && newUser) scheduleAuthorWelcome(newUser.id);
   revalidatePath("/", "layout");
-  if (role === "author" && !switchedToAuthor) {
+  if (publishes && !switchedToAuthor) {
     redirect(`/account?error=${encodeURIComponent(AUTHOR_PENDING_MESSAGE)}`);
   }
-  redirect(role === "author" ? "/dashboard" : "/");
+  redirect(publishes ? "/dashboard" : "/");
 }
 
 // SECURITY-9A: shown when an author sign-up ended as a reader.
 const AUTHOR_PENDING_MESSAGE =
-  "Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni \"Bëhuni autor\" në këtë faqe.";
+  "Llogaria juaj u krijua si llogari lexuesi. Për të botuar, përdorni \"Botoni librat tuaj\" në këtë faqe.";
 
 // K7: "Vazhdo me Google". From /login (signInWithGoogle) it only signs
 // in, keeping a safe `next`; from /signup (signUpWithGoogle, the button
@@ -193,7 +202,10 @@ export async function signUpWithGoogle(formData: FormData) {
 }
 
 async function startGoogle(formData: FormData, fromSignup: boolean) {
-  const wantsAuthor = fromSignup && resolveSignupRole(formData.get("role")) === "author";
+  const choice = fromSignup ? resolveSignupRole(formData.get("role")) : "reader";
+  const wantsAuthor = choice === "author";
+  // BUILD 2a-1: "Shtëpi botuese" + Google: no 18+ tick (h2 b).
+  const wantsHouse = choice === "publishing_house";
   const failedPath = fromSignup
     ? `/signup?error=${encodeURIComponent(GOOGLE_SIGN_IN_FAILED_MESSAGE)}`
     : loginErrorPath(GOOGLE_SIGN_IN_FAILED_MESSAGE, String(formData.get("next") ?? ""));
@@ -223,8 +235,8 @@ async function startGoogle(formData: FormData, fromSignup: boolean) {
 
   // Always set or cleared, so an old hint never outlives this attempt.
   const cookieStore = await cookies();
-  if (wantsAuthor) {
-    cookieStore.set(GOOGLE_AUTHOR_INTENT_COOKIE, "1", {
+  if (wantsAuthor || wantsHouse) {
+    cookieStore.set(GOOGLE_AUTHOR_INTENT_COOKIE, wantsHouse ? GOOGLE_HOUSE_INTENT_VALUE : "1", {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",

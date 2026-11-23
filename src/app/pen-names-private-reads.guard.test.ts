@@ -197,10 +197,11 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
       // BD13 (Q2a): the person's page (people.view: owner and admin)
       // reads exactly one profiles column -- that account's review
       // name -- with the service-role client, for its Review name box.
+      // BUILD 2a-1: plus its account kind (the "Publishing house" label).
       if (name === "app/admin/(protected)/people/[id]/page.tsx") {
         const found = chains(source, "profiles");
         expect(found).toHaveLength(1);
-        expect(found[0]).toMatch(/^\.select\("review_name"\)\.eq\("id",\s*id\)/);
+        expect(found[0]).toMatch(/^\.select\("review_name, account_kind"\)\.eq\("id",\s*id\)/);
         expect(source).toMatch(/requireStaff\("people\.view"\)/);
         continue;
       }

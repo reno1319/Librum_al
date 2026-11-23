@@ -24,6 +24,9 @@ export async function sendAuthorWelcomeOnce(userId: string): Promise<void> {
       .update({ author_welcome_sent_at: new Date().toISOString() })
       .eq("id", userId)
       .eq("role", "author")
+      // BUILD 2a-1 (h4): publishing houses get their own welcome (with
+      // build 2a-2); until then, none. Left unclaimed, not marked sent.
+      .eq("account_kind", "person")
       .is("author_welcome_sent_at", null)
       .select("id");
     if (error) {

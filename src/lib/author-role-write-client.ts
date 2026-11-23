@@ -17,7 +17,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //     signUp() itself just created and returned with an identity (no
 //     session may exist yet, with email confirmation on), whose reader
 //     row the database made in that same signUp; it is switched only
-//     after its 18+ tick was recorded.
+//     after its 18+ tick was recorded (a publishing house: after its
+//     Terms record; houses have no 18+ tick, BUILD 2a-1 h2 b). The
+//     Google sign-up finish (src/lib/google-sign-in.ts) uses the same
+//     switch.
 //
 //   1. Authenticate with the session client and read the caller's own
 //      profile through it BEFORE calling this. A request that is going
@@ -30,7 +33,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //      public_author_name = the caller's own display name (the stored
 //      one for becomeAuthor, the trimmed sign-up name for signup) -- the
 //      row handle_new_user() gave an author sign-up before SECURITY-9A.
-//      Nothing else is written.
+//      BUILD 2a-1: a publishing-house switch (the "Shtëpi botuese"
+//      sign-up, becomeAuthor's "Shtëpi botuese" choice) also writes account_kind =
+//      'publishing_house' in that same update, and the answer must show
+//      it. Nothing else is written.
 //   4. The UPDATE returns `.select("id, role")` and must prove that
 //      exactly one row changed and that it is the caller's row, now an
 //      author. An error, zero rows, several rows or any mismatch fails

@@ -64,6 +64,12 @@ describe("People list labels", () => {
     expect(personTypeLabel(reader)).toBe("Reader");
     expect(personTypeLabel({ ...reader, is_staff: true })).toBe("Staff");
     expect(personTypeLabel({ ...reader, account_type: "admin" })).toBe("Reader");
+    // BUILD 2a-1: a publishing house is an author account with the house kind.
+    expect(personTypeLabel(author, "publishing_house")).toBe("Publishing house");
+    expect(personTypeLabel(author, "person")).toBe("Author");
+    expect(personTypeLabel(author, null)).toBe("Author");
+    expect(personTypeLabel(reader, "publishing_house")).toBe("Reader");
+    expect(personTypeLabel({ ...author, is_staff: true }, "publishing_house")).toBe("Staff");
   });
 
   it("books column, as on the mockup", () => {
