@@ -83,6 +83,22 @@ describe("signInWithGoogle", () => {
     }));
   });
 
+  // BUILD 2a-1 (h2 b): a house needs no 18+ tick; the hint value is "house".
+  it("signup as publishing house: the house hint, no tick needed", async () => {
+    expect(await run({ google_from: "signup", role: "publishing_house" })).toBe(GOOGLE_URL);
+    expect(cookieStore.set).toHaveBeenCalledWith("librum_google_author", "house", expect.objectContaining({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/auth/callback",
+      maxAge: 600,
+    }));
+  });
+
+  it("login never sets the house hint, whatever the form says", async () => {
+    await run({ google_from: "login", role: "publishing_house" });
+    expect(cookieStore.set).not.toHaveBeenCalled();
+  });
+
   it("signup as author WITHOUT the 18+ tick: the form's refusal, Google never started", async () => {
     const to = await run({ google_from: "signup", role: "author" });
     expect(to).toBe(`/signup?role=author&error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`);

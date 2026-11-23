@@ -11,14 +11,16 @@ const mockRecord = vi.fn(async (_id: string, _opts: unknown) => {
   return recordOk;
 });
 let recordOk = true;
-const mockSwitch = vi.fn(async (_id: string, _name: string) => {
+const mockSwitch = vi.fn(async (_id: string, _name: string, _kind?: string) => {
   calls.push("switch");
   return switchOk;
 });
 let switchOk = true;
 
 vi.mock("@/lib/agreement-records", () => ({ recordAgreements: (id: string, o: unknown) => mockRecord(id, o) }));
-vi.mock("@/lib/author-signup-switch", () => ({ switchNewAccountToAuthor: (id: string, n: string) => mockSwitch(id, n) }));
+vi.mock("@/lib/author-signup-switch", () => ({
+  switchNewAccountToAuthor: (id: string, n: string, k?: string) => mockSwitch(id, n, k),
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (table: string) => ({
@@ -80,7 +82,22 @@ describe("finishGoogleSignIn", () => {
     expect(await finishGoogleSignIn(user(), true)).toBe("author");
     expect(calls).toEqual(["name:profiles", "record", "switch"]);
     expect(mockRecord).toHaveBeenCalledWith(ID, { authorAge: true, viaGoogleNotice: true });
-    expect(mockSwitch).toHaveBeenCalledWith(ID, "Ana Hoxha");
+    expect(mockSwitch).toHaveBeenCalledWith(ID, "Ana Hoxha", "person");
+  });
+
+  // BUILD 2a-1 (h2 b): the house hint switches to a house author account
+  // with the Terms record only (no 18+ tick for houses).
+  it("new Google publishing house: name, Terms record without 18+, then the house switch", async () => {
+    expect(await finishGoogleSignIn(user(), true, "publishing_house")).toBe("author");
+    expect(calls).toEqual(["name:profiles", "record", "switch"]);
+    expect(mockRecord).toHaveBeenCalledWith(ID, { authorAge: false, viaGoogleNotice: true });
+    expect(mockSwitch).toHaveBeenCalledWith(ID, "Ana Hoxha", "publishing_house");
+  });
+
+  it("the house kind without the author hint is a plain reader", async () => {
+    expect(await finishGoogleSignIn(user(), false, "publishing_house")).toBe("reader");
+    expect(mockRecord).toHaveBeenCalledWith(ID, { authorAge: false, viaGoogleNotice: true });
+    expect(mockSwitch).not.toHaveBeenCalled();
   });
 
   it("author: a failed record or switch ends as a reader (author_failed), never an author without the 18+ record", async () => {

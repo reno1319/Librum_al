@@ -13,6 +13,15 @@ export type Role = "author" | "reader" | "admin";
 // constraint, and handle_new_user()'s own whitelist (migration 028).
 export type SignupRole = Extract<Role, "author" | "reader">;
 
+// BUILD 2a-1 (migration 20261123140000): profiles.account_kind. A
+// publishing house is an author account (role 'author') of this kind;
+// only the server writes it (service role).
+export type AccountKind = "person" | "publishing_house";
+
+// The sign-up page's three choices: "publishing_house" makes an author
+// account of the house kind. Never a role of its own.
+export type SignupChoice = SignupRole | "publishing_house";
+
 export type Profile = {
   id: string;
   role: Role;

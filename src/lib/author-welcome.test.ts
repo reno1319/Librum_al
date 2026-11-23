@@ -21,7 +21,7 @@ const mockRecipient = vi.fn(async () => recipient);
 vi.mock("@/lib/author-recipient", () => ({ authorRecipient: () => mockRecipient() }));
 
 // A tiny profiles table: the claim is a conditional UPDATE ... RETURNING.
-type Row = { id: string; role: string; author_welcome_sent_at: string | null };
+type Row = { id: string; role: string; account_kind: string; author_welcome_sent_at: string | null };
 let rows: Row[] = [];
 let claimError: { code: string } | null = null;
 const claims: Array<{ values: Record<string, unknown>; filters: string[] }> = [];
@@ -63,9 +63,10 @@ const { sendAuthorWelcomeOnce, scheduleAuthorWelcome } = await import("./author-
 
 beforeEach(() => {
   rows = [
-    { id: "author-new", role: "author", author_welcome_sent_at: null },
-    { id: "author-old", role: "author", author_welcome_sent_at: "2026-11-17T18:00:00Z" },
-    { id: "reader", role: "reader", author_welcome_sent_at: null },
+    { id: "author-new", role: "author", account_kind: "person", author_welcome_sent_at: null },
+    { id: "author-old", role: "author", account_kind: "person", author_welcome_sent_at: "2026-11-17T18:00:00Z" },
+    { id: "reader", role: "reader", account_kind: "person", author_welcome_sent_at: null },
+    { id: "house", role: "author", account_kind: "publishing_house", author_welcome_sent_at: null },
   ];
   claimError = null;
   claims.length = 0;
@@ -79,7 +80,7 @@ beforeEach(() => {
 describe("sendAuthorWelcomeOnce", () => {
   it("claims an author row still unwelcomed, then sends once with the greeting name", async () => {
     await sendAuthorWelcomeOnce("author-new");
-    expect(claims[0].filters).toEqual(["id=author-new", "role=author", "author_welcome_sent_at is null"]);
+    expect(claims[0].filters).toEqual(["id=author-new", "role=author", "account_kind=person", "author_welcome_sent_at is null"]);
     expect(typeof claims[0].values.author_welcome_sent_at).toBe("string");
     expect(mockSendWelcome).toHaveBeenCalledExactlyOnceWith("ana@example.com", { name: "Ana" });
   });
@@ -100,6 +101,13 @@ describe("sendAuthorWelcomeOnce", () => {
     await sendAuthorWelcomeOnce("reader");
     expect(mockSendWelcome).not.toHaveBeenCalled();
     expect(rows.find((r) => r.id === "reader")?.author_welcome_sent_at).toBeNull();
+  });
+
+  // BUILD 2a-1 (h4): houses get their own welcome with build 2a-2.
+  it("a publishing house gets the author welcome never, and stays unclaimed", async () => {
+    await sendAuthorWelcomeOnce("house");
+    expect(mockSendWelcome).not.toHaveBeenCalled();
+    expect(rows.find((r) => r.id === "house")?.author_welcome_sent_at).toBeNull();
   });
 
   it("a failed claim sends nothing", async () => {

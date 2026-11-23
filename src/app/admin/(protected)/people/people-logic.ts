@@ -70,10 +70,18 @@ export function peopleListHref(kind: PeopleKind, q: string, page = 1): string {
   return query ? `/admin/people?${query}` : "/admin/people";
 }
 
-/** "Author", "Reader" or "Staff" (staff first: they can't be suspended). */
-export function personTypeLabel(person: Pick<PersonRow, "account_type" | "is_staff">): string {
+/**
+ * "Author", "Reader" or "Staff" (staff first: they can't be suspended).
+ * BUILD 2a-1: an author account whose profiles.account_kind is
+ * 'publishing_house' shows "Publishing house" where the page read it.
+ */
+export function personTypeLabel(
+  person: Pick<PersonRow, "account_type" | "is_staff">,
+  accountKind?: string | null,
+): string {
   if (person.is_staff) return "Staff";
-  return person.account_type === "author" ? "Author" : "Reader";
+  if (person.account_type !== "author") return "Reader";
+  return accountKind === "publishing_house" ? "Publishing house" : "Author";
 }
 
 /**
