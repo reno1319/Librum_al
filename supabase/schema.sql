@@ -22170,3 +22170,115 @@ revoke all on function public.update_blog_post(uuid, text, text, text, text, tex
   from public, anon, authenticated;
 grant execute on function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
   to authenticated, service_role;
+
+
+-- ============================================================
+-- Blog reactions (migration 20261123190000_blog_post_reactions.sql):
+-- blog_post_reactions, blog_post_reaction_counts() and
+-- toggle_blog_post_reaction(). Same statements as the migration; see
+-- its header.
+-- ============================================================
+-- 1. The table.
+create table public.blog_post_reactions (
+  post_id uuid not null references public.blog_posts(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  reaction text not null
+    constraint blog_post_reactions_reaction_check check (reaction in ('like', 'helpful', 'inspired')),
+  created_at timestamptz not null default pg_catalog.now(),
+  primary key (post_id, user_id, reaction)
+);
+
+create index blog_post_reactions_user_id_idx on public.blog_post_reactions (user_id);
+
+alter table public.blog_post_reactions enable row level security;
+
+create policy "Readers read their own blog reactions"
+  on public.blog_post_reactions for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+revoke all on public.blog_post_reactions from public, anon, authenticated, service_role;
+grant select on public.blog_post_reactions to authenticated;
+
+-- 2. The totals.
+create function public.blog_post_reaction_counts(p_post_ids uuid[])
+returns table (post_id uuid, reaction text, total integer)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if p_post_ids is null or pg_catalog.cardinality(p_post_ids) = 0 then
+    return;
+  end if;
+  if pg_catalog.cardinality(p_post_ids) > 500 then
+    raise exception 'blog_post_reaction_counts: too many articles' using errcode = '22023';
+  end if;
+  return query
+    select r.post_id, r.reaction, pg_catalog.count(*)::integer
+      from public.blog_post_reactions r
+      join public.blog_posts p on p.id = r.post_id
+     where r.post_id = any (p_post_ids)
+       and p.status = 'published'
+       and p.published_at is not null
+       and p.published_at <= pg_catalog.now()
+     group by r.post_id, r.reaction;
+end;
+$$;
+
+revoke all on function public.blog_post_reaction_counts(uuid[]) from public, anon, authenticated, service_role;
+grant execute on function public.blog_post_reaction_counts(uuid[]) to anon, authenticated;
+
+-- 3. Turning one reaction on or off.
+create function public.toggle_blog_post_reaction(p_post_id uuid, p_reaction text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if exists (
+    select 1 from public.account_suspensions s
+     where s.user_id = v_uid and s.lifted_at is null
+  ) or exists (
+    select 1 from public.account_deletion_requests d
+     where d.user_id = v_uid
+  ) then
+    raise exception 'toggle_blog_post_reaction: account not active' using errcode = 'LB524';
+  end if;
+  if p_reaction is null or p_reaction not in ('like', 'helpful', 'inspired') then
+    raise exception 'toggle_blog_post_reaction: invalid reaction' using errcode = 'LB525';
+  end if;
+  if not exists (
+    select 1 from public.blog_posts p
+     where p.id = p_post_id
+       and p.status = 'published'
+       and p.published_at is not null
+       and p.published_at <= pg_catalog.now()
+  ) then
+    raise exception 'toggle_blog_post_reaction: article not live' using errcode = 'LB526';
+  end if;
+
+  delete from public.blog_post_reactions r
+   where r.post_id = p_post_id and r.user_id = v_uid and r.reaction = p_reaction;
+  if found then
+    return false;
+  end if;
+
+  -- Two quick taps at once: the second insert finds the first one's row
+  -- and leaves it on, never an error.
+  insert into public.blog_post_reactions (post_id, user_id, reaction)
+  values (p_post_id, v_uid, p_reaction)
+  on conflict (post_id, user_id, reaction) do nothing;
+  return true;
+end;
+$$;
+
+revoke all on function public.toggle_blog_post_reaction(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.toggle_blog_post_reaction(uuid, text) to authenticated;
