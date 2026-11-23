@@ -84,6 +84,12 @@ export function BlogContentEditor({
     contentType: "markdown",
     editorProps: {
       attributes: { class: CONTENT_CLASS, "aria-label": "Content", "aria-multiline": "true", role: "textbox" },
+      // The pinned toolbar (ed5 a) covers the top of the window, up to
+      // ~90 px on a phone where it wraps to two rows. Keep the line being
+      // typed at least 100 px from the top so it never hides under it
+      // (audit r1 M1).
+      scrollThreshold: { top: 100, bottom: 5, left: 5, right: 5 },
+      scrollMargin: { top: 100, bottom: 5, left: 5, right: 5 },
       handleKeyDown: (_view, event) => {
         if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k") {
           event.preventDefault();
@@ -142,7 +148,14 @@ export function BlogContentEditor({
       {/* The saved article, as Markdown. */}
       <input type="hidden" name="contentMarkdown" value={contentMarkdown} />
 
-      <div className="flex flex-wrap gap-1.5" role="toolbar" aria-label="Formatting">
+      {/* ed5 a (Renato 2026-11-23): the buttons stay pinned at the top of
+          the window while a long article scrolls. The background hides
+          the text sliding under them. */}
+      <div
+        className="sticky top-0 z-20 flex flex-wrap gap-1.5 border-b border-border bg-background py-2"
+        role="toolbar"
+        aria-label="Formatting"
+      >
         {TOOLS.map((t) => (
           <button
             key={t.key}
