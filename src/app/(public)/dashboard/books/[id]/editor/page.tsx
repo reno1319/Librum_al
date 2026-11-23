@@ -33,6 +33,7 @@ import { BookEditorShell } from "@/components/book-editor-shell";
 import { BookDetailsForm, type DetailsFormValues } from "@/components/book-details-form";
 import { getRightsDeclarationState } from "@/lib/book-rights";
 import { getBookReviewState } from "@/lib/book-reviews";
+import { readPaymentDetailsReadiness } from "@/lib/author-tax-readiness";
 import { PD_PICKED_EDITOR_NOTE, isPickedPdEdition } from "@/lib/pd-editions";
 import { missingDetailItems } from "@/lib/book-details";
 import { resolveBookByline } from "@/lib/book-byline";
@@ -531,6 +532,9 @@ export default async function BookEditorPage({
           }
           missing={sendMissing}
           sendRefusedNote={takenDown ? TAKEN_DOWN_SEND_NOTE : null}
+          // BUILD 3: an unreadable answer shows the to-do too; the send
+          // itself is refused by the server gate either way.
+          paymentDetailsMissing={(await readPaymentDetailsReadiness(supabase)) !== "ready"}
         />
       )}
       {actionsBox}

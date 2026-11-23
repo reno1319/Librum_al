@@ -27,6 +27,7 @@ import { redirectForMaintenance } from "@/lib/maintenance-response";
 import { authorTakedownReasonLabel } from "@/lib/takedown-reasons";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
 import { checkPublishGate } from "@/lib/publish-readiness";
+import { readAuthorPaymentDetailsReadinessAsStaff } from "@/lib/author-tax-readiness";
 import { removeUnretainedManuscripts } from "@/lib/book-reviews";
 import { scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
 import { readRightsStateForStaff } from "./admin-book-reads";
@@ -302,6 +303,9 @@ export async function approveBookReviewAsStaff(formData: FormData) {
     description: book.description,
     readRights: () => readRightsStateForStaff(book.id),
     paidPublishingAvailable: canPublishPaidTitle,
+    // BUILD 3: the author's Payment & tax details, yes/no, asked as
+    // service_role (author_payment_details_ready_for, service_role only).
+    readPaymentDetails: () => readAuthorPaymentDetailsReadinessAsStaff(admin, book.author_id),
   });
   if (!gate.ok) {
     redirect(withQuery(bookPath, "error", approveReadinessMessage(gate.reason)));

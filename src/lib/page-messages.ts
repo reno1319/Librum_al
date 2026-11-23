@@ -8,6 +8,17 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // BUILD 3 Payment & tax (2026-11-23).
+  "Zgjidhni ku paguani tatimet mbi të ardhurat.",
+  "Zgjidhni shtetin ku paguani tatimet.",
+  "Shkruani emrin tuaj të plotë ligjor.",
+  "Ky nuk duket si numër personal (NID). Ka 10 shenja: një shkronjë, 8 shifra dhe një shkronjë.",
+  "Ky nuk duket si numër tatimor. Shkruani vetëm shkronjat dhe shifrat e tij.",
+  "Të dhënat tatimore nuk u ruajtën. Provoni përsëri.",
+  "Para se të dërgoni një libër me çmim, plotësoni të dhënat e pagesës te Paratë › Të dhënat e pagesës.",
+  "Para se të publikoni një paketë me çmim, plotësoni të dhënat e pagesës te Paratë › Të dhënat e pagesës.",
+  "The author hasn't completed their payment and tax details, so this paid book can't go live.",
+  "Couldn't check the author's payment and tax details. Please try again.",
   "A live article needs at least one keyword. Add one in Keywords and save.",
   "A review name has 2 to 40 characters.",
   "Arsyeja duhet të ketë më pak se 2000 karaktere.",
@@ -375,6 +386,8 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // BUILD 3 Payment & tax (2026-11-23).
+  "Të dhënat tatimore u ruajtën.",
   // Blog categories, patch B (2026-11-19).
   "Category created. It is last in the order: move it with the arrows.",
   "Category saved.",

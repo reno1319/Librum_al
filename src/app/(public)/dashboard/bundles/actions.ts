@@ -8,6 +8,7 @@ import { createCatalogWriteClient } from "@/lib/catalog-write-client";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE, readPaymentDetailsReadiness } from "@/lib/author-tax-readiness";
 import {
   CATALOG_ROW_CHANGED_MESSAGE,
   PAID_REPRICING_UNAVAILABLE_MESSAGE,
@@ -289,6 +290,22 @@ export async function updateBundle(bundleId: string, formData: FormData) {
       `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(PAID_REPRICING_UNAVAILABLE_MESSAGE)}`,
     );
   }
+  // BUILD 3 (sg1 a, audit r1 F2): a live free bundle turning paid (or a
+  // new paid price) is a paid listing at once, so it needs the Payment &
+  // tax details too. Yes/no only; unreadable fails closed.
+  if (priceAuthorization.kind === "paid_publishing_permission_required") {
+    const payment = await readPaymentDetailsReadiness(supabase);
+    if (payment === "missing") {
+      redirect(
+        `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE)}`,
+      );
+    }
+    if (payment !== "ready") {
+      redirect(
+        `/dashboard/bundles/${bundleId}/edit?error=${encodeURIComponent(BUNDLE_SAVE_ROLLED_BACK_MESSAGE)}`,
+      );
+    }
+  }
   // LIVE-PRICE-CONFIRM-1 (Renato 10-24): a new price on a LIVE bundle
   // needs the tick under the price, carrying exactly this new price.
   // Decided from the row read above and refused before any write. A
@@ -390,6 +407,7 @@ type PerformBundlePublishResult =
         | "read_failed"
         | "missing_all_price"
         | "paid_mode_required"
+        | "missing_payment_details"
         | "insufficient_members"
         | "update_failed";
     };
@@ -464,6 +482,13 @@ async function performBundlePublish(
     // price.
     if (!canPublishPaidTitle()) {
       return { ok: false, reason: "paid_mode_required" };
+    }
+    // BUILD 3 (sg1 a): a paid bundle sells the author's books, so it
+    // needs the same Payment & tax details as a paid book. Yes/no only;
+    // unreadable fails closed.
+    const payment = await readPaymentDetailsReadiness(supabase);
+    if (payment !== "ready") {
+      return { ok: false, reason: payment === "missing" ? "missing_payment_details" : "read_failed" };
     }
   }
 
@@ -583,6 +608,9 @@ export async function publishBundle(bundleId: string) {
     // state.
     if (result.reason === "paid_mode_required") {
       redirect(`/dashboard/bundles?error=${encodeURIComponent("Publikimi me pagesë nuk është i mundur tani")}`);
+    }
+    if (result.reason === "missing_payment_details") {
+      redirect(`/dashboard/bundles?error=${encodeURIComponent(BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE)}`);
     }
     if (result.reason === "insufficient_members") {
       redirect(`/dashboard/bundles?error=${encodeURIComponent("Kjo paketë ka nevojë për të paktën 2 libra të publikuar")}`);

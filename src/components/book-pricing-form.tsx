@@ -2,6 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import {
+  PAYMENT_DETAILS_TODO_LABEL,
+  PAYMENT_DETAILS_TODO_TAB,
+  PAYMENT_PAGE_PATH,
+} from "@/app/(public)/dashboard/payment/payment-logic";
 import { UnsavedChangesGuard } from "@/components/unsaved-changes-guard";
 import {
   EDITOR_CONTROL_CLASSES,
@@ -114,7 +119,10 @@ export type PricingRelease =
     }
   | { available: false; note: string };
 
-export type PricingTodo = { key: string; label: string; tab: EditorTab; href: string };
+// BUILD 3: `place` replaces the tab name in brackets for an item that
+// lives outside the editor (the Payment & tax page), and `external`
+// makes it a page link instead of a jump to a box on this tab.
+export type PricingTodo = { key: string; label: string; tab: EditorTab; href: string; place?: string; external?: true };
 
 // A missing item's link: its tab with the "show missing" flag, and for
 // the Content tab the box it is in.
@@ -162,8 +170,12 @@ export function BookPricingForm({
   live = null,
   sendRefusedNote = null,
   release = null,
+  paymentDetailsMissing = false,
 }: {
   release?: PricingRelease | null;
+  // BUILD 3 (sg1 a): the author's Payment & tax details are not
+  // complete. A PAID book then has one more to-do; a free one does not.
+  paymentDetailsMissing?: boolean;
   action: (formData: FormData) => void | Promise<void>;
   // BD15 P5b-2: a live book -- its saved price (a new one needs the tick
   // under the price, LIVE-PRICE-CONFIRM-1) and whether it has waiting
@@ -218,6 +230,18 @@ export function BookPricingForm({
     ...(preorder && (releaseDate === "" || releaseDateOutside)
       ? [{ key: "release-date", label: RELEASE_DATE_TODO_LABEL, tab: "pricing" as const, href: "#pricing-release-date" }]
       : []),
+    ...(mode === "paid" && paymentDetailsMissing
+      ? [
+          {
+            key: "payment-details",
+            label: PAYMENT_DETAILS_TODO_LABEL,
+            tab: "pricing" as const,
+            href: PAYMENT_PAGE_PATH,
+            place: PAYMENT_DETAILS_TODO_TAB,
+            external: true as const,
+          },
+        ]
+      : []),
   ];
   // BD16 P2: a pre-order listing always goes to review, even when an
   // earlier approval still matches (the server sends it the same way).
@@ -241,7 +265,7 @@ export function BookPricingForm({
   const showWhatIsMissing = () => {
     if (todo.length === 0) return;
     setShowMissing(true);
-    const first = todo.find((m) => m.tab === "pricing");
+    const first = todo.find((m) => m.tab === "pricing" && !m.external);
     const target = document.getElementById(first ? first.href.slice(1) : "pricing-todo");
     target?.scrollIntoView({ block: "center" });
     target?.focus({ preventScroll: true });
@@ -496,7 +520,7 @@ export function BookPricingForm({
           <ul className="mt-1.5 flex list-disc flex-col gap-1 pl-[18px]">
             {todo.map((m) => (
               <li key={m.key}>
-                {m.tab === "pricing" ? (
+                {m.tab === "pricing" && !m.external ? (
                   <a href={m.href} className="text-primary underline">
                     {m.label}
                   </a>
@@ -505,7 +529,7 @@ export function BookPricingForm({
                     {m.label}
                   </Link>
                 )}{" "}
-                <span className="text-muted">({EDITOR_TABS.find((t) => t.key === m.tab)?.label})</span>
+                <span className="text-muted">({m.place ?? EDITOR_TABS.find((t) => t.key === m.tab)?.label})</span>
               </li>
             ))}
           </ul>

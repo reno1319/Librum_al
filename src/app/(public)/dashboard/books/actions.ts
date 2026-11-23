@@ -30,6 +30,8 @@ import { recordManuscriptWords } from "@/lib/page-estimate";
 import { redirectIfRecoverySessionActive } from "@/lib/recovery-guard";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { readPaymentDetailsReadiness } from "@/lib/author-tax-readiness";
+import { PAYMENT_DETAILS_MISSING_MESSAGE } from "../payment/payment-logic";
 import { checkPublishGate } from "@/lib/publish-readiness";
 import { INVALID_ISBN_MESSAGE, isValidIsbn } from "@/lib/book-identifiers";
 import { parseAiAnswer, readAiDisclosure, writeAiDisclosure } from "@/lib/book-ai-disclosure";
@@ -1454,6 +1456,15 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       if (authorization.kind === "paid_publishing_permission_required" && !canPublishPaidTitle()) {
         fail(PAID_REPRICING_UNAVAILABLE_MESSAGE);
       }
+      // BUILD 3 (sg1 a, audit r1 F2): a live free book turning paid (or a
+      // new paid price) is a paid listing at once, with no staff review,
+      // so it needs the Payment & tax details too. Yes/no only;
+      // unreadable fails closed.
+      if (authorization.kind === "paid_publishing_permission_required") {
+        const payment = await readPaymentDetailsReadiness(supabase);
+        if (payment === "missing") fail(PAYMENT_DETAILS_MISSING_MESSAGE);
+        if (payment !== "ready") fail("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri");
+      }
       if (isLivePriceChange({ status: existing.status, currentPriceAll: existing.price_all, submittedPriceAll: priceAll }) &&
         !isPriceChangeConfirmed(formData, priceAll)) {
         fail(PRICE_CHANGE_CONFIRM_MESSAGE);
@@ -1639,6 +1650,9 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
       case "paid_mode_required":
         fail(PAID_PUBLISHING_UNAVAILABLE_MESSAGE);
         break;
+      case "missing_payment_details":
+        fail(PAYMENT_DETAILS_MISSING_MESSAGE);
+        break;
       case "preorder_date":
         fail(PREORDER_DATE_INVALID_MESSAGE);
         break;
@@ -1649,6 +1663,7 @@ export async function saveBookPricing(bookId: string, formData: FormData) {
         fail(PREORDER_PUBLIC_DOMAIN_NOTE);
         break;
       case "rights_unavailable":
+      case "payment_details_unavailable":
       case "takedown_unavailable":
       case "review_unavailable":
         redirect(`/dashboard?error=${PUBLISH_NOT_POSSIBLE_YET_QUERY}`);
@@ -1811,6 +1826,9 @@ type PerformPublishResult =
         | "book_changed"
         | "send_incomplete"
         | "paid_mode_required"
+        // BUILD 3: the author's Payment & tax details (paid book only).
+        | "missing_payment_details"
+        | "payment_details_unavailable"
         // BD16 P2: request_book_review refused the listing (LB500-LB502).
         | "preorder_date"
         | "preorder_used_up"
@@ -1918,6 +1936,11 @@ async function performPublish(
   //   canPublishPaidTitle() still denies in every environment where
   //   PAID_PUBLISHING_MODE is unset, which is everywhere today.
   //
+  //   BUILD 3 (sg1 a): after all of the above, a PAID title also needs
+  //   the author's own Payment & tax details, asked as a yes/no through
+  //   author_payment_details_ready_self() (never a value). A free title never
+  //   asks.
+  //
   //   Consequence worth stating plainly: performPublish() now reads no
   //   `profiles` row at ANY price. A denial costs no database query and
   //   cannot be used to probe another author's state -- the property the
@@ -1927,6 +1950,7 @@ async function performPublish(
     description: book.description,
     readRights: async () => (await getRightsDeclarationState(bookId)).kind,
     paidPublishingAvailable: canPublishPaidTitle,
+    readPaymentDetails: () => readPaymentDetailsReadiness(supabase),
   });
   if (!gate.ok) {
     return { ok: false, reason: gate.reason };

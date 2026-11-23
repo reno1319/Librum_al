@@ -426,6 +426,10 @@ export function approveReadinessMessage(reason: PublishGateRefusal): string {
       return "Couldn't check the book's rights. Please try again.";
     case "paid_mode_required":
       return "Paid publishing isn't available right now, so this paid book can't go live.";
+    case "missing_payment_details":
+      return "The author hasn't completed their payment and tax details, so this paid book can't go live.";
+    case "payment_details_unavailable":
+      return "Couldn't check the author's payment and tax details. Please try again.";
   }
 }
 

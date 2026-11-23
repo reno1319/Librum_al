@@ -54,6 +54,17 @@ describe("BookPricingForm", () => {
     expect(html).toContain("Librum shet në të gjithë botën, në një treg të vetëm: librum.al.");
   });
 
+  // BUILD 3 (sg1 a): a paid book needs the author's Payment & tax details.
+  it("a paid book without payment details lists them as a to-do linking to the payment page", () => {
+    const html = render({ initialPriceAll: 500, paymentDetailsMissing: true });
+    expect(html).toMatch(/<a href="\/dashboard\/payment"[^>]*>Të dhënat e pagesës<\/a> <span class="text-muted">\(Paratë\)<\/span>/);
+  });
+
+  it("a free book, or details complete, has no payment to-do", () => {
+    expect(render({ initialPriceAll: 0, paymentDetailsMissing: true })).not.toContain("/dashboard/payment");
+    expect(render({ initialPriceAll: 500, paymentDetailsMissing: false })).not.toContain("/dashboard/payment");
+  });
+
   it("no price yet: neither choice picked, the preview asks for a price", () => {
     const html = render();
     expect(tick(html, "priceMode")).not.toContain("checked");
