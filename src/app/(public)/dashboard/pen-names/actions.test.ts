@@ -90,6 +90,7 @@ const { updatePenName, deletePenName, createPenName } = await import("./actions"
 
 let ownRow: Record<string, unknown> | null;
 let profileRole: string;
+let accountKind: string;
 let ownPenNameIds: string[];
 let profileWriteRows: unknown;
 
@@ -98,7 +99,7 @@ function defaultRespond(q: Query): Result {
     return method(q, "maybeSingle") ? { data: ownRow } : { data: ownPenNameIds.map((id) => ({ id })) };
   }
   if (q.client === "session" && q.table === "profiles" && method(q, "update")) return { data: profileWriteRows };
-  if (q.client === "session" && q.table === "profiles") return { data: { role: profileRole } };
+  if (q.client === "session" && q.table === "profiles") return { data: { role: profileRole, account_kind: accountKind } };
   if (q.client === "session" && q.table === "pen_names" && method(q, "update")) return { data: [{ id: PEN_ID }] };
   if (q.client === "writer" && q.table === "pen_names" && method(q, "update")) {
     const avatar = (method(q, "update")!.args[0] as { avatar_path: unknown }).avatar_path;
@@ -137,6 +138,7 @@ beforeEach(() => {
   respond = defaultRespond;
   ownRow = { id: PEN_ID, is_default: false, avatar_path: null };
   profileRole = "author";
+  accountKind = "person";
   ownPenNameIds = [PEN_ID];
   profileWriteRows = [{ id: USER_ID }];
   resolveCalls = [];
@@ -396,5 +398,117 @@ describe("createPenName", () => {
     expect(await redirectOf(createPenName(form({ name: "Jo" })))).toBe(
       "/dashboard/profile?error=Pseudonimi nuk u shtua dot. Provoni përsëri.",
     );
+  });
+});
+
+// BUILD 2a-2: a publishing house's Autorët tab sends from=authors; the
+// same actions then come back to Autorët and say "autor". The field only
+// picks the page and the words; the writes are the same.
+describe("from=authors (a publishing house's Autorët tab)", () => {
+  const AUTHORS = { from: "authors" };
+
+  it("save: back to Autorët with 'Autori u ruajt.', same session write", async () => {
+    expect(await redirectOf(updatePenName(PEN_ID, form({ ...AUTHORS, name: "Arta Test" })))).toBe(
+      "/dashboard/authors?success=Autori u ruajt.",
+    );
+    const write = queries.find((q) => q.client === "session" && q.table === "pen_names" && method(q, "update"))!;
+    expect(write.ops).toContainEqual({ method: "eq", args: ["author_id", USER_ID] });
+  });
+
+  it("add: back to Autorët with 'Autori u shtua.', through resolveOwnPenNameId", async () => {
+    ownPenNameIds = [PEN_ID];
+    expect(await redirectOf(createPenName(form({ ...AUTHORS, name: "Besnik Test" })))).toBe(
+      "/dashboard/authors?success=Autori u shtua.",
+    );
+    expect(resolveCalls).toEqual([[USER_ID, "Besnik Test"]]);
+  });
+
+  it("remove: back to Autorët with 'Autori u hoq.'", async () => {
+    expect(await redirectOf(deletePenName(PEN_ID, form(AUTHORS)))).toBe("/dashboard/authors?success=Autori u hoq.");
+  });
+
+  it("errors use author words on Autorët", async () => {
+    expect(await redirectOf(createPenName(form({ ...AUTHORS, name: "  " })))).toBe(
+      "/dashboard/authors?error=Emri i autorit nuk mund të jetë bosh.",
+    );
+    resolveResult = { ok: true, penNameId: PEN_ID };
+    expect(await redirectOf(createPenName(form({ ...AUTHORS, name: "Arta" })))).toBe(
+      "/dashboard/authors?error=Këtë emër e ka tashmë një nga autorët tuaj ose shtëpia juaj botuese. Zgjidhni një emër tjetër.",
+    );
+    respond = (q) => (q.table === "books" ? { count: 2 } : defaultRespond(q));
+    expect(await redirectOf(deletePenName(PEN_ID, form(AUTHORS)))).toBe(
+      "/dashboard/authors?error=Ky autor ka ende një libër, seri ose paketë, ndaj nuk mund të hiqet.",
+    );
+    expect(await redirectOf(updatePenName("../x", form({ ...AUTHORS, name: "Jo" })))).toBe(
+      "/dashboard/authors?error=Autori nuk u ruajt dot. Provoni përsëri.",
+    );
+  });
+
+  it("a message with no author version is passed through as it is", async () => {
+    expect(await redirectOf(updatePenName(PEN_ID, form({ ...AUTHORS, name: "Jo", links: ["http://a.example"] })))).toMatch(
+      /^\/dashboard\/authors\?error=.*https:\/\//,
+    );
+  });
+
+  it("any other 'from' value keeps Profili and pseudonym words", async () => {
+    expect(await redirectOf(updatePenName(PEN_ID, form({ from: "x", name: "Jo" })))).toBe(
+      "/dashboard/profile?success=Pseudonimi u ruajt.",
+    );
+    expect(await redirectOf(deletePenName(PEN_ID))).toBe("/dashboard/profile?success=Pseudonimi u fshi.");
+  });
+});
+
+// BUILD 2a-2 (Renato's k2 a): saving a house's own card also saves the
+// house name as the account name (the house Profili has no account name
+// field). A person author's main card without the field writes nothing
+// to the profile.
+describe("updatePenName: a publishing house's own card (k2 a)", () => {
+  it("writes the house name as display_name first (own row, session client), then the pen name", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    accountKind = "publishing_house";
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "  Botime Reja " })))).toBe(
+      "/dashboard/profile?success=Profili u ruajt.",
+    );
+    const read = queries.find((q) => q.table === "profiles" && !method(q, "update"))!;
+    expect(method(read, "select")!.args[0]).toBe("account_kind");
+    expect(read.ops).toContainEqual({ method: "eq", args: ["id", USER_ID] });
+    const profileWrite = queries.findIndex((q) => q.table === "profiles" && method(q, "update"));
+    const penWrite = queries.findIndex((q) => q.table === "pen_names" && method(q, "update"));
+    expect(profileWrite).toBeGreaterThan(-1);
+    expect(profileWrite).toBeLessThan(penWrite);
+    expect(queries[profileWrite].client).toBe("session");
+    expect(method(queries[profileWrite], "update")!.args[0]).toEqual({ display_name: "Botime Reja" });
+    expect(queries[profileWrite].ops).toContainEqual({ method: "eq", args: ["id", USER_ID] });
+  });
+
+  it("a person author's main card without the field leaves the account name alone", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    await redirectOf(updatePenName(PEN_ID, form({ name: "Jo" })));
+    expect(queries.some((q) => q.table === "profiles" && method(q, "update"))).toBe(false);
+  });
+
+  it("a house's author card (not the default) never writes the account name", async () => {
+    accountKind = "publishing_house";
+    await redirectOf(updatePenName(PEN_ID, form({ from: "authors", name: "Arta" })));
+    expect(queries.some((q) => q.table === "profiles")).toBe(false);
+  });
+
+  it("the kind can't be read: nothing is written", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    respond = (q) => (q.table === "profiles" && !method(q, "update") ? { data: null, error: { code: "XX" } } : defaultRespond(q));
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Jo" })))).toBe(
+      "/dashboard/profile?error=Profili nuk u ruajt dot. Provoni përsëri.",
+    );
+    expect(queries.some((q) => method(q, "update"))).toBe(false);
+  });
+
+  it("an account name write that fails stops the save; the pen name is not written", async () => {
+    ownRow = { id: PEN_ID, is_default: true, avatar_path: null };
+    accountKind = "publishing_house";
+    profileWriteRows = [];
+    expect(await redirectOf(updatePenName(PEN_ID, form({ name: "Botime" })))).toBe(
+      "/dashboard/profile?error=Profili nuk u ruajt dot. Provoni përsëri.",
+    );
+    expect(queries.some((q) => q.table === "pen_names" && method(q, "update"))).toBe(false);
   });
 });

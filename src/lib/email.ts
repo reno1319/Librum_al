@@ -783,6 +783,40 @@ export async function sendAuthorWelcomeEmail(to: string, { name }: { name: strin
   await sendEmail(to, subject, html, { replyTo: SUPPORT_EMAIL });
 }
 
+// BUILD 2a-2 (Renato 11-23, h4 ok): the one-time welcome for a
+// publishing house, in "ju" (a company), sent by
+// src/lib/author-welcome.ts instead of the author welcome. Text:
+// HOUSE-WELCOME-EMAIL-draft-r1 as approved; same sign-off and reply-to.
+export function houseWelcomeEmail({ name }: { name: string | null }): { subject: string; html: string } {
+  const origin = resolveSiteOrigin();
+  const safeName = name ? subjectName(name) : "";
+  const subject = safeName
+    ? `Mirë se erdhët në Librum, ${safeName}! Librat tuaj, tani edhe digjitalë 📚`
+    : "Mirë se erdhët në Librum! Librat tuaj, tani edhe digjitalë 📚";
+  const greeting = safeName ? `Përshëndetje, ${escapeEmailHtml(safeName)},` : "Përshëndetje,";
+  const html = `${AUTHOR_EMAIL_OPEN}
+        <p>${greeting}</p>
+        <p>Mirë se erdhët zyrtarisht në Librum! Jemi jashtëzakonisht të lumtur dhe krenarë që shtëpia juaj botuese u bë pjesë e komunitetit tonë.</p>
+        <p>Librum lindi si një hapësirë e dedikuar për ta sjellë librin shqip digjital (e-book) te lexuesit në Shqipëri, Kosovë dhe diasporë, pa burokraci të panevojshme dhe me kontroll të plotë mbi botimet tuaja.</p>
+        <p><strong>Çfarë mund të bëni tani?</strong></p>
+        <p>Për ta nisur këtë rrugëtim sa më mbarë, ja tre hapa të thjeshtë që mund të ndërmerrni që sot:</p>
+        <ol>
+          <li>${emailLink(`${origin}/dashboard/profile`, "Plotësoni Profilin e shtëpisë botuese")}: Shtoni logon, disa fjalë për shtëpinë tuaj botuese dhe lidhjet tuaja, që lexuesit t'ju njohin më mirë.</li>
+          <li>${emailLink(`${origin}/dashboard/authors`, "Shtoni autorët tuaj")}: Çdo autor ka faqen e vet, me librat e tij.</li>
+          <li>${emailLink(`${origin}/dashboard/books/new`, "Gati për botim?")} Nëse i keni librat gati në Word (.docx) ose ePub, mund të nisni shumë shpejt ngarkimin e tyre në platformë duke ndjekur hapat tanë udhëzues.</li>
+        </ol>
+        <p>Nëse keni ndonjë pyetje, paqartësi apo sugjerim, dera jonë është gjithmonë e hapur. Mund të na shkruani në çdo kohë direkt në këtë adresë e-maili ose të vizitoni ${emailLink(`${origin}/ndihme`, "faqen tonë të ndihmës")}.</p>
+        <p>Ju urojmë mbarësi dhe suksese me botimet tuaja!</p>
+        ${signOffHtml(origin)}
+      </div>`;
+  return { subject, html };
+}
+
+export async function sendHouseWelcomeEmail(to: string, { name }: { name: string | null }) {
+  const { subject, html } = houseWelcomeEmail({ name });
+  await sendEmail(to, subject, html, { replyTo: SUPPORT_EMAIL });
+}
+
 // DEL (del5 a): sent once, when someone asks to delete their account.
 // Text as approved (EMAIL-TEXT-r1); the password line only for an
 // account that has a password (not one that signs in with Google only).

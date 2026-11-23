@@ -91,7 +91,7 @@ export function buildSiteHeaderNav(params: {
   if (user) {
     primaryLinks.push(
       role === "author"
-        ? { href: "/dashboard", label: "Paneli i autorit" }
+        ? { href: "/dashboard", label: "Paneli" }
         : { href: "/library", label: "Biblioteka ime" },
     );
   }

@@ -21,11 +21,20 @@ vi.mock("next/navigation", () => ({
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 let role: unknown;
+let accountKind: unknown = "person";
+const selects: string[] = [];
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: { id: "u1" } } }) },
     from: () => ({
-      select: () => ({ eq: () => ({ single: async () => ({ data: role === undefined ? null : { role } }) }) }),
+      select: (columns: string) => {
+        selects.push(columns);
+        return {
+          eq: () => ({
+            single: async () => ({ data: role === undefined ? null : { role, account_kind: accountKind } }),
+          }),
+        };
+      },
     }),
   }),
 }));
@@ -45,6 +54,7 @@ async function run(): Promise<string> {
 describe("DashboardLayout role boundary", () => {
   beforeEach(() => {
     role = undefined;
+    accountKind = "person";
   });
 
   it("lets an author through", async () => {
@@ -70,10 +80,38 @@ describe("DashboardLayout menu", () => {
     role = "author";
     const element = await DashboardLayout({ children: "PAGE-CONTENT" });
     const html = renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
-    const menuAt = html.indexOf('<nav aria-label="Paneli i autorit"');
+    const menuAt = html.indexOf('<nav aria-label="Paneli"');
     expect(menuAt).toBeGreaterThanOrEqual(0);
     expect(menuAt).toBeLessThan(html.indexOf("PAGE-CONTENT"));
-    expect(html.match(/<nav aria-label="Paneli i autorit"/g)).toHaveLength(1);
+    expect(html.match(/<nav aria-label="Paneli"/g)).toHaveLength(1);
     expect(html).toContain('<div class="page-container pt-5 sm:pt-10"><nav');
+  });
+});
+
+// BUILD 2a-2: a publishing house's menu has Profili > Autorët; a
+// person author's menu does not.
+describe("DashboardLayout house menu", () => {
+  async function html(): Promise<string> {
+    const element = await DashboardLayout({ children: null });
+    return renderToStaticMarkup(element as Parameters<typeof renderToStaticMarkup>[0]);
+  }
+
+  it("reads the account kind with the role", async () => {
+    role = "author";
+    selects.length = 0;
+    await html();
+    expect(selects).toEqual(["role, account_kind"]);
+  });
+
+  it("a house sees Autorët in its menu", async () => {
+    role = "author";
+    accountKind = "publishing_house";
+    expect(await html()).toContain('href="/dashboard/authors"');
+  });
+
+  it("a person author does not", async () => {
+    role = "author";
+    accountKind = "person";
+    expect(await html()).not.toContain("/dashboard/authors");
   });
 });

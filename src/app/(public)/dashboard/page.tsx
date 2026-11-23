@@ -44,7 +44,7 @@ import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
 
 export const metadata: Metadata = {
-  title: "Paneli i autorit",
+  title: "Paneli",
 };
 
 // ALL-CUTOVER APP-A: reads the maintenance env var on every request, so

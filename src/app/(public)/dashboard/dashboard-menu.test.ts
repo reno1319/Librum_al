@@ -10,9 +10,9 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 const { DashboardMenu } = await import("./dashboard-menu");
 const { DismissableDetails } = await import("@/components/dismissable-details");
 
-function render(path: string): string {
+function render(path: string, isHouse?: boolean): string {
   pathname = path;
-  return renderToStaticMarkup(createElement(DashboardMenu));
+  return renderToStaticMarkup(createElement(DashboardMenu, isHouse === undefined ? {} : { isHouse }));
 }
 
 function findElement(node: ReactNode, type: ReactElement["type"]): ReactElement | null {
@@ -38,7 +38,7 @@ function linkTag(html: string, text: string): string {
 describe("DashboardMenu", () => {
   it("keeps the Dashboard nav label and only the new group words", () => {
     const html = render("/dashboard");
-    expect(html).toMatch(/^<nav aria-label="Paneli i autorit">/);
+    expect(html).toMatch(/^<nav aria-label="Paneli">/);
     for (const word of ["Librat", "Paratë", "Promovimi", "Profili", "Seritë", "Shitjet", "Bilanci", "Paketat", "Zbritjet", "Seksioni"]) {
       expect(html).toContain(word);
     }
@@ -123,9 +123,9 @@ describe("DashboardMenu", () => {
   // which carries the key.
   it("the phone control remounts (closes) on client navigation: keyed by the path", () => {
     pathname = "/dashboard/sales";
-    const first = findElement(DashboardMenu(), DismissableDetails);
+    const first = findElement(DashboardMenu({}), DismissableDetails);
     pathname = "/dashboard/balance";
-    const second = findElement(DashboardMenu(), DismissableDetails);
+    const second = findElement(DashboardMenu({}), DismissableDetails);
     expect(first?.key).toBe("/dashboard/sales");
     expect(second?.key).toBe("/dashboard/balance");
   });
@@ -146,5 +146,22 @@ describe("DashboardMenu stacking", () => {
     expect(headerZ).toBeGreaterThan(0);
     expect(listZ).toBeGreaterThan(0);
     expect(listZ).toBeLessThan(headerZ);
+  });
+});
+
+// BUILD 2a-2: a publishing house's menu shows Profili | Autorët on the
+// second row of its Profili pages; a person author's shows no second row.
+describe("DashboardMenu for a publishing house", () => {
+  it("shows Profili and Autorët on the second row, Autorët current on its page", () => {
+    const html = render("/dashboard/authors", true);
+    expect(linkTag(html, "Autorët")).toContain('href="/dashboard/authors"');
+    const tags = html.match(/<a [^>]*>Autorët<\/a>/g) ?? [];
+    expect(tags.length).toBeGreaterThan(0);
+    for (const tag of tags) expect(tag).toContain('aria-current="page"');
+  });
+
+  it("a person author's Profili page has no Autorët", () => {
+    expect(render("/dashboard/profile")).not.toContain("Autorët");
+    expect(render("/dashboard/profile", false)).not.toContain("Autorët");
   });
 });
