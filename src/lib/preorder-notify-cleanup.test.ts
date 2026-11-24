@@ -14,6 +14,7 @@ type Req = {
   created_at: string;
   notified_at: string | null;
   book_cancelled_at: string | null;
+  send_failure: string | null;
 };
 type Book = { id: string; status: string; release_date: string | null; published_at: string | null };
 
@@ -88,7 +89,15 @@ const OLD_DAY = "2026-11-30";
 const DAY29_DAY = "2026-12-02";
 
 function req(bookId: string, userId: string, over: Partial<Req> = {}): Req {
-  return { book_id: bookId, user_id: userId, created_at: OLD, notified_at: null, book_cancelled_at: null, ...over };
+  return {
+    book_id: bookId,
+    user_id: userId,
+    created_at: OLD,
+    notified_at: null,
+    book_cancelled_at: null,
+    send_failure: null,
+    ...over,
+  };
 }
 const left = () => reqs.map((r) => `${r.book_id}/${r.user_id}`).sort();
 
@@ -179,6 +188,26 @@ describe("deleteOldNotifyRequests", () => {
     const counts = await deleteOldNotifyRequests(admin, NOW);
     expect(left()).toEqual(["again/u2", "fresh/u4", "paused-again/u5", "paused/u3", "pre/u1"]);
     expect(counts).toEqual({ sent: 0, cancelled: 0, released: 0 });
+  });
+
+  it("G4 (g4e1 a): a request whose email failed is never deleted, in any step, until staff handle it", async () => {
+    books = [
+      { id: "out", status: "published", release_date: OLD_DAY, published_at: OLD },
+      { id: "ended", status: "draft", release_date: null, published_at: null },
+    ];
+    reqs = [
+      req("out", "address", { notified_at: OLD, send_failure: "address_refused" }),
+      req("out", "unclear", { notified_at: OLD, send_failure: "unclear" }),
+      req("out", "batch", { send_failure: "batch_refused" }),
+      req("ended", "batch", { book_cancelled_at: OLD, send_failure: "batch_refused" }),
+      // The same rows without a failure still go.
+      req("out", "sent", { notified_at: OLD }),
+      req("out", "stuck"),
+      req("ended", "never", { book_cancelled_at: OLD }),
+    ];
+    const counts = await deleteOldNotifyRequests(admin, NOW);
+    expect(left()).toEqual(["ended/batch", "out/address", "out/batch", "out/unclear"]);
+    expect(counts).toEqual({ sent: 1, cancelled: 1, released: 1 });
   });
 
   it("a failed step reports null and the other steps still run; never throws", async () => {

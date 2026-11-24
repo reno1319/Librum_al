@@ -350,6 +350,10 @@ describe("sendEmailBatch", () => {
       // surely not sent; the thrown one may have gone out.
       const result = await sendEmailBatch(messages(EMAIL_BATCH_SIZE * 2 + 1), { pauseMs: 0 });
       expect(result.notSent).toEqual(Array.from({ length: EMAIL_BATCH_SIZE }, (_v, i) => i));
+      // G4 r3 (audit N1): the thrown batch is reported as unknown, so the
+      // pre-order sweep marks those readers "unclear" for staff.
+      expect(result.unknown).toEqual(Array.from({ length: EMAIL_BATCH_SIZE }, (_v, i) => EMAIL_BATCH_SIZE + i));
+      expect(result.invalid).toEqual([]);
       expect(batchMock).toHaveBeenCalledTimes(3);
       expect(errorSpy).toHaveBeenCalledTimes(2);
       const logged = JSON.stringify(errorSpy.mock.calls[0]);

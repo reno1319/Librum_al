@@ -31,6 +31,7 @@ import {
   runCountsLine,
 } from "@/lib/preorder-staff";
 import { runPreorderJobAsOwner } from "./preorder-job-actions";
+import { FailedPreorderEmails } from "./failed-preorder-emails";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -299,6 +300,9 @@ export default async function AdminPage({
           ))}
         </section>
       )}
+
+      {/* G4: failed pre-order reader emails, Owner and Admin only (people.view). */}
+      {roleHasPermission(role, "people.view") && <FailedPreorderEmails />}
 
       <div className="flex flex-wrap gap-6">
         <section
