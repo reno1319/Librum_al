@@ -53,6 +53,13 @@ vi.mock("@/lib/book-reviews", async (importOriginal) => {
 });
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// BUILD 3: the author's Payment & tax readiness, as a yes/no double.
+vi.mock("@/lib/author-tax-readiness", () => ({
+  BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE: "bundle payment details missing",
+  readPaymentDetailsReadiness: vi.fn(async () => "ready"),
+  readAuthorPaymentDetailsReadinessAsStaff: vi.fn(async () => "ready"),
+  readOwnPaymentDetailsState: vi.fn(async () => ({ ok: true, hasTaxDetails: true, hasBankAccount: true })),
+}));
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve({ get: () => undefined }) }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ __emailAdmin: true }) }));
 vi.mock("@/lib/email", () => ({ sendNewBookEmails: vi.fn(async () => undefined) }));

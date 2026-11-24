@@ -217,11 +217,20 @@ describe("checkPublishGate", () => {
   const gate = (overrides: Partial<Parameters<typeof checkPublishGate>[0]> = {}) => {
     const readRights = vi.fn(async () => "present" as const);
     const paid = vi.fn(() => true);
+    const payment = vi.fn(async () => "ready" as const);
     return {
       readRights,
       paid,
+      payment,
       run: () =>
-        checkPublishGate({ priceAll: 0, description: "A description.", readRights, paidPublishingAvailable: paid, ...overrides }),
+        checkPublishGate({
+          priceAll: 0,
+          description: "A description.",
+          readRights,
+          paidPublishingAvailable: paid,
+          readPaymentDetails: payment,
+          ...overrides,
+        }),
     };
   };
 
@@ -256,5 +265,33 @@ describe("checkPublishGate", () => {
       reason: "paid_mode_required",
     });
     expect(await gate({ priceAll: 990, paidPublishingAvailable: () => true }).run()).toEqual({ ok: true });
+  });
+
+  // BUILD 3 (sg1 a): the author's Payment & tax details, paid only.
+  it("a free book never asks about payment details", async () => {
+    const g = gate({ readPaymentDetails: vi.fn(async () => "missing" as const) });
+    expect(await g.run()).toEqual({ ok: true });
+  });
+
+  it("a paid book without payment details is refused", async () => {
+    expect(await gate({ priceAll: 990, readPaymentDetails: async () => "missing" }).run()).toEqual({
+      ok: false,
+      reason: "missing_payment_details",
+    });
+  });
+
+  it("an unreadable answer fails closed", async () => {
+    expect(await gate({ priceAll: 990, readPaymentDetails: async () => "unavailable" }).run()).toEqual({
+      ok: false,
+      reason: "payment_details_unavailable",
+    });
+  });
+
+  it("paid publishing closed is refused before payment details are asked", async () => {
+    const payment = vi.fn(async () => "ready" as const);
+    expect(
+      await gate({ priceAll: 990, paidPublishingAvailable: () => false, readPaymentDetails: payment }).run(),
+    ).toEqual({ ok: false, reason: "paid_mode_required" });
+    expect(payment).not.toHaveBeenCalled();
   });
 });

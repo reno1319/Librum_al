@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getPublishChecklist } from "@/lib/publish-checklist";
 import { inReviewIdsFrom, resolveDashboardAttention } from "@/lib/dashboard-attention";
 import { canPublishPaidTitle } from "@/lib/paid-readiness";
+import { readOwnPaymentDetailsState } from "@/lib/author-tax-readiness";
+import { PAYMENT_PAGE_PATH, paymentReadyCount } from "./payment/payment-logic";
 import { isSchedulerEnabled } from "@/lib/payout-scheduler";
 import { computeNextPayoutCycleDate, formatPayoutCycleDate } from "@/lib/payout-cycle";
 import { formatTransactionMinorUnits, type CurrencyTotals } from "@/lib/transaction-money";
@@ -239,6 +241,10 @@ export default async function DashboardPage({
   // ADMIN-2-TAKEDOWN (G): the notices for books Librum took down, read
   // with the author's own session (RLS: own rows; named columns only).
   const takedownNotices = await loadAuthorTakedownNotices(supabase, user.id);
+  // BUILD 3 (nr1 b): the Payment & tax requirements are visible from the
+  // first login, until both parts are saved. Yes/no per part only; an
+  // unreadable answer shows no card (the publish gate still decides).
+  const paymentState = await readOwnPaymentDetailsState(supabase, user.id);
   const schedulerEnabled = isSchedulerEnabled(process.env.PAYOUT_SCHEDULER_ENABLED);
 
   // BD15 P6: the series names for the cards and the group headings
@@ -350,6 +356,27 @@ export default async function DashboardPage({
             className="focus-ring rounded-sm font-medium underline"
           >
             Vazhdoni redaktimin
+          </Link>
+        </Alert>
+      )}
+
+      {paymentState.ok && !(paymentState.hasTaxDetails && paymentState.hasBankAccount) && (
+        <Alert
+          variant="info"
+          title={`Para se të shisni libra me çmim: ${paymentReadyCount(paymentState)} nga 2 gati`}
+          className="mt-6"
+        >
+          <ul>
+            <li>
+              {paymentState.hasTaxDetails ? "✓" : "○"} Të dhënat tatimore
+            </li>
+            <li>
+              {paymentState.hasBankAccount ? "✓" : "○"} Llogaria bankare
+            </li>
+          </ul>
+          <p className="text-muted">Për librat falas nuk ka nevojë.</p>
+          <Link href={PAYMENT_PAGE_PATH} className="focus-ring rounded-sm font-medium underline">
+            Plotësoni të dhënat e pagesës
           </Link>
         </Alert>
       )}

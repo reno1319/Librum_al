@@ -22170,3 +22170,330 @@ revoke all on function public.update_blog_post(uuid, text, text, text, text, tex
   from public, anon, authenticated;
 grant execute on function public.update_blog_post(uuid, text, text, text, text, text, text, boolean, text, text, boolean, text[], text)
   to authenticated, service_role;
+
+
+-- ============================================================
+-- Blog reactions (migration 20261123190000_blog_post_reactions.sql):
+-- blog_post_reactions, blog_post_reaction_counts() and
+-- toggle_blog_post_reaction(). Same statements as the migration; see
+-- its header.
+-- ============================================================
+-- 1. The table.
+create table public.blog_post_reactions (
+  post_id uuid not null references public.blog_posts(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  reaction text not null
+    constraint blog_post_reactions_reaction_check check (reaction in ('like', 'helpful', 'inspired')),
+  created_at timestamptz not null default pg_catalog.now(),
+  primary key (post_id, user_id, reaction)
+);
+
+create index blog_post_reactions_user_id_idx on public.blog_post_reactions (user_id);
+
+alter table public.blog_post_reactions enable row level security;
+
+create policy "Readers read their own blog reactions"
+  on public.blog_post_reactions for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+revoke all on public.blog_post_reactions from public, anon, authenticated, service_role;
+grant select on public.blog_post_reactions to authenticated;
+
+-- 2. The totals.
+create function public.blog_post_reaction_counts(p_post_ids uuid[])
+returns table (post_id uuid, reaction text, total integer)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if p_post_ids is null or pg_catalog.cardinality(p_post_ids) = 0 then
+    return;
+  end if;
+  if pg_catalog.cardinality(p_post_ids) > 500 then
+    raise exception 'blog_post_reaction_counts: too many articles' using errcode = '22023';
+  end if;
+  return query
+    select r.post_id, r.reaction, pg_catalog.count(*)::integer
+      from public.blog_post_reactions r
+      join public.blog_posts p on p.id = r.post_id
+     where r.post_id = any (p_post_ids)
+       and p.status = 'published'
+       and p.published_at is not null
+       and p.published_at <= pg_catalog.now()
+     group by r.post_id, r.reaction;
+end;
+$$;
+
+revoke all on function public.blog_post_reaction_counts(uuid[]) from public, anon, authenticated, service_role;
+grant execute on function public.blog_post_reaction_counts(uuid[]) to anon, authenticated;
+
+-- 3. Turning one reaction on or off.
+create function public.toggle_blog_post_reaction(p_post_id uuid, p_reaction text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if exists (
+    select 1 from public.account_suspensions s
+     where s.user_id = v_uid and s.lifted_at is null
+  ) or exists (
+    select 1 from public.account_deletion_requests d
+     where d.user_id = v_uid
+  ) then
+    raise exception 'toggle_blog_post_reaction: account not active' using errcode = 'LB524';
+  end if;
+  if p_reaction is null or p_reaction not in ('like', 'helpful', 'inspired') then
+    raise exception 'toggle_blog_post_reaction: invalid reaction' using errcode = 'LB525';
+  end if;
+  if not exists (
+    select 1 from public.blog_posts p
+     where p.id = p_post_id
+       and p.status = 'published'
+       and p.published_at is not null
+       and p.published_at <= pg_catalog.now()
+  ) then
+    raise exception 'toggle_blog_post_reaction: article not live' using errcode = 'LB526';
+  end if;
+
+  delete from public.blog_post_reactions r
+   where r.post_id = p_post_id and r.user_id = v_uid and r.reaction = p_reaction;
+  if found then
+    return false;
+  end if;
+
+  -- Two quick taps at once: the second insert finds the first one's row
+  -- and leaves it on, never an error.
+  insert into public.blog_post_reactions (post_id, user_id, reaction)
+  values (p_post_id, v_uid, p_reaction)
+  on conflict (post_id, user_id, reaction) do nothing;
+  return true;
+end;
+$$;
+
+revoke all on function public.toggle_blog_post_reaction(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.toggle_blog_post_reaction(uuid, text) to authenticated;
+
+
+-- ============================================================
+-- Payment & tax (migration 20261123200000_author_tax_details.sql):
+-- author_tax_details, set_author_tax_details(), foreign IBANs in
+-- set_author_payout_destination() (replaces the body above),
+-- author_payment_details_ready_self() and _for(uuid). Same statements
+-- as the migration; see its header.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The table
+-- ------------------------------------------------------------
+create table public.author_tax_details (
+  author_id uuid primary key references public.profiles(id) on delete cascade,
+  -- ISO 3166-1 alpha-2 country of tax residence ('AL' = Albania;
+  -- Kosovo is 'XK').
+  country_code text not null
+    constraint author_tax_details_country_check check (country_code ~ '^[A-Z]{2}$'),
+  legal_name text not null
+    constraint author_tax_details_legal_name_check
+    check (btrim(legal_name) <> '' and char_length(legal_name) <= 200),
+  -- Albania: the NID (letter, 8 digits, letter). Elsewhere: the home
+  -- country's tax number, letters/digits only after normalising.
+  tax_id text not null
+    constraint author_tax_details_tax_id_check
+    check (
+      (country_code = 'AL' and tax_id ~ '^[A-Z][0-9]{8}[A-Z]$')
+      or (country_code <> 'AL' and tax_id ~ '^[A-Z0-9]{4,30}$')
+    ),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.author_tax_details enable row level security;
+
+revoke all on public.author_tax_details from public, anon, authenticated, service_role;
+grant select on public.author_tax_details to authenticated;
+
+create policy "Authors can view their own tax details"
+  on public.author_tax_details for select
+  using (auth.uid() = author_id);
+
+-- ------------------------------------------------------------
+-- 2. The one write path
+-- ------------------------------------------------------------
+create or replace function public.set_author_tax_details(
+  p_country_code text,
+  p_legal_name text,
+  p_tax_id text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_country text;
+  v_name text;
+  v_tax_id text;
+begin
+  if v_uid is null then
+    raise exception 'set_author_tax_details: not authenticated';
+  end if;
+
+  v_country := upper(btrim(coalesce(p_country_code, '')));
+  v_name := btrim(regexp_replace(coalesce(p_legal_name, ''), '\s+', ' ', 'g'));
+  -- Spaces, dashes, dots and slashes are typing help only.
+  v_tax_id := upper(regexp_replace(coalesce(p_tax_id, ''), '[\s./-]+', '', 'g'));
+
+  if v_country !~ '^[A-Z]{2}$' then
+    raise exception 'set_author_tax_details: country is required';
+  end if;
+  if v_name = '' or char_length(v_name) > 200 then
+    raise exception 'set_author_tax_details: legal name is required';
+  end if;
+  if v_country = 'AL' and v_tax_id !~ '^[A-Z][0-9]{8}[A-Z]$' then
+    raise exception 'set_author_tax_details: nid format is not valid';
+  end if;
+  if v_country <> 'AL' and v_tax_id !~ '^[A-Z0-9]{4,30}$' then
+    raise exception 'set_author_tax_details: tax number format is not valid';
+  end if;
+
+  insert into public.author_tax_details (author_id, country_code, legal_name, tax_id, updated_at)
+  values (v_uid, v_country, v_name, v_tax_id, now())
+  on conflict on constraint author_tax_details_pkey do update
+    set country_code = excluded.country_code,
+        legal_name = excluded.legal_name,
+        tax_id = excluded.tax_id,
+        updated_at = now();
+end;
+$$;
+
+revoke all on function public.set_author_tax_details(text, text, text) from public, anon, authenticated;
+grant execute on function public.set_author_tax_details(text, text, text) to authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. Foreign IBANs for the lek payout destination (t3 a)
+-- ------------------------------------------------------------
+create or replace function public.set_author_payout_destination(
+  p_currency text,
+  p_beneficiary_name text,
+  p_iban text
+)
+returns table (
+  currency text,
+  beneficiary_name text,
+  iban text,
+  updated_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_currency text;
+  v_beneficiary_name text;
+  v_iban text;
+begin
+  v_currency := upper(btrim(coalesce(p_currency, '')));
+  v_beneficiary_name := btrim(coalesce(p_beneficiary_name, ''));
+  v_iban := upper(regexp_replace(coalesce(p_iban, ''), '\s+', '', 'g'));
+
+  if v_currency !~ '^[A-Z]{3}$' then
+    raise exception 'set_author_payout_destination: currency must be a 3-letter ISO code';
+  end if;
+
+  if v_beneficiary_name = '' then
+    raise exception 'set_author_payout_destination: beneficiary_name is required and must not be blank';
+  end if;
+
+  if v_iban = '' then
+    raise exception 'set_author_payout_destination: iban is required and must not be blank';
+  end if;
+
+  -- BUILD 3 (t3 a): any country's IBAN shape (15-34 characters); an
+  -- Albanian one must still be exactly AL + 26.
+  if v_currency = 'ALL' and v_iban !~ '^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$' then
+    raise exception 'set_author_payout_destination: iban does not match the expected IBAN format';
+  end if;
+
+  if v_currency = 'ALL' and v_iban like 'AL%' and v_iban !~ '^AL[0-9]{2}[A-Z0-9]{24}$' then
+    raise exception 'set_author_payout_destination: iban does not match the expected Albanian IBAN format (AL + 26 digits/letters)';
+  end if;
+
+  if not public.iban_mod97_valid(v_iban) then
+    raise exception 'set_author_payout_destination: iban fails checksum validation -- this only confirms the format is well-formed, never that the account exists or belongs to you';
+  end if;
+
+  -- ON CONFLICT ON CONSTRAINT: see migration 055 (the OUT parameter
+  -- "currency" makes a bare column list ambiguous).
+  insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban, updated_at)
+  values (auth.uid(), v_currency, v_beneficiary_name, v_iban, now())
+  on conflict on constraint author_payout_destinations_pkey do update
+    set beneficiary_name = excluded.beneficiary_name,
+        iban = excluded.iban,
+        updated_at = now();
+
+  currency := v_currency;
+  beneficiary_name := v_beneficiary_name;
+  iban := v_iban;
+  select apd.updated_at into updated_at
+  from public.author_payout_destinations apd
+  where apd.author_id = auth.uid() and apd.currency = v_currency;
+  return next;
+end;
+$$;
+
+-- CREATE OR REPLACE keeps the existing grants (authenticated from 055,
+-- service_role from 20261024200000); restated here so this file says
+-- the whole truth on its own.
+revoke all on function public.set_author_payout_destination(text, text, text) from public, anon;
+grant execute on function public.set_author_payout_destination(text, text, text) to authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 4. Ready to sell? (yes/no only)
+-- ------------------------------------------------------------
+-- Two functions, so the grants decide who may ask (no token-claim
+-- check): the author asks about themselves only; the staff Approve
+-- action (service_role) asks about the book's author.
+create or replace function public.author_payment_details_ready_self()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select auth.uid() is not null
+     and exists (select 1 from public.author_tax_details t where t.author_id = auth.uid())
+     and exists (
+       select 1 from public.author_payout_destinations d
+       where d.author_id = auth.uid() and d.currency = 'ALL'
+     );
+$$;
+
+revoke all on function public.author_payment_details_ready_self() from public, anon, authenticated, service_role;
+grant execute on function public.author_payment_details_ready_self() to authenticated;
+
+create or replace function public.author_payment_details_ready_for(p_author_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_author_id is not null
+     and exists (select 1 from public.author_tax_details t where t.author_id = p_author_id)
+     and exists (
+       select 1 from public.author_payout_destinations d
+       where d.author_id = p_author_id and d.currency = 'ALL'
+     );
+$$;
+
+revoke all on function public.author_payment_details_ready_for(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.author_payment_details_ready_for(uuid) to service_role;

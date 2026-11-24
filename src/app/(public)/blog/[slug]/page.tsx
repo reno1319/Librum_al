@@ -15,6 +15,15 @@ import { BlogMarkdown } from "@/components/blog-markdown";
 import { BlogArticleCard, NgaLibrumTag, type BlogArticleCardPost } from "@/components/blog-article-card";
 import { BlogCta } from "@/components/blog-category-nav";
 import { ShareButtons } from "@/components/share-buttons";
+import { BlogReactions } from "@/components/blog-reactions";
+import {
+  emptyBlogReactionCounts,
+  groupBlogReactionCounts,
+  isBlogReaction,
+  type BlogReaction,
+  type BlogReactionCountRow,
+} from "@/lib/blog-reactions";
+import { pageErrorMessage } from "@/lib/page-messages";
 
 type PublicBlogPostDetail = {
   id: string;
@@ -150,8 +159,15 @@ function ArticleJsonLd({ post, url, coverUrl }: { post: PublicBlogPostDetail; ur
   );
 }
 
-export default async function BlogArticlePage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function BlogArticlePage({
+  params,
+  searchParams = Promise.resolve({}),
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ error?: string }>;
+}) {
   const { slug } = await params;
+  const { error: rawError } = await searchParams;
   const post = await getPublishedBlogPostBySlug(slug);
 
   if (!post) {
@@ -180,9 +196,33 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
 
   const related = selectRelatedPosts(relatedCandidatesData ?? [], post.category, post.id);
 
+  // BR1 (2026-11-23): totals come from a function that returns numbers
+  // only, never who reacted; the reader's own picks are their own rows.
+  const [{ data: reactionRows, error: reactionCountsError }, { data: authData }] = await Promise.all([
+    supabase.rpc("blog_post_reaction_counts", { p_post_ids: [post.id] }),
+    supabase.auth.getUser(),
+  ]);
+  // Audit L2: a failed read shows the buttons without numbers; the log
+  // line (no user data) is what the release error read catches.
+  if (reactionCountsError) console.error("blog article: reaction counts read failed", { code: reactionCountsError.code });
+  const reactionCounts = groupBlogReactionCounts(reactionRows as BlogReactionCountRow[] | null).get(post.id) ?? emptyBlogReactionCounts();
+  const reader = authData.user;
+  const myReactions = new Set<BlogReaction>();
+  if (reader) {
+    const { data: mine, error: mineError } = await supabase
+      .from("blog_post_reactions")
+      .select("reaction")
+      .eq("post_id", post.id)
+      .eq("user_id", reader.id)
+      .returns<{ reaction: string }[]>();
+    if (mineError) console.error("blog article: own reactions read failed", { code: mineError.code });
+    for (const row of mine ?? []) if (isBlogReaction(row.reaction)) myReactions.add(row.reaction);
+  }
+  const reactionError = pageErrorMessage(rawError);
+
   const readingMinutes = calculateReadingTime(post.content_markdown);
   // Blog categories (2026-11-17): Editorial posts carry the yellow
-  // "Nga Librum" tag and a thin gold line (blog1/blog3); every other
+  // "Editorial" tag and a thin gold line (blog1/blog3); every other
   // post links its category name to the category page. The bottom
   // button follows the category (blog6). bs1: an Editorial post is the tick on top of a
   // real category, so it shows the tag AND its category link.
@@ -253,9 +293,26 @@ export default async function BlogArticlePage({ params }: { params: Promise<{ sl
         </div>
       </article>
 
+      {/* BR1 (Renato, 2026-11-23): reactions at the end of the article,
+          above the share row (br1 q5). */}
+      <section id="reagime" aria-label="Reagime" className="mt-10 scroll-mt-24 text-sm">
+        {reactionError && (
+          <p role="alert" className="mb-3 rounded-card bg-red-50 px-3 py-2 text-red-700">
+            {reactionError}
+          </p>
+        )}
+        <BlogReactions
+          postId={post.id}
+          slug={post.slug}
+          counts={reactionCounts}
+          mine={myReactions}
+          signedIn={reader !== null}
+        />
+      </section>
+
       {/* SOCIAL (Renato soc2, 2026-11-18): the same share row as the book
           page, at the end of the article. */}
-      <ShareButtons url={url} text={`${post.title} në Librum`} className="mt-10 text-sm" />
+      <ShareButtons url={url} text={`${post.title} në Librum`} className="mt-8 text-sm" />
 
       {related.length > 0 && (
         <section className="mt-14 border-t border-border pt-8">

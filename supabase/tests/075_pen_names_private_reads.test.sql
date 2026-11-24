@@ -539,6 +539,8 @@ insert into pg_temp.allow values
   ('reviews', 'reader_id', 'own', 'readers read own reviews (upsert)'),
   ('purchases', 'reader_id', 'own', 'readers read own purchases'),
   ('wishlist_items', 'reader_id', 'own', 'own wishlist'),
+  ('blog_post_reactions', 'user_id', 'own', 'own blog reactions (BR1)'),
+  ('author_tax_details', 'author_id', 'own', 'own Payment & tax details (build 3)'),
   ('preorder_notify_requests', 'user_id', 'own', 'own pre-order notices (BD16 P1)'),
   ('pen_name_follows', 'follower_id', 'own', 'own follows'),
   -- K8+K10 (20261115160000): a reader's own place, bookmarks and highlights,

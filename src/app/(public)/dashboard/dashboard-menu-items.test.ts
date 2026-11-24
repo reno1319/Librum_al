@@ -17,7 +17,7 @@ describe("dashboard menu groups", () => {
   it("has Renato's four groups and the existing page names", () => {
     expect(DASHBOARD_MENU_GROUPS.map((g) => [g.label, g.items.map((i) => `${i.label} ${i.href}`)])).toEqual([
       ["Librat", ["Librat /dashboard", "Seritë /dashboard/series"]],
-      ["Paratë", ["Shitjet /dashboard/sales", "Bilanci /dashboard/balance"]],
+      ["Paratë", ["Shitjet /dashboard/sales", "Bilanci /dashboard/balance", "Të dhënat e pagesës /dashboard/payment"]],
       ["Promovimi", ["Paketat /dashboard/bundles", "Zbritjet /dashboard/discounts"]],
       // AUTHOR PROFILI (build 1): pen names live inside Profili.
       ["Profili", ["Profili /dashboard/profile"]],
@@ -41,6 +41,7 @@ describe("findDashboardMenuMatch", () => {
     ["/dashboard/series", "Librat/Seritë"],
     ["/dashboard/sales", "Paratë/Shitjet"],
     ["/dashboard/balance", "Paratë/Bilanci"],
+    ["/dashboard/payment", "Paratë/Të dhënat e pagesës"],
     ["/dashboard/bundles", "Promovimi/Paketat"],
     ["/dashboard/bundles/abc/edit", "Promovimi/Paketat"],
     ["/dashboard/discounts", "Promovimi/Zbritjet"],
@@ -86,10 +87,11 @@ describe("aria-current", () => {
     // DC 1: Librat has no second row, so its tab is the page itself.
     expect(current("/dashboard")).toEqual({
       groups: ["page", undefined, undefined, undefined],
-      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined],
+      items: ["page", undefined, undefined, undefined, undefined, undefined, undefined, undefined],
     });
     expect(current("/dashboard/balance").items[3]).toBe("page");
     expect(current("/dashboard/balance").groups).toEqual([undefined, "true", undefined, undefined]);
+    expect(current("/dashboard/payment").items[4]).toBe("page");
     expect(current("/dashboard/series").groups).toEqual(["true", undefined, undefined, undefined]);
     expect(current("/dashboard/books/new").groups).toEqual(["true", undefined, undefined, undefined]);
   });
@@ -103,7 +105,7 @@ describe("aria-current", () => {
   );
 
   it("bundle edit marks Paketat 'true'", () => {
-    expect(current("/dashboard/bundles/abc/edit").items[4]).toBe("true");
+    expect(current("/dashboard/bundles/abc/edit").items[5]).toBe("true");
     expect(current("/dashboard/bundles/abc/edit").groups[2]).toBe("true");
   });
 
@@ -111,7 +113,7 @@ describe("aria-current", () => {
   // tab is the page itself.
   it("the Profili tab and its item are 'page' on /dashboard/profile", () => {
     expect(current("/dashboard/profile").groups[3]).toBe("page");
-    expect(current("/dashboard/profile").items[6]).toBe("page");
+    expect(current("/dashboard/profile").items[7]).toBe("page");
   });
 
   it("an unknown path marks nothing", () => {

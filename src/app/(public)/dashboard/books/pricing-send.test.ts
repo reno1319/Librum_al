@@ -229,6 +229,14 @@ const sessionClient = {
   auth: { getUser: async () => ({ data: { user: { id: USER_ID } } }) },
   from: (table: string) => query(table),
   rpc: async (fn: string, args: unknown) => {
+    // BUILD 3: the author's own Payment & tax yes/no (not recorded in
+    // rpcCalls). true = ready, false = missing, null = the read fails.
+    if (fn === "author_payment_details_ready_self") {
+      paymentDetailsCalls += 1;
+      return paymentReady === null
+        ? { data: null, error: { code: "57014", message: "canceling statement" } }
+        : { data: paymentReady, error: null };
+    }
     rpcCalls.push({ fn, args });
     return { data: null, error: rpcError };
   },
@@ -236,6 +244,8 @@ const sessionClient = {
 };
 // BD16 P2: push_preorder_release_date.
 let rpcCalls: { fn: string; args: unknown }[] = [];
+let paymentReady: boolean | null = true;
+let paymentDetailsCalls = 0;
 let rpcError: { code: string; message: string } | null = null;
 let releaseReadFails = false;
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => sessionClient }));
@@ -244,6 +254,7 @@ const writerClient = { ...sessionClient, from: (table: string) => query(table, "
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => writerClient }));
 
 const { saveBookPricing, cancelPreorder, pushPreorderDate, unpublishBook } = await import("./actions");
+const { PAYMENT_DETAILS_MISSING_MESSAGE } = await import("../payment/payment-logic");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
 
 const OWN_EPUB = canonicalBookManuscriptPath(USER_ID, BOOK_ID);
@@ -329,6 +340,8 @@ beforeEach(async () => {
   preorderFeature = false;
   rpcCalls = [];
   rpcError = null;
+  paymentReady = true;
+  paymentDetailsCalls = 0;
   releaseReadFails = false;
   afterCalls.length = 0;
   mockRevalidatePath.mockReset();
@@ -747,6 +760,31 @@ describe("saveBookPricing: a live book", () => {
     expect(priceWrites()[0].payload).toEqual({ price_all: 300 });
     expect(priceWrites()[0].filters).toContainEqual({ kind: "eq", column: "status", value: "published" });
     expect(publishWrites()).toEqual([]);
+  });
+
+  // BUILD 3 (sg1 a, audit r1 F2): a live free book turning paid is a
+  // paid listing at once, so it needs the Payment & tax details.
+  it("a live free book turning paid is refused without Payment & tax details, nothing written", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    paymentReady = false;
+    const missing = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300", confirmPriceChange: "300" })));
+    expect(missing).toBe(`${EDITOR}&error=${encodeURIComponent(PAYMENT_DETAILS_MISSING_MESSAGE)}`);
+    paymentReady = null;
+    const unreadable = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300", confirmPriceChange: "300" })));
+    expect(unreadable).toBe(`${EDITOR}&error=${encodeURIComponent("Diçka shkoi keq gjatë ruajtjes së ndryshimeve. Provoni përsëri")}`);
+    expect(priceWrites()).toEqual([]);
+  });
+
+  it("a live book going free, or a draft's paid price, never asks for Payment & tax details", async () => {
+    paymentReady = false;
+    book.price_all = 300;
+    const free = await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", confirmPriceChange: "0" })));
+    expect(free).toBe(`${EDITOR}&success=${encodeURIComponent("Ndryshimet u ruajtën")}`);
+    book.status = "draft";
+    book.published_at = null;
+    book.price_all = null;
+    await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "paid", price: "300" })));
+    expect(paymentDetailsCalls).toBe(0);
   });
 
   it("a new paid price is refused while paid publishing is off", async () => {

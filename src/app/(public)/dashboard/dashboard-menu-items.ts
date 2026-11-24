@@ -38,6 +38,8 @@ export const DASHBOARD_MENU_GROUPS: DashboardMenuGroup[] = [
     items: [
       { href: "/dashboard/sales", label: "Shitjet", nested: true },
       { href: "/dashboard/balance", label: "Bilanci", nested: true },
+      // BUILD 3: the author's tax details and bank account.
+      { href: "/dashboard/payment", label: "Të dhënat e pagesës", nested: true },
     ],
   },
   {

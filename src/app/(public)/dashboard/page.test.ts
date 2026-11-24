@@ -11,6 +11,13 @@ const mockCreateClient = vi.fn(() => {
   throw SENTINEL;
 });
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// BUILD 3: the author's Payment & tax readiness, as a yes/no double.
+vi.mock("@/lib/author-tax-readiness", () => ({
+  BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE: "bundle payment details missing",
+  readPaymentDetailsReadiness: vi.fn(async () => "ready"),
+  readAuthorPaymentDetailsReadinessAsStaff: vi.fn(async () => "ready"),
+  readOwnPaymentDetailsState: vi.fn(async () => ({ ok: true, hasTaxDetails: true, hasBankAccount: true })),
+}));
 vi.mock("@/app/(public)/dashboard/books/actions", () => ({ deleteBook: vi.fn() }));
 // BD15 P6: the bookshelf reads book_pending_changes with the trusted
 // writer; the fake records which ids it was asked for.
@@ -177,6 +184,25 @@ describe("DashboardPage: step 4 dashboard", () => {
     expect(html).not.toContain('href="/dashboard/books"');
     expect(html).toContain("Për t&#x27;u bërë: Shtoni një ballinë");
     expect(html).not.toContain("Të dhënat e shitjeve nuk u ngarkuan");
+  });
+
+  // BUILD 3 (nr1 b): the Payment & tax card, until both parts are saved.
+  it("shows '0 nga 2 gati' with a link to the payment page while nothing is saved", async () => {
+    const { readOwnPaymentDetailsState } = await import("@/lib/author-tax-readiness");
+    vi.mocked(readOwnPaymentDetailsState).mockResolvedValueOnce({ ok: true, hasTaxDetails: false, hasBankAccount: false });
+    const html = await render(TABLES, RPCS);
+    expect(html).toContain("Para se të shisni libra me çmim: 0 nga 2 gati");
+    expect(html).toContain('href="/dashboard/payment"');
+    expect(html).toContain("Për librat falas nuk ka nevojë.");
+  });
+
+  it("counts one saved part, and hides the card once both are saved or when unreadable", async () => {
+    const { readOwnPaymentDetailsState } = await import("@/lib/author-tax-readiness");
+    vi.mocked(readOwnPaymentDetailsState).mockResolvedValueOnce({ ok: true, hasTaxDetails: true, hasBankAccount: false });
+    expect(await render(TABLES, RPCS)).toContain("1 nga 2 gati");
+    expect(await render(TABLES, RPCS)).not.toContain("nga 2 gati");
+    vi.mocked(readOwnPaymentDetailsState).mockResolvedValueOnce({ ok: false });
+    expect(await render(TABLES, RPCS)).not.toContain("nga 2 gati");
   });
 
   it("a failed sales read replaces every figure with the existing sentence and keeps the book list", async () => {

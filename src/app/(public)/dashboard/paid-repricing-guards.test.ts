@@ -159,8 +159,17 @@ function builder(table: string, via: Via = "session") {
   return chain;
 }
 
+// BUILD 3 (audit r1 F2): the author's own Payment & tax yes/no.
+// true = ready, false = missing, null = the read fails.
+let paymentReady: boolean | null = true;
 const client = {
   auth: { getUser: async () => ({ data: { user: { id: USER_ID } } }) },
+  rpc: async (fn: string) =>
+    fn === "author_payment_details_ready_self"
+      ? paymentReady === null
+        ? { data: null, error: { code: "57014", message: "canceling statement" } }
+        : { data: paymentReady, error: null }
+      : { data: null, error: { code: "42883", message: `unexpected function ${fn}` } },
   from: (table: string) => builder(table),
   storage: {
     from: (bucket: string) => ({
@@ -243,6 +252,7 @@ const catalogWriter = {
 vi.mock("@/lib/catalog-write-client", () => ({ createCatalogWriteClient: () => catalogWriter }));
 
 const { updateBundle, publishBundle } = await import("./bundles/actions");
+const { BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE } = await import("@/lib/author-tax-readiness");
 const { PAID_REPRICING_UNAVAILABLE_MESSAGE, CATALOG_ROW_CHANGED_MESSAGE } = await import(
   "@/lib/paid-repricing"
 );
@@ -320,6 +330,7 @@ beforeEach(() => {
   writes = [];
   uploads = [];
   interceptor = null;
+  paymentReady = true;
   mockRedirect.mockClear();
   seedBook({});
   seedBundle({});
@@ -409,6 +420,29 @@ describe("updateBundle while paid publishing is OPEN on protected staging", () =
     seedBundle({ status: "published", price_all: 0 });
     expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")))).toBe(BUNDLE_SAVED);
     expect(bundle()).toMatchObject({ status: "published", price_all: 199 });
+  });
+
+  // BUILD 3 (sg1 a, audit r1 F2): a live free bundle turning paid is a
+  // paid listing at once, so it needs the Payment & tax details.
+  it("published, free -> paid is refused without Payment & tax details, nothing written", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    paymentReady = false;
+    seedBundle({ status: "published", price_all: 0 });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")))).toBe(
+      `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent(BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE)}`,
+    );
+    paymentReady = null;
+    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("199")))).toBe(
+      `/dashboard/bundles/${BUNDLE_ID}/edit?error=${encodeURIComponent("Paketa nuk u ruajt dot, ndaj nuk ndryshoi asgjë. Provoni përsëri.")}`,
+    );
+    expect(writes).toEqual([]);
+    expect(bundle()).toMatchObject({ status: "published", price_all: 0 });
+  });
+
+  it("published, free -> free never asks for Payment & tax details", async () => {
+    paymentReady = false;
+    seedBundle({ status: "published", price_all: 0 });
+    expect(await redirectOf(updateBundle(BUNDLE_ID, bundleForm("0")))).toBe(BUNDLE_SAVED);
   });
 });
 

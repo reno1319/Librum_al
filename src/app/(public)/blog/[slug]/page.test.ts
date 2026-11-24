@@ -82,7 +82,8 @@ function allText(node: unknown): string {
 const mockNotFound = vi.fn(() => {
   throw new Error("NOT_FOUND");
 });
-vi.mock("next/navigation", () => ({ notFound: mockNotFound }));
+vi.mock("next/navigation", () => ({ notFound: mockNotFound, redirect: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const mockMaybeSingle = vi.fn();
 const mockReturns = vi.fn();
@@ -99,8 +100,13 @@ const mockSelect = vi.fn((_columns: string) => chain);
 const mockFrom = vi.fn((_table: string) => ({ select: mockSelect }));
 const mockGetPublicUrl = vi.fn((path: string) => ({ data: { publicUrl: `https://cdn.test/${path}` } }));
 const mockStorageFrom = vi.fn((_bucket: string) => ({ getPublicUrl: mockGetPublicUrl }));
+// BR1: the reaction totals (rpc) and the signed-in reader (auth).
+const mockReactionRows = vi.fn((): unknown[] => []);
+const mockRpcError = vi.fn((): { code: string } | null => null);
+const mockRpc = vi.fn((_fn: string, _args: unknown) => Promise.resolve({ data: mockReactionRows(), error: mockRpcError() }));
+const mockGetUser = vi.fn(() => Promise.resolve({ data: { user: null as { id: string } | null } }));
 const mockCreateClient = vi.fn(() =>
-  Promise.resolve({ from: mockFrom, storage: { from: mockStorageFrom } }),
+  Promise.resolve({ from: mockFrom, storage: { from: mockStorageFrom }, rpc: mockRpc, auth: { getUser: mockGetUser } }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 // Patch B: the categories come from blog_categories; these tests use the
@@ -111,6 +117,7 @@ vi.mock("@/lib/blog-categories-server", async () => {
 });
 
 const { default: BlogArticlePage, generateMetadata } = await import("./page");
+const { BlogReactions } = await import("@/components/blog-reactions");
 
 const basePost = {
   id: "post-1",
@@ -138,6 +145,10 @@ beforeEach(() => {
   mockMaybeSingle.mockReset();
   mockReturns.mockReset().mockResolvedValue({ data: [] });
   mockGetPublicUrl.mockClear();
+  mockRpc.mockClear();
+  mockReactionRows.mockReset().mockReturnValue([]);
+  mockRpcError.mockReset().mockReturnValue(null);
+  mockGetUser.mockReset().mockResolvedValue({ data: { user: null } });
 });
 
 describe("generateMetadata", () => {
@@ -336,7 +347,7 @@ describe("BlogArticlePage", () => {
     expect(allText(page)).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
   });
 
-  it("au2: on an Editorial post the typed name replaces the Nga Librum byline; the yellow tag stays", async () => {
+  it("au2: on an Editorial post the typed name replaces the Nga Librum byline; the yellow Editorial tag stays", async () => {
     mockMaybeSingle.mockResolvedValueOnce({
       data: { ...basePost, category: "kultura", is_editorial: true, author_name: "Arben Hoxha" },
     });
@@ -344,8 +355,8 @@ describe("BlogArticlePage", () => {
     const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
     const text = allText(page);
     expect(text).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
-    expect(text).not.toContain("Nga Librum · ");
-    expect(text).toContain("Nga Librum");
+    expect(text).not.toContain("Nga Librum");
+    expect(text).toContain("Editorial");
   });
 
   it("SOCIAL (soc2): the share row follows the article, with the article's full address and title", async () => {
@@ -359,6 +370,93 @@ describe("BlogArticlePage", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].url).toBe("http://localhost:3000/blog/how-to-publish");
     expect(rows[0].text).toBe(`${basePost.title} në Librum`);
+  });
+
+  it("BR1: the reaction row sits between the article and the share row, with this article's totals", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    mockReactionRows.mockReturnValue([
+      { post_id: "post-1", reaction: "like", total: 4 },
+      { post_id: "post-1", reaction: "helpful", total: "2" },
+      { post_id: "other", reaction: "like", total: 9 },
+    ]);
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    expect(mockRpc).toHaveBeenCalledWith("blog_post_reaction_counts", { p_post_ids: ["post-1"] });
+    const order: string[] = [];
+    const rows: Record<string, unknown>[] = [];
+    walk(page, (element) => {
+      if (element.type === "article") order.push("article");
+      if (element.type === BlogReactions) {
+        order.push("reactions");
+        rows.push(element.props);
+      }
+      if (element.type === ShareButtons) order.push("share");
+    });
+    expect(order).toEqual(["article", "reactions", "share"]);
+    expect(rows[0].counts).toEqual({ like: 4, helpful: 2, inspired: 0 });
+    expect(rows[0].signedIn).toBe(false);
+    expect(rows[0].postId).toBe("post-1");
+    expect(rows[0].slug).toBe("how-to-publish");
+    // Signed out: never asks for anyone's own rows.
+    expect(mockFrom).not.toHaveBeenCalledWith("blog_post_reactions");
+    const text = allText(page);
+    expect(text).toContain("Si ju duk ky artikull?");
+    expect(text).toContain("Hyni në llogari për të reaguar.");
+    const hrefs = collectLinkHrefs(page);
+    expect(hrefs.filter((h) => h === "/login?next=%2Fblog%2Fhow-to-publish")).toHaveLength(3);
+  });
+
+  it("BR1: a signed-in reader gets buttons, with their own picks pressed", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
+    mockReturns
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [{ reaction: "inspired" }, { reaction: "bogus" }] });
+    mockGetUser.mockResolvedValue({ data: { user: { id: "reader-1" } } });
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    expect(mockFrom).toHaveBeenCalledWith("blog_post_reactions");
+    expect(chain.eq).toHaveBeenCalledWith("user_id", "reader-1");
+    const rows: Record<string, unknown>[] = [];
+    walk(page, (element) => {
+      if (element.type === BlogReactions) rows.push(element.props);
+    });
+    expect(rows[0].signedIn).toBe(true);
+    expect([...(rows[0].mine as Set<string>)]).toEqual(["inspired"]);
+    const pressed: unknown[] = [];
+    walk(page, (element) => {
+      if (element.type === "button" && "aria-pressed" in element.props) pressed.push(element.props["aria-pressed"]);
+    });
+    expect(pressed).toEqual([false, false, true]);
+    expect(allText(page)).not.toContain("Hyni në llogari për të reaguar.");
+  });
+
+  it("BR1: a zero shows no number; a known error message shows above the buttons", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    mockReactionRows.mockReturnValue([{ post_id: "post-1", reaction: "helpful", total: 7 }]);
+    const page = await BlogArticlePage({
+      params: Promise.resolve({ slug: basePost.slug }),
+      searchParams: Promise.resolve({ error: "Diçka shkoi keq. Provoni përsëri." }),
+    });
+    const text = allText(page);
+    expect(text).toContain("Më pëlqen");
+    expect(text).toContain("E dobishme7");
+    expect(text).not.toMatch(/Më pëlqen0|Më frymëzoi0/);
+    expect(text).toContain("Diçka shkoi keq. Provoni përsëri.");
+  });
+
+  it("audit L2: a failed totals read still shows the buttons, without numbers, and logs only the code", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost } });
+    mockReturns.mockResolvedValueOnce({ data: [] });
+    mockRpcError.mockReturnValue({ code: "42883" });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
+    const rows: Record<string, unknown>[] = [];
+    walk(page, (element) => {
+      if (element.type === BlogReactions) rows.push(element.props);
+    });
+    expect(rows[0].counts).toEqual({ like: 0, helpful: 0, inspired: 0 });
+    expect(errorSpy).toHaveBeenCalledWith("blog article: reaction counts read failed", { code: "42883" });
+    errorSpy.mockRestore();
   });
 
   it("a reader-category post (Kulturë) ends with the Shfletoni librarinë button", async () => {
