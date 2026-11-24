@@ -23,6 +23,8 @@ const mockBuild = vi.fn();
 vi.mock("@/lib/epub-reader", () => ({ buildReaderContent: (...a: unknown[]) => mockBuild(...a) }));
 const mockReadLibrumPages = vi.fn();
 vi.mock("@/lib/librum-download-pages", () => ({ readLibrumPages: (...a: unknown[]) => mockReadLibrumPages(...a) }));
+const mockReadRights = vi.fn();
+vi.mock("@/lib/librum-download-rights", () => ({ readRightsBasisForPages: (...a: unknown[]) => mockReadRights(...a) }));
 const mockReadDownloadFilePath = vi.fn();
 vi.mock("@/lib/book-reviews", () => ({ readDownloadFilePath: (...a: unknown[]) => mockReadDownloadFilePath(...a) }));
 
@@ -34,6 +36,30 @@ const READER = "e5f6a7b8-7777-4777-8777-abcdef777777";
 const KEY = `${AUTHOR}/${BOOK}.epub`;
 const FUTURE = "2999-01-01T00:00:00Z";
 const PAST = "2000-01-01T00:00:00Z";
+
+// lbnp2: the download's own pages (made-up test data).
+const FRONT = {
+  title: "Libri <i>",
+  subtitle: null,
+  penName: "Arta Test",
+  originalAuthor: null,
+  originalTitle: null,
+  copyrightYear: 2026,
+  originalYear: null,
+  translators: [],
+  rights: "own_rights",
+  librumYear: 2026,
+  isbn: null,
+  lbn: "LE7K4M9X2D",
+  publisher: null,
+  edition: null,
+  buyer: { email: "lexues@example.test", date: "15 nëntor 2026", code: "LB-1", free: false },
+};
+const PAGES = {
+  front: FRONT,
+  last: { penName: "Arta Test", books: [{ title: "Dimri", url: "https://librum.test/libra/x" }], reviewUrl: "https://librum.test/libra/y#vleresimet" },
+  buyerLineMissing: false,
+};
 
 type Result = { data: unknown; error: unknown };
 const ok = (data: unknown): Result => ({ data, error: null });
@@ -104,10 +130,8 @@ beforeEach(() => {
   }));
   mockReadDownloadFilePath.mockResolvedValue({ ok: true, filePath: KEY });
   mockBuild.mockResolvedValue({ available: true, html: "<section class=\"lb-sec\"><p>tekst</p></section>", toc: [], approximatePercent: 10 });
-  mockReadLibrumPages.mockResolvedValue({
-    front: { buyer: { email: "lexues@example.test", date: "15 nëntor 2026", code: "LB-1", free: false } },
-    buyerLineMissing: false,
-  });
+  mockReadRights.mockResolvedValue({ ok: true, basis: null });
+  mockReadLibrumPages.mockResolvedValue(PAGES);
 });
 
 const get = (query = "") =>
@@ -183,18 +207,53 @@ describe("GET /api/books/[id]/read", () => {
     expect(recorded()).toBe(true);
   });
 
-  it("2a: the book starts with the buyer line from the download's first page", async () => {
+  it("lbnp2: the online book is the download: copyright page first (LBN, buyer line), then the book, then the last page", async () => {
     const body = await (await get()).json();
-    expect(body.html.startsWith('<p class="lb-c lb-i">Blerë nga lexues@example.test më 15 nëntor 2026 · Kodi i blerjes: LB-1</p><hr>')).toBe(true);
-    expect(body.html).toContain("tekst");
+    const html: string = body.html;
+    expect(html.startsWith('<section class="lb-sec lb-lp"><h1>Libri &lt;i&gt;</h1>')).toBe(true);
+    expect(html).toContain('<p class="lb-c">LBN: LE7K4M9X2D</p>');
+    expect(html).toContain("Blerë nga lexues@example.test më 15 nëntor 2026 · Kodi i blerjes: LB-1");
+    const book = html.indexOf('<section class="lb-sec"><p>tekst</p></section>');
+    expect(book).toBeGreaterThan(html.indexOf("LBN: LE7K4M9X2D"));
+    expect(html.indexOf("Faleminderit që lexuat!")).toBeGreaterThan(book);
+    expect(html.endsWith("</section>")).toBe(true);
+    // No links reach the reader: the last page's titles are text.
+    expect(html).not.toContain("<a");
+    expect(html).not.toContain("https://");
+    expect(html).toContain('<p class="lb-c">Dimri</p>');
+    // Same reads as the download: the rights basis with the service role, then the pages.
+    expect(mockReadLibrumPages.mock.calls[0][1]).toMatchObject({
+      bookId: BOOK,
+      buyer: { readerId: READER, email: expect.any(String) },
+      rights: null,
+    });
   });
 
-  it("2a: a missing buyer line still opens the book (like the download)", async () => {
+  it("lbnp2: the rights basis read by the download decides the © line", async () => {
+    mockReadRights.mockResolvedValue({ ok: true, basis: "public_domain" });
+    await get();
+    expect(mockReadLibrumPages.mock.calls[0][1]).toMatchObject({ rights: "public_domain" });
+  });
+
+  it("lbnp2: an unreadable rights basis means no Librum pages (never a false ©), and the book still opens", async () => {
+    mockReadRights.mockResolvedValue({ ok: false });
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(mockReadLibrumPages).not.toHaveBeenCalled();
+    expect((await res.json()).html).toBe('<section class="lb-sec"><p>tekst</p></section>');
+  });
+
+  it("2a: missing pages, a missing buyer line or a failed read still open the book (like the download)", async () => {
     mockReadLibrumPages.mockResolvedValue(null);
-    const body = await (await get()).json();
-    expect(body.html.startsWith("<section")).toBe(true);
+    expect((await (await get()).json()).html).toBe('<section class="lb-sec"><p>tekst</p></section>');
+    mockReadLibrumPages.mockResolvedValue({ ...PAGES, front: { ...FRONT, buyer: null }, buyerLineMissing: true });
+    const html: string = (await (await get()).json()).html;
+    expect(html).toContain("LBN: LE7K4M9X2D");
+    expect(html).not.toContain("Blerë nga");
     mockReadLibrumPages.mockRejectedValue(new Error("boom"));
-    expect((await get()).status).toBe(200);
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect((await res.json()).html).toBe('<section class="lb-sec"><p>tekst</p></section>');
   });
 
   it("audit r1 B2: a book too big for one answer is refused BEFORE the open is recorded", async () => {
@@ -225,14 +284,15 @@ describe("GET /api/books/[id]/read", () => {
     expect(body.html).toBeUndefined();
   });
 
-  it("the author reads their own book: no check, no record, no buyer line", async () => {
+  it("the author reads their own book: no check, no record, the Librum pages without a buyer line", async () => {
     session.authorRow = ok({ id: BOOK });
     session.states = ok([{ book_id: BOOK, first_downloaded_at: null, cancel_open_until: FUTURE }]);
     const res = await get();
     expect(res.status).toBe(200);
     expect(recorded()).toBe(false);
     expect(calls).not.toContain("session.rpc(user_owns_book)");
-    expect(mockReadLibrumPages).not.toHaveBeenCalled();
+    // lbnp2: the same pages as the author's own download (no buyer).
+    expect(mockReadLibrumPages.mock.calls[0][1]).toMatchObject({ buyer: null });
     expect(mockReadDownloadFilePath.mock.calls[0][1]).toMatchObject({ isAuthor: true });
   });
 

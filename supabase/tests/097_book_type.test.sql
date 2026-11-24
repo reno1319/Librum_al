@@ -253,14 +253,15 @@ select pg_temp.assert(
 select pg_temp.assert(
   (select a.attname from pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) in ('book_type', 'word_count', 'original_title')
+    order by a.attnum desc limit 1) in ('book_type', 'word_count', 'original_title', 'lbn')
   and (select a.attnum from pg_attribute a
         where a.attrelid = 'public.public_books'::regclass and a.attname = 'book_type')
       = (select a.attnum + 1 from pg_attribute a
           where a.attrelid = 'public.public_books'::regclass and a.attname = 'release_date'),
   -- Upload notes D (migration 20261107140000) appends word_count after it,
-  -- and X19 (migration 20261121180000) original_title after that.
-  'part5: book_type follows release_date, last or before word_count (and original_title)');
+  -- and X19 (migration 20261121180000) original_title after that, and
+  -- LBN (migration 20261124190000) lbn after that.
+  'part5: book_type follows release_date, last or before word_count (and original_title, lbn)');
 select pg_temp.assert(
   (select release_date is null and book_type = 'Ese' from public.public_books where id = 'e0970001-0000-4000-8000-00000000000a'),
   'part5: the view shows the live book''s type');
