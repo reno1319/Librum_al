@@ -21,7 +21,8 @@ vi.mock("@/lib/staff", () => ({ requireStaff: (permission: string) => mockRequir
 const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => Promise.resolve({ rpc: mockRpc }) }));
 
-const { approveReaderReviewAsStaff, rejectReaderReviewAsStaff, setReviewNameAsStaff } = await import("./actions");
+const { approveReaderReviewAsStaff, approveSelectedReaderReviewsAsStaff, rejectReaderReviewAsStaff, setReviewNameAsStaff } =
+  await import("./actions");
 
 const REVIEW = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const BOOK = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -130,6 +131,43 @@ describe("setReviewNameAsStaff", () => {
   it("refuses a one-letter name without calling the database", async () => {
     const to = await target(setReviewNameAsStaff(form({ user_id: REVIEW, review_name: "A" })));
     expect(to).toContain("?error=A review name has 2 to 40 characters.");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("approveSelectedReaderReviewsAsStaff (G4 batch 3)", () => {
+  const REVIEW2 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const BOOK2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  function picks(...values: string[]): FormData {
+    const fd = new FormData();
+    for (const v of values) fd.append("pick", v);
+    return fd;
+  }
+
+  it("approves each ticked review with the version seen; the rest still go when one is refused (b3e1 a)", async () => {
+    mockRpc.mockResolvedValueOnce({ data: "approved", error: null }).mockResolvedValueOnce({ data: "changed", error: null });
+    const to = await target(
+      approveSelectedReaderReviewsAsStaff(picks(`${REVIEW}|${SEEN}|${BOOK}`, `${REVIEW2}|${SEEN}|${BOOK2}`)),
+    );
+    expect(mockRequireStaff).toHaveBeenCalledWith("reports.resolve");
+    expect(mockRpc).toHaveBeenNthCalledWith(1, "staff_approve_reader_review", { p_review_id: REVIEW, p_seen_updated_at: SEEN });
+    expect(mockRpc).toHaveBeenNthCalledWith(2, "staff_approve_reader_review", { p_review_id: REVIEW2, p_seen_updated_at: SEEN });
+    expect(mockRevalidatePath).toHaveBeenCalledWith(`/libra/${BOOK}`);
+    expect(mockRevalidatePath).not.toHaveBeenCalledWith(`/libra/${BOOK2}`);
+    expect(to).toBe("/admin/reader-reviews?bulk=1.1.0.0.0");
+  });
+
+  it("counts a database error as failed and keeps going", async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { code: "XX000" } }).mockResolvedValueOnce({ data: "approved", error: null });
+    const to = await target(
+      approveSelectedReaderReviewsAsStaff(picks(`${REVIEW}|${SEEN}|${BOOK}`, `${REVIEW2}|${SEEN}|${BOOK2}`)),
+    );
+    expect(to).toBe("/admin/reader-reviews?bulk=1.0.0.0.1");
+  });
+
+  it("calls nothing for an empty or malformed form", async () => {
+    expect(await target(approveSelectedReaderReviewsAsStaff(picks()))).toContain("?error=Something went wrong");
+    expect(await target(approveSelectedReaderReviewsAsStaff(picks(`${REVIEW}|${SEEN}`)))).toContain("?error=Something went wrong");
     expect(mockRpc).not.toHaveBeenCalled();
   });
 });

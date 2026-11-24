@@ -150,6 +150,9 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     // BD15 P7: the public-domain works list, after
     // requireStaff("reports.view").
     "app/admin/(protected)/books/public-domain/page.tsx",
+    // G4 batch 3: the Today site totals count live books (a count, no
+    // rows), rendered only for people.view + finance.view holders.
+    "app/admin/(protected)/site-totals.tsx",
   ];
   // The shared helper is gated by its callers; each caller is listed.
   const BOOK_READ_HELPER = "app/admin/(protected)/books/admin-book-reads.ts";

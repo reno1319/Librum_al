@@ -32,6 +32,7 @@ import {
 } from "@/lib/preorder-staff";
 import { runPreorderJobAsOwner } from "./preorder-job-actions";
 import { FailedPreorderEmails } from "./failed-preorder-emails";
+import { SiteTotals } from "./site-totals";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -303,6 +304,9 @@ export default async function AdminPage({
 
       {/* G4: failed pre-order reader emails, Owner and Admin only (people.view). */}
       {roleHasPermission(role, "people.view") && <FailedPreorderEmails />}
+
+      {/* G4 batch 3: site totals, Owner and Admin only (g4q10 a). */}
+      {roleHasPermission(role, "people.view") && roleHasPermission(role, "finance.view") && <SiteTotals />}
 
       <div className="flex flex-wrap gap-6">
         <section

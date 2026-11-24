@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { isAdminNavItemCurrent, type AdminNavGroup } from "./admin-nav";
+import { AdminNavBubble } from "./admin-nav-bubble";
+import type { AdminNavCounts } from "./admin-nav-counts";
 
 // ADMIN-1 (A2 look): the desktop sidebar (md and up). White, one gold
 // eyebrow per group, the current page a filled dark-green row. A client
@@ -10,7 +12,13 @@ import { isAdminNavItemCurrent, type AdminNavGroup } from "./admin-nav";
 // admin layout does not re-render on client navigation. Brass is never
 // text on white here; the eyebrows use the darkened gold #806510, as
 // bookstore/page.tsx does.
-export function AdminSidebarNav({ groups }: { groups: readonly AdminNavGroup[] }) {
+export function AdminSidebarNav({
+  groups,
+  counts = {},
+}: {
+  groups: readonly AdminNavGroup[];
+  counts?: AdminNavCounts;
+}) {
   const pathname = usePathname() ?? "";
 
   return (
@@ -39,7 +47,8 @@ export function AdminSidebarNav({ groups }: { groups: readonly AdminNavGroup[] }
                           : "font-medium text-primary hover:bg-surface-hover"
                       }`}
                     >
-                      {item.label}
+                      <span className="flex-1">{item.label}</span>
+                      <AdminNavBubble count={counts[item.href]} inverted={current} />
                     </Link>
                   </li>
                 );

@@ -5,7 +5,10 @@ import { roleHasPermission } from "@/lib/staff-permissions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { feedbackStatusFilter, isCleanFeedbackPath, parseAdminFeedbackRows, type FeedbackStatusFilter } from "@/lib/reader-feedback";
-import { markFeedbackDone } from "./actions";
+import { markFeedbackDone, markSelectedFeedbackDone } from "./actions";
+import { Alert } from "@/components/ui/alert";
+import { BulkSelectBar } from "../../bulk-select-bar";
+import { BULK_PICK_FIELD, feedbackBulkLines, parseFeedbackBulk } from "../../bulk-select-logic";
 import type { Metadata } from "next";
 
 // K4 feedback d a (Renato 2026-11-15): the "Na tregoni" messages, under
@@ -20,6 +23,8 @@ const FILTERS: { value: FeedbackStatusFilter; label: string }[] = [
   { value: "all", label: "All" },
 ];
 
+const BULK_FORM_ID = "bulk-feedback-done";
+
 const KIND_LABEL = { problem: "Problem", idea: "Idea" } as const;
 
 function formatWhen(iso: string): string {
@@ -32,14 +37,17 @@ function formatWhen(iso: string): string {
   });
 }
 
-export default async function AdminFeedbackPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+export default async function AdminFeedbackPage({ searchParams }: { searchParams: Promise<{ status?: string; bulk?: string }> }) {
   const { role } = await requireStaff("reports.view");
   const canResolve = roleHasPermission(role, "reports.resolve");
   // Audit r1 F2 (Renato 11-15, mod a): the reader's email only for staff
   // who may see people; the database sends none to anyone else.
   const canSeeSender = roleHasPermission(role, "people.view");
-  const { status } = await searchParams;
+  const { status, bulk: rawBulk } = await searchParams;
   const active = feedbackStatusFilter(status);
+  // G4 batch 3 (b3e1 a): after "Mark selected done", built from digits only.
+  const bulk = parseFeedbackBulk(rawBulk);
+  const bulkLines = bulk ? feedbackBulkLines(bulk) : null;
 
   const supabase = await createClient();
   const [listResult, openResult] = await Promise.all([
@@ -49,6 +57,7 @@ export default async function AdminFeedbackPage({ searchParams }: { searchParams
   const failed = Boolean(listResult.error) || Boolean(openResult?.error);
   const rows = parseAdminFeedbackRows(listResult.data);
   const openCount = active === "open" ? rows.length : parseAdminFeedbackRows(openResult?.data).length;
+  const canBulk = canResolve && rows.some((r) => !r.doneAt);
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6">
@@ -75,13 +84,43 @@ export default async function AdminFeedbackPage({ searchParams }: { searchParams
           </Link>
         ))}
       </div>
+      {bulkLines?.success && (
+        <Alert variant="success" className="mt-6">
+          {bulkLines.success}
+        </Alert>
+      )}
+      {bulkLines?.error && (
+        <Alert variant="error" className="mt-6">
+          {bulkLines.error}
+        </Alert>
+      )}
       {rows.length === 0 ? (
         <EmptyState className="mt-6" title="No messages here." description="Messages sent with the Na tregoni button appear here." />
       ) : (
-        <ul className="mt-6 flex flex-col gap-3">
+        <>
+        {canBulk && (
+          <BulkSelectBar
+            formId={BULK_FORM_ID}
+            action={markSelectedFeedbackDone}
+            actionLabel="Mark selected done"
+            hidden={{ status: active }}
+            className="mt-6"
+          />
+        )}
+        <ul className={`${canBulk ? "mt-3" : "mt-6"} flex flex-col gap-3`}>
           {rows.map((r) => (
             <li key={r.id} className="rounded-card border border-border bg-surface p-4 shadow-sm">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem]">
+                {!r.doneAt && canResolve && (
+                  <input
+                    type="checkbox"
+                    form={BULK_FORM_ID}
+                    name={BULK_PICK_FIELD}
+                    value={r.id}
+                    aria-label="Select this message"
+                    className="size-5 accent-[#1E3A32]"
+                  />
+                )}
                 <span
                   className={`rounded-full px-2.5 py-0.5 font-semibold ${
                     r.kind === "problem" ? "bg-[#f6e3df] text-[#8E2A1E]" : "bg-author-tint text-primary"
@@ -136,6 +175,7 @@ export default async function AdminFeedbackPage({ searchParams }: { searchParams
             </li>
           ))}
         </ul>
+        </>
       )}
     </main>
   );
