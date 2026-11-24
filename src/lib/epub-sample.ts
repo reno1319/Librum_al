@@ -5,6 +5,12 @@ import { EPUB_ZIP_PREFLIGHT_LIMITS } from "@/lib/epub-validation";
 import { resolveArchivePath } from "@/lib/epub-archive-paths";
 import { firstElementInner, markupTokens, tagAttrs } from "@/lib/markup-scan";
 
+// G2 (PV1 item 3, Renato 11-24): the old sample builder
+// (extractEpubSample) is removed; the readers' sample is made by
+// epub-reader.ts. What stays is the spine walk and sanitizer behind
+// countEpubWords (the page estimate). The notes below are the original
+// PRODUCT-1 design, kept for the parts still in use (steps 1 to 5).
+//
 // LIBRUM 2.0 PRODUCT-1: derives a genuine "Read sample" excerpt from a
 // book's own EPUB manuscript, on demand, entirely server-side. Chosen
 // architecture: ON-DEMAND EXTRACTION, not a precomputed/stored sample --
@@ -42,36 +48,13 @@ import { firstElementInner, markupTokens, tagAttrs } from "@/lib/markup-scan";
 // document is well-formed XHTML (every tag closed or self-closing, no
 // HTML5 implied-close-tag ambiguity), which is exactly what makes a
 // small stack-based tokenizer tractable without a full parser.
-export type EpubSampleSection = {
-  // Sanitized, render-ready HTML -- only ALLOWED_TAGS, zero attributes
-  // on any of them. Safe to dangerouslySetInnerHTML as-is.
-  html: string;
-};
-
-export type EpubSampleUnavailableReason =
+type EpubSampleUnavailableReason =
   | "invalid_zip"
   | "missing_container"
   | "missing_opf"
   | "missing_manifest"
   | "missing_spine"
   | "no_readable_content";
-
-export type EpubSampleResult =
-  | {
-      available: true;
-      sections: EpubSampleSection[];
-      // The actual fraction of total readable text included, as a
-      // whole-number percent -- reported rather than hardcoded 10,
-      // since preserving element boundaries means the true cutoff is
-      // "the first element that reaches or passes 10%," not exactly 10%.
-      approximatePercent: number;
-    }
-  | {
-      available: false;
-      reason: EpubSampleUnavailableReason;
-    };
-
-const TARGET_FRACTION = 0.1;
 
 // Defensive bounds -- not a full abuse-prevention subsystem (the
 // manuscript itself is already capped at 50MB by upload-time validation,
@@ -170,7 +153,7 @@ function makeFrame(tag: string, allowed: boolean, isDropped: boolean): StackFram
 // individually well-formed top-level chunks (paragraphs, headings, list
 // blocks, etc.) -- never a chunk that stops mid-element. Each chunk
 // pairs its sanitized HTML with its own plain-text content, which is
-// what the 10% accumulation in extractEpubSample measures the length of.
+// what the word count (countEpubWords) reads.
 function sanitizeBodyIntoChunks(bodyHtml: string): { html: string; text: string }[] {
   const root = makeFrame("#root", false, false);
   const stack: StackFrame[] = [root];
@@ -376,20 +359,17 @@ function parseSpineIdrefs(opfXml: string): string[] {
 
 const CONTENT_MEDIA_TYPES = new Set(["application/xhtml+xml", "text/html"]);
 
-// Upload notes D: the spine walk shared by the sample (below) and the
-// page estimate (countEpubWords). Every spine content document, in spine
-// order, as sanitized chunks -- or the same "unavailable" reason the
-// sample has always returned. Moved here unchanged from
-// extractEpubSample; only the return shape is new.
+// Upload notes D: the spine walk behind the page estimate
+// (countEpubWords). Every spine content document, in spine order, as
+// sanitized chunks -- or an "unavailable" reason.
 type SpineChunksResult =
   | { ok: true; docChunks: { html: string; text: string }[][] }
   | { ok: false; reason: EpubSampleUnavailableReason };
 
 async function readSpineChunks(bytes: Buffer): Promise<SpineChunksResult> {
-  // LIBRUM 2.0 EPUB-VALIDATION-1B: this is the CRITICAL call site --
-  // /api/books/[id]/sample is public and unauthenticated, so this
-  // function's own decompression calls below run on every request for
-  // every published book, not just once at upload. Preflight runs
+  // LIBRUM 2.0 EPUB-VALIDATION-1B: this walk once served the public
+  // sample route on every request (G2: it now serves only the page
+  // estimate, at upload). Preflight runs
   // FIRST, against the raw buffer, before JSZip.loadAsync() -- and
   // therefore before any entry.async() call below (the OPF, or any
   // spine content document) -- using the SAME limits
@@ -509,39 +489,6 @@ async function readSpineChunks(bytes: Buffer): Promise<SpineChunksResult> {
   }
 
   return { ok: true, docChunks };
-}
-
-export async function extractEpubSample(bytes: Buffer): Promise<EpubSampleResult> {
-  const spine = await readSpineChunks(bytes);
-  if (!spine.ok) return { available: false, reason: spine.reason };
-  const { docChunks } = spine;
-
-  const totalLength = docChunks.reduce(
-    (sum, chunks) => sum + chunks.reduce((s, c) => s + c.text.length, 0),
-    0,
-  );
-  if (totalLength === 0) return { available: false, reason: "no_readable_content" };
-
-  const target = Math.max(1, Math.ceil(totalLength * TARGET_FRACTION));
-
-  const sections: EpubSampleSection[] = [];
-  let included = 0;
-  outer: for (const chunks of docChunks) {
-    const sectionHtml: string[] = [];
-    for (const chunk of chunks) {
-      sectionHtml.push(chunk.html);
-      included += chunk.text.length;
-      if (included >= target) {
-        sections.push({ html: sectionHtml.join("") });
-        break outer;
-      }
-    }
-    sections.push({ html: sectionHtml.join("") });
-  }
-
-  const approximatePercent = Math.min(100, Math.round((included / totalLength) * 100));
-
-  return { available: true, sections, approximatePercent };
 }
 
 // Upload notes D: words in the book's readable text (the same spine

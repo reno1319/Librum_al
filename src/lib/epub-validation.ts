@@ -30,8 +30,8 @@ const MAX_CONTAINER_XML_BYTES = 16 * 1024;
 // path, which is the concrete gap the EPUB-VALIDATION-1A audit found:
 // every entry.async() call in this file previously ran with no
 // pre-inflation size bound at all. This matters beyond just this
-// function -- extractEpubSample() (epub-sample.ts) reuses these SAME
-// limits, and that function backs a PUBLIC, unauthenticated route
+// function -- the spine walk in epub-sample.ts reuses these SAME
+// limits, and (until G2, 11-24) it backed a PUBLIC, unauthenticated route
 // (/api/books/[id]/sample) that re-parses an already-stored manuscript
 // on every request; this validator running first, at ingestion, is
 // what's supposed to guarantee nothing unbounded ever reaches
@@ -50,7 +50,7 @@ const MAX_CONTAINER_XML_BYTES = 16 * 1024;
 //     separately, after JSZip.loadAsync(), not through this shared
 //     preflight option) -- the check that closes the actual gap the
 //     audit found: a SINGLE pathological entry (mimetype, container.xml,
-//     the OPF, or -- in extractEpubSample()'s case -- a spine content
+//     the OPF, or -- in the epub-sample.ts spine walk -- a spine content
 //     document) with a tiny compressed footprint and an enormous
 //     declared uncompressed size, previously fully decompressed before
 //     any length check ever ran.

@@ -11,6 +11,7 @@ import { AVATARS_BUCKET } from "@/lib/avatar-path";
 import { createPenNameWriteClient, resolveOwnPenNameId } from "@/lib/pen-name-write-client";
 import { canonicalPenNamePhotoPath, isPenNamePhotoPath } from "@/lib/pen-name-photo-path";
 import { ACCOUNT_NAME_MAX_LENGTH, ACCOUNT_NAME_TOO_LONG_MESSAGE } from "@/lib/account-name";
+import { checkStagedUploadSize } from "@/lib/staged-upload-size";
 import {
   PEN_NAME_BIO_MAX_LENGTH,
   PEN_NAME_PHOTO_MAX_BYTES,
@@ -83,6 +84,10 @@ async function readStagedPhoto(
 ) {
   if (!tempPath.startsWith(`${userId}/tmp/avatar/`) || !/\.(jpe?g|png)$/i.test(tempPath) || tempPath.includes("..")) {
     fail("Kjo foto nuk është më e vlefshme. Zgjidheni skedarin përsëri.");
+  }
+  // G2 c2: refuse an oversized file before reading it.
+  if ((await checkStagedUploadSize(supabase.storage.from(STAGING_BUCKET), tempPath, PEN_NAME_PHOTO_MAX_BYTES)) === "too_large") {
+    fail("Ky imazh e kalon kufirin prej 5 MB.");
   }
   const { data, error } = await supabase.storage.from(STAGING_BUCKET).download(tempPath);
   if (error || !data) {

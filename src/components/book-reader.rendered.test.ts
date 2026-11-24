@@ -117,3 +117,28 @@ describe("BookReader fonts (K9)", () => {
     expect(src).toContain('style.setProperty("--lb-font", READER_FONTS[settings.font].stack);');
   });
 });
+
+describe("DD follow-up: the ❮ ❯ page buttons keep keyboard focus at the ends", () => {
+  it("use aria-disabled, never disabled, so focus is not dropped at the first page", () => {
+    const html = render();
+    for (const label of ["Faqja e mëparshme", "Faqja tjetër"]) {
+      const t = tagWith(html, `aria-label="${label}"`);
+      expect(t).not.toMatch(/\sdisabled(=""|\s|>)/);
+      expect(t).toMatch(/aria-disabled="(true|false)"/);
+      expect(t).toContain("aria-disabled:opacity-0");
+    }
+    expect(tagWith(html, 'aria-label="Faqja e mëparshme"')).toContain('aria-disabled="true"');
+  });
+
+  it("a click at the ends turns no page (so K8 'user moved' is not set), and the ring is not hidden by an inline shadow (audit S2)", () => {
+    const source = readFileSync(new URL("./book-reader.tsx", import.meta.url), "utf8");
+    const prev = source.slice(source.indexOf('aria-label="Faqja e mëparshme"'), source.indexOf("</button>", source.indexOf('aria-label="Faqja e mëparshme"')));
+    const next = source.slice(source.indexOf('aria-label="Faqja tjetër"'), source.indexOf("</button>", source.indexOf('aria-label="Faqja tjetër"')));
+    expect(prev).toMatch(/if \(viewIndex > 0\) go\(-1\);/);
+    expect(next).toMatch(/if \(viewIndex < views\.length - 1\) go\(1\);/);
+    for (const button of [prev, next]) {
+      expect(button).not.toMatch(/boxShadow/);
+      expect(button).toContain("${CHEVRON_STATE}");
+    }
+  });
+});

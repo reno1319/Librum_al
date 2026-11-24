@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
-import { extractEpubSample, __internal } from "./epub-sample";
+import { countEpubWords, __internal } from "./epub-sample";
 
 const { sanitizeBodyIntoChunks } = __internal;
 
@@ -11,10 +11,10 @@ function sanitizedHtml(bodyInner: string): string {
 }
 
 // LIBRUM 2.0 PRODUCT-1: every fixture here is a real EPUB built with
-// JSZip and read back through the exact same extractEpubSample() a real
-// upload's manuscript goes through -- same "write with JSZip, read with
-// the function under test" discipline epub-validation.test.ts already
-// established for this codebase's other EPUB-parsing code.
+// JSZip and read back through the function under test -- same "write
+// with JSZip, read with the function under test" discipline
+// epub-validation.test.ts already established for this codebase's other
+// EPUB-parsing code.
 
 function containerXmlFor(opfPath: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -104,456 +104,116 @@ async function buildEpub({
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
 }
 
-describe("extractEpubSample: valid EPUBs with several spine documents", () => {
-  it("extracts a real sample from a multi-chapter EPUB, in spine order", async () => {
+// G2 (PV1 item 3, Renato 11-24 "s1 b"): the old sample builder
+// (extractEpubSample) is removed; the reader (epub-reader.ts) makes the
+// sample now. What stays here is the spine reader behind countEpubWords
+// (the page estimate) and the sanitizer tests below.
+const OPF_HEAD = `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>`;
+
+describe("countEpubWords: which spine documents count", () => {
+  it("counts every linear spine document", async () => {
     const bytes = await buildEpub({
       docs: [
         { id: "c1", href: "c1.xhtml", body: "<p>" + "one ".repeat(200) + "</p>" },
         { id: "c2", href: "c2.xhtml", body: "<p>" + "two ".repeat(200) + "</p>" },
-        { id: "c3", href: "c3.xhtml", body: "<p>" + "three ".repeat(200) + "</p>" },
       ],
     });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections.length).toBeGreaterThan(0);
-    expect(result.sections[0].html).toContain("one");
-    expect(result.approximatePercent).toBeGreaterThan(0);
-    expect(result.approximatePercent).toBeLessThanOrEqual(100);
-  });
-
-  it("ordering follows OPF spine order, not manifest declaration order", async () => {
-    // Manifest lists chapter three, then one, then two -- the spine
-    // itself (declared separately, in a different order) is what must
-    // govern reading order.
-    const opfXml = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>
-  <manifest>
-    <item id="c3" href="c3.xhtml" media-type="application/xhtml+xml"/>
-    <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>
-    <item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine>
-    <itemref idref="c1"/>
-    <itemref idref="c2"/>
-    <itemref idref="c3"/>
-  </spine>
-</package>`;
-    const bytes = await buildEpub({
-      opfXml,
-      docs: [
-        { id: "c1", href: "c1.xhtml", body: "<p>CHAPTER-ONE-MARKER " + "x ".repeat(500) + "</p>" },
-        { id: "c2", href: "c2.xhtml", body: "<p>CHAPTER-TWO-MARKER " + "x ".repeat(500) + "</p>" },
-        { id: "c3", href: "c3.xhtml", body: "<p>CHAPTER-THREE-MARKER " + "x ".repeat(500) + "</p>" },
-      ],
-    });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections[0].html).toContain("CHAPTER-ONE-MARKER");
-    // Whatever else made it in must respect spine order: two before three.
-    const joined = result.sections.map((s) => s.html).join("");
-    const twoIdx = joined.indexOf("CHAPTER-TWO-MARKER");
-    const threeIdx = joined.indexOf("CHAPTER-THREE-MARKER");
-    if (twoIdx !== -1 && threeIdx !== -1) {
-      expect(twoIdx).toBeLessThan(threeIdx);
-    }
+    expect(await countEpubWords(bytes)).toBe(400);
   });
 
   it("skips the EPUB3 navigation document even if present in spine", async () => {
     const bytes = await buildEpub({
       navId: "nav",
       docs: [
-        { id: "nav", href: "nav.xhtml", body: "<p>NAV-SHOULD-NOT-APPEAR</p>" },
-        { id: "c1", href: "c1.xhtml", body: "<p>" + "real content ".repeat(300) + "</p>" },
+        { id: "nav", href: "nav.xhtml", body: "<p>nav nav nav</p>" },
+        { id: "c1", href: "c1.xhtml", body: "<p>" + "real ".repeat(30) + "</p>" },
       ],
     });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("NAV-SHOULD-NOT-APPEAR");
+    expect(await countEpubWords(bytes)).toBe(30);
   });
 
-  it("skips linear=\"no\" spine items", async () => {
+  it('skips linear="no" spine items', async () => {
     const bytes = await buildEpub({
       docs: [
-        { id: "c1", href: "c1.xhtml", body: "<p>" + "main ".repeat(300) + "</p>" },
-        { id: "extra", href: "extra.xhtml", body: "<p>NONLINEAR-SHOULD-NOT-APPEAR</p>", linear: "no" },
+        { id: "c1", href: "c1.xhtml", body: "<p>" + "main ".repeat(30) + "</p>" },
+        { id: "extra", href: "extra.xhtml", body: "<p>extra extra</p>", linear: "no" },
       ],
     });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("NONLINEAR-SHOULD-NOT-APPEAR");
+    expect(await countEpubWords(bytes)).toBe(30);
   });
 
   it("does not double-count a spine item referenced twice", async () => {
-    const opfXml = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>
-  <manifest>
-    <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine>
-    <itemref idref="c1"/>
-    <itemref idref="c1"/>
-  </spine>
+    const opfXml = `${OPF_HEAD}
+  <manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="c1"/><itemref idref="c1"/></spine>
 </package>`;
-    const bytes = await buildEpub({
-      opfXml,
-      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "solo ".repeat(50) + "</p>" }],
-    });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections.length).toBe(1);
-  });
-});
-
-describe("extractEpubSample: the 10% boundary spans multiple spine documents", () => {
-  it("accumulates across several small documents until reaching ~10% of total readable text", async () => {
-    // 12 near-equal documents (~8.3% each) -- reaching 10% requires the
-    // first document PLUS at least part of the second, never stopping
-    // inside document 1 alone.
-    const docs: Doc[] = Array.from({ length: 12 }, (_, i) => ({
-      id: `c${i}`,
-      href: `c${i}.xhtml`,
-      body: `<p>DOC-${i}-MARKER ${"word ".repeat(50)}</p>`,
-    }));
-    const bytes = await buildEpub({ docs });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections.length).toBeGreaterThanOrEqual(2);
-    expect(result.sections[0].html).toContain("DOC-0-MARKER");
-    expect(result.sections[1].html).toContain("DOC-1-MARKER");
-  });
-
-  it("never truncates mid-element -- every returned chunk's tags are balanced", async () => {
-    const docs: Doc[] = Array.from({ length: 10 }, (_, i) => ({
-      id: `c${i}`,
-      href: `c${i}.xhtml`,
-      body: `<p>Paragraph ${i} ${"word ".repeat(40)}</p><p>Second paragraph ${"word ".repeat(40)}</p>`,
-    }));
-    const bytes = await buildEpub({ docs });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    for (const section of result.sections) {
-      const opens = section.html.match(/<p>/g)?.length ?? 0;
-      const closes = section.html.match(/<\/p>/g)?.length ?? 0;
-      expect(opens).toBe(closes);
-    }
-  });
-});
-
-describe("extractEpubSample: malformed EPUB / missing structure", () => {
-  it("rejects arbitrary non-ZIP bytes", async () => {
-    const result = await extractEpubSample(Buffer.from("not a zip at all"));
-    expect(result).toEqual({ available: false, reason: "invalid_zip" });
-  });
-
-  it("rejects a ZIP with no META-INF/container.xml", async () => {
-    const bytes = await buildEpub({ omitContainer: true, docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }] });
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "missing_container" });
-  });
-
-  it("rejects when the OPF the container points to is absent", async () => {
-    const bytes = await buildEpub({ omitOpf: true });
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "missing_opf" });
-  });
-
-  it("rejects an OPF with no manifest", async () => {
-    const bytes = await buildEpub({
-      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }],
-      omitManifest: true,
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "missing_manifest" });
-  });
-
-  it("rejects an OPF with no spine", async () => {
-    const bytes = await buildEpub({
-      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }],
-      omitSpine: true,
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "missing_spine" });
-  });
-
-  it("reports no_readable_content when every spine document is empty of readable text", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        { id: "c1", href: "c1.xhtml", body: "" },
-        { id: "c2", href: "c2.xhtml", body: "   \n  " },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "no_readable_content" });
+    const bytes = await buildEpub({ opfXml, docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "solo ".repeat(50) + "</p>" }] });
+    expect(await countEpubWords(bytes)).toBe(50);
   });
 
   it("skips a spine item whose manifest href doesn't exist in the archive, rather than crashing", async () => {
-    const opfXml = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title></metadata>
+    const opfXml = `${OPF_HEAD}
   <manifest>
     <item id="ghost" href="does-not-exist.xhtml" media-type="application/xhtml+xml"/>
     <item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
-  <spine>
-    <itemref idref="ghost"/>
-    <itemref idref="c1"/>
-  </spine>
+  <spine><itemref idref="ghost"/><itemref idref="c1"/></spine>
 </package>`;
-    const bytes = await buildEpub({
-      opfXml,
-      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "real ".repeat(50) + "</p>" }],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections[0].html).toContain("real");
+    const bytes = await buildEpub({ opfXml, docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "real ".repeat(50) + "</p>" }] });
+    expect(await countEpubWords(bytes)).toBe(50);
+  });
+
+  it("never counts script content", async () => {
+    const bytes = await buildEpub({ docs: [{ id: "c1", href: "c1.xhtml", body: "<p>one two</p><script>alert(1) bad words</script>" }] });
+    expect(await countEpubWords(bytes)).toBe(2);
   });
 });
 
-// LIBRUM 2.0 EPUB-VALIDATION-1B: this is the CRITICAL call site --
-// /api/books/[id]/sample is public and unauthenticated, so a resource-
-// abuse fixture here proves the same preflight validateEpubStructure()
-// already enforces at ingestion (EPUB_ZIP_PREFLIGHT_LIMITS,
-// epub-validation.ts) also gates this function, on every request, not
-// just once at upload.
-describe("extractEpubSample: resource limits (EPUB-VALIDATION-1B)", () => {
-  it("rejects an archive that fails the EPUB preflight BEFORE any entry is ever decompressed -- proven cleanly (no mocking) by an otherwise fully valid, normally-extractable EPUB still being rejected once one entry's declared uncompressed size exceeds the shared per-entry limit", async () => {
+describe("countEpubWords: malformed EPUB / missing structure gives null", () => {
+  it.each([
+    ["arbitrary non-ZIP bytes", async () => Buffer.from("not a zip at all")],
+    ["no META-INF/container.xml", async () => buildEpub({ omitContainer: true, docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }] })],
+    ["the OPF the container points to is absent", async () => buildEpub({ omitOpf: true })],
+    ["an OPF with no manifest", async () => buildEpub({ docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }], omitManifest: true })],
+    ["an OPF with no spine", async () => buildEpub({ docs: [{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }], omitSpine: true })],
+  ])("%s", async (_label, make) => {
+    expect(await countEpubWords(await make())).toBeNull();
+  });
+
+  it("an EPUB whose spine documents hold no readable text counts 0 words", async () => {
+    const bytes = await buildEpub({ docs: [{ id: "c1", href: "c1.xhtml", body: "" }, { id: "c2", href: "c2.xhtml", body: "   \n  " }] });
+    expect(await countEpubWords(bytes)).toBe(0);
+  });
+});
+
+// EPUB-VALIDATION-1B: the same preflight as validateEpubStructure() runs
+// before any entry is decompressed.
+describe("countEpubWords: resource limits (EPUB-VALIDATION-1B)", () => {
+  it("an otherwise valid EPUB with one entry over the per-entry size limit is refused before decompression", async () => {
     const zip = new JSZip();
     zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
     zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
-    zip.file(
-      "OEBPS/content.opf",
-      opfFor([{ id: "c1", href: "c1.xhtml", body: "<p>real content</p>" }]),
-      { compression: "DEFLATE" },
-    );
+    zip.file("OEBPS/content.opf", opfFor([{ id: "c1", href: "c1.xhtml", body: "" }]), { compression: "DEFLATE" });
     zip.file("OEBPS/c1.xhtml", xhtmlDoc("<p>" + "real ".repeat(50) + "</p>"), { compression: "DEFLATE" });
-    // An extra entry, never referenced by any manifest item, with a
-    // declared uncompressed size over the shared per-entry cap (50MB)
-    // -- real, DEFLATE-compressible all-zero content, tiny actual
-    // compressed footprint. If preflight did NOT run before any
-    // decompression, this entry's mere presence would have zero effect
-    // on extraction (sample-building never reads an unreferenced
-    // entry) -- extraction would succeed normally, exactly like the
-    // "still samples a normal valid EPUB" test below. That this
-    // archive is instead rejected is the proof preflight ran, against
-    // the whole archive's central directory, before JSZip.loadAsync()
-    // or any entry.async() call.
-    const bomb = Buffer.alloc(51 * 1024 * 1024, 0);
-    zip.file("OEBPS/unused-bomb.bin", bomb, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+    zip.file("OEBPS/unused-bomb.bin", Buffer.alloc(51 * 1024 * 1024, 0), { compression: "DEFLATE", compressionOptions: { level: 9 } });
     const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
-
-    const result = await extractEpubSample(bytes);
-    expect(result).toEqual({ available: false, reason: "invalid_zip" });
+    expect(await countEpubWords(bytes)).toBeNull();
   });
 
-  it("rejects an archive with more entries than the shared preflight limit, returning the existing safe unavailable result rather than throwing", async () => {
+  it("an archive with more entries than the preflight limit is refused, not thrown", async () => {
     const zip = new JSZip();
     zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
     zip.file("META-INF/container.xml", containerXmlFor("OEBPS/content.opf"), { compression: "DEFLATE" });
-    zip.file("OEBPS/content.opf", opfFor([{ id: "c1", href: "c1.xhtml", body: "<p>x</p>" }]), {
-      compression: "DEFLATE",
-    });
+    zip.file("OEBPS/content.opf", opfFor([{ id: "c1", href: "c1.xhtml", body: "" }]), { compression: "DEFLATE" });
     zip.file("OEBPS/c1.xhtml", xhtmlDoc("<p>x</p>"), { compression: "DEFLATE" });
-    for (let i = 0; i < 5001; i++) {
-      zip.file(`OEBPS/filler-${i}.txt`, "x");
-    }
+    for (let i = 0; i < 5001; i++) zip.file(`OEBPS/filler-${i}.txt`, "x");
     const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
-
-    await expect(extractEpubSample(bytes)).resolves.toEqual({
-      available: false,
-      reason: "invalid_zip",
-    });
-  });
-
-  it("still samples a normal valid EPUB -- no regression from adding the preflight step", async () => {
-    const bytes = await buildEpub({
-      docs: [{ id: "c1", href: "c1.xhtml", body: "<p>" + "hello ".repeat(50) + "</p>" }],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    expect(result.sections[0].html).toContain("hello");
+    await expect(countEpubWords(bytes)).resolves.toBeNull();
   });
 });
 
-describe("extractEpubSample: sanitization security", () => {
-  it("strips <script> tags and their content entirely", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p>Safe text ${"word ".repeat(30)}</p><script>alert("evil")</script>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("script");
-    expect(joined).not.toContain("alert");
-    expect(joined).not.toContain("evil");
-  });
-
-  it("strips event-handler attributes (dropped along with all attributes on retained tags)", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p onclick="evil()" onload="evil2()">Safe text ${"word ".repeat(30)}</p>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("onclick");
-    expect(joined).not.toContain("onload");
-    expect(joined).not.toContain("evil");
-    expect(joined).toContain("<p>Safe text");
-  });
-
-  it("strips iframe/object/embed/form/input/button entirely, including their content", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p>Before ${"word ".repeat(30)}</p><iframe src="https://evil.example">trapped</iframe><object data="x"><param/></object><embed src="x"/><form><input type="text"/><button>Click</button></form>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    for (const forbidden of ["iframe", "object", "embed", "<form", "<input", "<button", "trapped", "evil.example"]) {
-      expect(joined).not.toContain(forbidden);
-    }
-  });
-
-  it("omits images entirely -- no <img>, no src leakage", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p>Text ${"word ".repeat(30)}</p><img src="https://tracker.example/pixel.png" alt="x"/>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("<img");
-    expect(joined).not.toContain("tracker.example");
-  });
-
-  it("unwraps <a href> links -- keeps visible text, never the href/javascript: URL", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p>See <a href="javascript:alert(1)">this footnote</a> ${"word ".repeat(30)}</p>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).not.toContain("javascript:");
-    expect(joined).not.toContain("<a ");
-    expect(joined).not.toContain("href");
-    expect(joined).toContain("this footnote");
-  });
-
-  it("only ever emits allowed tags with zero attributes -- no style/class/id leaks through", async () => {
-    const bytes = await buildEpub({
-      docs: [
-        {
-          id: "c1",
-          href: "c1.xhtml",
-          body: `<p style="color:red" class="fancy" id="p1">${"word ".repeat(30)}</p>`,
-        },
-      ],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const joined = result.sections.map((s) => s.html).join("");
-    expect(joined).toContain("<p>");
-    expect(joined).not.toContain("style=");
-    expect(joined).not.toContain("class=");
-    expect(joined).not.toContain('id="');
-  });
-
-  it("never leaks manuscript_path, a storage path, or a signed URL -- the extractor never sees or handles them", async () => {
-    const bytes = await buildEpub({
-      docs: [{ id: "c1", href: "c1.xhtml", body: `<p>${"word ".repeat(30)}</p>` }],
-    });
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain("manuscript_path");
-    expect(serialized).not.toContain("supabase.co");
-    expect(serialized).not.toContain("/storage/v1/");
-  });
-});
-
-describe("extractEpubSample: sample does not return the full book", () => {
-  it("returned sample text is meaningfully shorter than the total manuscript text", async () => {
-    const docs: Doc[] = Array.from({ length: 10 }, (_, i) => ({
-      id: `c${i}`,
-      href: `c${i}.xhtml`,
-      body: `<p>${"filler word ".repeat(200)}</p>`,
-    }));
-    const bytes = await buildEpub({ docs });
-
-    const result = await extractEpubSample(bytes);
-    expect(result.available).toBe(true);
-    if (!result.available) return;
-
-    const sampleLength = result.sections.reduce((sum, s) => sum + s.html.length, 0);
-    const totalDocsLength = docs.reduce((sum, d) => sum + d.body.length, 0);
-    // A generous ceiling -- the true target is ~10%; this only asserts
-    // the sample is not anywhere close to the whole book.
-    expect(sampleLength).toBeLessThan(totalDocsLength * 0.5);
-    expect(result.approximatePercent).toBeLessThan(50);
-  });
-});
-
-// LIBRUM 2.0 PRODUCT-1 PRE-COMMIT HARDENING: sanitizeBodyIntoChunks is
-// the actual security boundary (extractEpubSample just calls it per
-// spine document), so these exercise it directly via __internal --
-// exactly the fixture set requested by the PRE-COMMIT review's hostile-
-// markup audit. The required invariant throughout: malformed input may
-// lose content or come back empty, but must NEVER put executable/active
-// markup or an attribute of any kind into the output.
 describe("sanitizeBodyIntoChunks: hostile/malformed markup", () => {
   // A literal '>' inside a quoted attribute value desyncs the tag-
   // boundary match (documented limitation -- attrs can't itself contain

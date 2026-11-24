@@ -62,6 +62,16 @@ describe("summarizeDashboardSales", () => {
       lastMonth: ["2026-11-30T22:59:59Z", "2026-10-31T23:00:00Z"],
       older: ["2026-10-31T22:59:59Z"],
     },
+    // B17: the turn of the year. A sale at 00:30 on 1 January in Tirana
+    // (2026-12-31T23:30Z) is January's, not December's; last month is
+    // December of the year before.
+    {
+      season: "the new year",
+      now: "2027-01-10T10:00:00Z",
+      thisMonth: ["2026-12-31T23:00:00Z", "2026-12-31T23:30:00Z"],
+      lastMonth: ["2026-12-31T22:59:59Z", "2026-11-30T23:00:00Z"],
+      older: ["2026-11-30T22:59:59Z"],
+    },
   ])("month cards follow Tirana months in $season", ({ now, thisMonth, lastMonth, older }) => {
     const at = (values: string[], amount: number) => values.map((value) => purchase("paid", new Date(value), amount));
     const summary = summarizeDashboardSales({

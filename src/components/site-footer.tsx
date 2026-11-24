@@ -53,7 +53,7 @@ const BOTO_ME_LK_HREF = "https://www.lamajkalemi.al";
 // inside a sentence, so it is underlined at rest.
 export function SiteFooter() {
   return (
-    <footer className="bg-primary-hover text-primary-foreground">
+    <footer data-site-footer="" className="bg-primary-hover text-primary-foreground">
       <div className="page-container flex flex-col gap-8 py-8 md:flex-row md:justify-between">
         <div className="max-w-xs">
           {/* LOGO (Renato 11-18, lg1 a): same wordmark as the header; the

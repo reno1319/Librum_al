@@ -201,7 +201,7 @@ function storageBucket(bucket: string) {
       const key = `${bucket}:${String(path)}`;
       if (infoError) return { data: null, error: infoError };
       if (!storedObjects[key]) return { data: null, error: { message: "not found" } };
-      return { data: { name: String(path), metadata: storedMetadata[key] ?? {} }, error: null };
+      return { data: { name: String(path), size: storedObjects[key].length, metadata: storedMetadata[key] ?? {} }, error: null };
     },
     download: async (path: unknown) => {
       record("download", [path]);
@@ -624,6 +624,17 @@ describe("saveBookContent with a replacement", () => {
       expect(new Set(call.paths).size).toBe(call.paths.length);
     }
     expect(events.indexOf("db:update:books")).toBeLessThan(events.indexOf("storage:remove:covers"));
+  });
+});
+
+describe("G2 c2: a staged cover over 5 MB is refused before it is read", () => {
+  it("refused from its stored size: no download, no write", async () => {
+    storedObjects[`manuscripts:${TEMP_COVER}`] = Buffer.alloc(5 * 1024 * 1024 + 1);
+    const f = editForm();
+    f.set("coverStoragePath", TEMP_COVER);
+    expect(await run(saveBookContent(BOOK_ID, f))).toContain(encodeURIComponent("Imazhi i ballinës duhet të jetë nën 5 MB").slice(0, 20));
+    expect(storageCalls.some((c) => c.op === "download" && c.paths?.[0] === TEMP_COVER)).toBe(false);
+    expect(bookUpdates()).toEqual([]);
   });
 });
 

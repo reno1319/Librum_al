@@ -16,7 +16,7 @@ import type { DocImage, DocSection } from "@/lib/docx-converter";
 //
 // Deliberately targets exactly what this app's own
 // validateEpubStructure() (src/lib/epub-validation.ts) and
-// extractEpubSample() (src/lib/epub-sample.ts) actually read --
+// the readers' sample (src/lib/epub-reader.ts) actually read --
 // confirmed by reading both directly, not assumed -- so a generated
 // book works with Read Sample and the rest of the existing pipeline
 // automatically, with no separate DOCX-aware code path anywhere else
