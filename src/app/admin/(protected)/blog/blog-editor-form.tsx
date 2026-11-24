@@ -171,7 +171,7 @@ export function BlogEditorForm({
         <span>
           Editorial
           <span className="block text-muted">
-            Adds the yellow &ldquo;Nga Librum&rdquo; tag. The article shows in the
+            Adds the yellow &ldquo;Editorial&rdquo; tag. The article shows in the
             Editorial section and in its category above.
           </span>
         </span>

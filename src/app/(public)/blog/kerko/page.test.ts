@@ -133,7 +133,8 @@ describe("BlogSearchPage", () => {
     expect(links).toEqual(["/blog/b", "/blog/a"]);
     const text = allText(page);
     expect(text).toContain("2 artikuj për «botim»");
-    expect(text).toContain("Nga Librum");
+    expect(text).toContain("Editorial");
+    expect(text).not.toContain("Nga Librum");
   });
 
   it("one match says '1 artikull'", async () => {

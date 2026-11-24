@@ -13,7 +13,7 @@ import { getBlogCategory, type BlogCategoryInfo } from "@/lib/blog-categories";
 //
 // Blog categories (2026-11-17): the label line is the category name in
 // the category's own colour; an Editorial post (bs1, is_editorial)
-// shows the yellow "Nga Librum" tag first, then its category name. `compactOnMobile` (the /blog lists and the
+// shows the yellow "Editorial" tag first, then its category name. `compactOnMobile` (the /blog lists and the
 // category pages) turns the card into a row with a small square
 // picture and no excerpt below the sm breakpoint.
 export type BlogArticleCardPost = {
@@ -29,7 +29,7 @@ export type BlogArticleCardPost = {
 export function NgaLibrumTag() {
   return (
     <span className="inline-block rounded-[3px] bg-accent px-2 py-[3px] text-[11px] font-semibold uppercase leading-normal tracking-[0.06em] text-accent-foreground">
-      Nga Librum
+      Editorial
     </span>
   );
 }

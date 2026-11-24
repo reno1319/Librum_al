@@ -307,10 +307,11 @@ describe("BlogIndexPage", () => {
     expect(hrefs).not.toContain("/blog/draft-kultura");
   });
 
-  it("an Editorial post's card carries the yellow Nga Librum tag AND its category name (bs1)", async () => {
+  it("an Editorial post's card carries the yellow Editorial tag AND its category name (bs1)", async () => {
     mockReturns.mockResolvedValueOnce({ data: [candidate({ id: "ed", category: "tregu", is_editorial: true })] });
     const text = collectText(await BlogIndexPage());
-    expect(text).toContain("Nga Librum");
+    expect(text).toContain("Editorial");
+    expect(text).not.toContain("Nga Librum");
     expect(text).toContain("Tregu i Librit & Botimet");
   });
 

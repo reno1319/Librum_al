@@ -347,7 +347,7 @@ describe("BlogArticlePage", () => {
     expect(allText(page)).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
   });
 
-  it("au2: on an Editorial post the typed name replaces the Nga Librum byline; the yellow tag stays", async () => {
+  it("au2: on an Editorial post the typed name replaces the Nga Librum byline; the yellow Editorial tag stays", async () => {
     mockMaybeSingle.mockResolvedValueOnce({
       data: { ...basePost, category: "kultura", is_editorial: true, author_name: "Arben Hoxha" },
     });
@@ -355,8 +355,8 @@ describe("BlogArticlePage", () => {
     const page = await BlogArticlePage({ params: Promise.resolve({ slug: basePost.slug }) });
     const text = allText(page);
     expect(text).toContain("Nga Arben Hoxha · 1 janar 2026 · ");
-    expect(text).not.toContain("Nga Librum · ");
-    expect(text).toContain("Nga Librum");
+    expect(text).not.toContain("Nga Librum");
+    expect(text).toContain("Editorial");
   });
 
   it("SOCIAL (soc2): the share row follows the article, with the article's full address and title", async () => {
