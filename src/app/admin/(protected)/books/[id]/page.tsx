@@ -133,6 +133,8 @@ type AdminBook = {
   keywords: string | null;
   publisher: string | null;
   isbn: string | null;
+  // LBN (migration 20261124190000).
+  lbn: string | null;
   // BD16: the pre-order columns (migration 20261106120000).
   release_date: string | null;
   preorder_count: number;
@@ -215,7 +217,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, original_title, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, release_date, preorder_count, preorder_slip_used")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, original_title, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, lbn, release_date, preorder_count, preorder_slip_used")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();

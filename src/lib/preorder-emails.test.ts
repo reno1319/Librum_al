@@ -9,12 +9,24 @@ vi.mock("server-only", () => ({}));
 const afterTasks: (() => Promise<unknown>)[] = [];
 vi.mock("next/server", () => ({ after: (task: () => Promise<unknown>) => afterTasks.push(task) }));
 
-type Row = { book_id: string; user_id: string; notified_at: string | null; book_cancelled_at: string | null };
+type Row = {
+  book_id: string;
+  user_id: string;
+  notified_at: string | null;
+  book_cancelled_at: string | null;
+  send_failure?: string | null;
+  send_failed_at?: string | null;
+};
 type Book = { id: string; title: string; author_id: string; status: string; release_date: string | null };
 
 let rows: Row[] = [];
 let books: Book[] = [];
 let failClaim = false;
+// G4: the failure-mark update errors (or throws).
+let failMark: "error" | "throw" | null = null;
+// G4 r3 (audit N2): runs inside a batch send, so a row can change between
+// the claim and the failure mark (another run, or staff pressing a button).
+let duringBatch: ((call: number) => void) | null = null;
 // r2 (audit F1-F3): a failed titles read, failing address lookups, no
 // key, and Resend's answer per batch call ("ok", "refuse" = returned
 // { error }, "throw" = outcome unknown).
@@ -29,16 +41,18 @@ const batchOptions: unknown[] = [];
 const sent: { to: string; subject: string }[] = [];
 const mockBatch = vi.fn(async (messages: { to: string; subject: string; html: string }[], options?: unknown) => {
   batchOptions.push(options);
+  duringBatch?.(batchOptions.length);
   const answer = batchAnswers.shift() ?? "ok";
-  if (answer === "refuse") return { notSent: messages.map((_m, i) => i), invalid: [] };
-  if (answer === "throw" || answer === "unknown") return { notSent: [], invalid: [] }; // may have gone out
-  if (answer === "allbad") return { notSent: [], invalid: messages.map((_m, i) => i) };
+  if (answer === "refuse") return { notSent: messages.map((_m, i) => i), invalid: [], unknown: [] };
+  // may have gone out (G4: reported as unknown)
+  if (answer === "throw" || answer === "unknown") return { notSent: [], invalid: [], unknown: messages.map((_m, i) => i) };
+  if (answer === "allbad") return { notSent: [], invalid: messages.map((_m, i) => i), unknown: [] };
   if (answer === "bad1") {
     messages.forEach((m, i) => i !== 1 && sent.push({ to: m.to, subject: m.subject }));
-    return { notSent: [], invalid: messages.length > 1 ? [1] : [] };
+    return { notSent: [], invalid: messages.length > 1 ? [1] : [], unknown: [] };
   }
   for (const m of messages) sent.push({ to: m.to, subject: m.subject });
-  return { notSent: [], invalid: [] };
+  return { notSent: [], invalid: [], unknown: [] };
 });
 const mockNewBook = vi.fn(async (_admin: unknown, _args: { bookId: string; authorId: string }) => undefined);
 const authorMails: { kind: string; to: string; args: unknown }[] = [];
@@ -65,6 +79,9 @@ vi.mock("@/lib/author-recipient", () => ({
     id.startsWith("gone") ? null : { email: `${id}@example.test`, name: `Name ${id}` },
 }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => fakeAdmin() }));
+// G4: the one-a-day alert has its own tests (preorder-failure-alert.test.ts).
+const mockAlert = vi.fn(async (_admin: unknown) => 0);
+vi.mock("@/lib/preorder-failure-alert", () => ({ alertPreorderEmailFailures: (admin: unknown) => mockAlert(admin) }));
 
 type Filter = (r: Record<string, unknown>) => boolean;
 
@@ -80,6 +97,8 @@ function query(table: string) {
   let columns = "";
   const run = () => {
     if (update && failClaim) return { data: null, error: { code: "XX000" } };
+    if (update && typeof update.send_failure === "string" && failMark === "error") return { data: null, error: { code: "XX000" } };
+    if (update && typeof update.send_failure === "string" && failMark === "throw") throw new Error("down");
     if (table === "books" && failBooksRead) return { data: null, error: { code: "57014" } };
     const hit = source()
       .filter((r) => filters.every((f) => f(r)))
@@ -175,6 +194,8 @@ beforeEach(() => {
     { book_id: "b-cxl", user_id: "r4", notified_at: null, book_cancelled_at: "2026-11-30T10:00:00Z" },
   ];
   failClaim = false;
+  failMark = null;
+  duringBatch = null;
   failBooksRead = false;
   failingLookups = new Set();
   keyConfigured = true;
@@ -185,6 +206,7 @@ beforeEach(() => {
   afterTasks.length = 0;
   mockBatch.mockClear();
   mockNewBook.mockClear();
+  mockAlert.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -536,5 +558,94 @@ describe("R22 (I3): readers of an account's books when the account is deleted", 
     expect(sent).toEqual([]);
     await afterTasks[0]();
     expect(sent).toEqual([{ to: "r1@example.test", subject: "cancelled:Waiting" }]);
+  });
+});
+
+describe("G4: failed reader emails are marked for staff (g4q3 a, g4q4 a)", () => {
+  const row = (bookId: string, userId: string) => rows.find((r) => r.book_id === bookId && r.user_id === userId)!;
+
+  it("a refused address is marked address_refused and stays claimed (never retried)", async () => {
+    batchAnswers = ["ok", "bad1"];
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(row("b-rel", "r2")).toMatchObject({ send_failure: "address_refused" });
+    expect(row("b-rel", "r2").notified_at).not.toBeNull();
+    expect(row("b-rel", "r2").send_failed_at).toEqual(expect.any(String));
+    // The ones that went have no mark.
+    expect(row("b-rel", "r1").send_failure ?? null).toBeNull();
+    expect(row("b-cxl", "r4").send_failure ?? null).toBeNull();
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(mockBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("an unclear outcome is marked unclear on every row of that batch and stays claimed", async () => {
+    batchAnswers = ["unknown", "throw"];
+    const counts = await sendWaitingReaderEmails(fakeAdmin());
+    expect(counts).toEqual({ released: 0, cancelled: 0 });
+    for (const [b, u] of [["b-cxl", "r4"], ["b-rel", "r1"], ["b-rel", "r2"]]) {
+      expect(row(b, u)).toMatchObject({ send_failure: "unclear" });
+      expect(row(b, u).notified_at).not.toBeNull();
+    }
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(mockBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("a refused batch is un-claimed and marked batch_refused; the next good run sends it and clears the mark", async () => {
+    batchAnswers = ["ok", "refuse"];
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(row("b-rel", "r1")).toMatchObject({ notified_at: null, send_failure: "batch_refused" });
+    expect(row("b-rel", "r2")).toMatchObject({ notified_at: null, send_failure: "batch_refused" });
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(sent.filter((m) => m.subject === "released:Released").map((m) => m.to)).toEqual([
+      "r1@example.test",
+      "r2@example.test",
+    ]);
+    expect(row("b-rel", "r1")).toMatchObject({ send_failure: null, send_failed_at: null });
+    expect(row("b-rel", "r1").notified_at).not.toBeNull();
+  });
+
+  it("a mark only touches rows of its own claim (a row told earlier keeps its state)", async () => {
+    batchAnswers = ["ok", "allbad"];
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(row("b-rel", "r3")).toEqual({
+      book_id: "b-rel",
+      user_id: "r3",
+      notified_at: "2026-11-30T08:00:00Z",
+      book_cancelled_at: null,
+    });
+  });
+
+  it.each([
+    ["allbad", "address_refused"],
+    ["unknown", "unclear"],
+    ["refuse", "batch_refused"],
+  ] as const)("N2: a row whose claim changed during the send (%s) is not marked or un-claimed", async (answer, failure) => {
+    batchAnswers = ["ok", answer];
+    duringBatch = (call) => {
+      if (call === 2) row("b-rel", "r1").notified_at = "2026-12-01T09:00:00Z";
+    };
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(row("b-rel", "r1").notified_at).toBe("2026-12-01T09:00:00Z");
+    expect(row("b-rel", "r1").send_failure ?? null).toBeNull();
+    // The other reader of the same batch, still on this claim, is marked.
+    expect(row("b-rel", "r2")).toMatchObject({ send_failure: failure });
+  });
+
+  it.each(["error", "throw"] as const)("a failed mark write (%s) is logged only: the sweep goes on, nothing throws", async (mode) => {
+    failMark = mode;
+    batchAnswers = ["bad1", "ok"];
+    rows.push({ book_id: "b-cxl", user_id: "r5", notified_at: null, book_cancelled_at: "2026-11-30T10:00:00Z" });
+    const counts = await sendWaitingReaderEmails(fakeAdmin());
+    expect(counts.released).toBe(2);
+    expect(row("b-cxl", "r5").send_failure ?? null).toBeNull();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("failure mark failed");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("@example.test");
+  });
+
+  it("the one-a-day alert runs once after every sweep, not without an email key", async () => {
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    keyConfigured = false;
+    await sendWaitingReaderEmails(fakeAdmin());
+    expect(mockAlert).toHaveBeenCalledTimes(1);
   });
 });

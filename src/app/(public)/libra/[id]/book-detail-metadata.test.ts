@@ -63,8 +63,8 @@ describe("Book Detail: metadata tiles and rows, order and conditional rendering"
 
   // BD15 P8 (Q3 a): Zhanri/Zhanret, then Përmbajtja (18+) and Mosha;
   // Botimi reads EDITION_LABEL.
-  it("rows in the exact order: Lloji, Zhanri/Zhanret, Përmbajtja, Mosha, Seria, Botuesi, Botimi, Botuar për herë të parë, Parapublikim, ISBN", () => {
-    const labels = ["BOOK_TYPE_LABEL", "categoriesLabel(", "ADULT_DETAIL_LABEL", "READING_AGE_LABEL", 'label="Seria"', 'label="Botuesi"', "EDITION_LABEL", 'label="Botuar për herë të parë"', 'label="Parapublikim"', 'label="ISBN"'];
+  it("rows in the exact order: Lloji, Zhanri/Zhanret, Përmbajtja, Mosha, Seria, Botuesi, Botimi, Botuar për herë të parë, Parapublikim, ISBN, LBN", () => {
+    const labels = ["BOOK_TYPE_LABEL", "categoriesLabel(", "ADULT_DETAIL_LABEL", "READING_AGE_LABEL", 'label="Seria"', 'label="Botuesi"', "EDITION_LABEL", 'label="Botuar për herë të parë"', 'label="Parapublikim"', 'label="ISBN"', 'label="LBN"'];
     const positions = labels.map((label) => {
       const idx = rows.indexOf(label);
       expect(idx, `expected to find row "${label}"`).toBeGreaterThan(-1);
@@ -130,6 +130,11 @@ describe("Book Detail: metadata tiles and rows, order and conditional rendering"
   it("ISBN's existing behavior is preserved unchanged", () => {
     const isbnRow = rows.match(/\{book\.isbn && \([\s\S]*?\)\}/)![0];
     expect(isbnRow).toContain("{book.isbn}");
+  });
+
+  it("LBN (lbnq8 a): its own row, labelled just LBN, showing the stored code", () => {
+    const lbnRow = rows.match(/\{book\.lbn && \([\s\S]*?\)\}/)![0];
+    expect(lbnRow).toContain('<DetailRow label="LBN">{book.lbn}</DetailRow>');
   });
 
   it("imports getLanguageLabel and the shared date helpers, no duplicated formatting logic", () => {

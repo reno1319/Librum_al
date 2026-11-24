@@ -30,6 +30,7 @@ import {
 import {
   GOOGLE_AUTHOR_INTENT_COOKIE,
   GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS,
+  createGoogleAuthorIntent,
 } from "@/lib/google-sign-in";
 
 // Supabase's own wrong-password message, which auth-error.ts translates.
@@ -201,6 +202,13 @@ async function startGoogle(formData: FormData, fromSignup: boolean) {
   if (wantsAuthor && !hasAuthorAgeTick(formData)) {
     redirect(`/signup?role=author&error=${encodeURIComponent(AUTHOR_AGE_REQUIRED_MESSAGE)}`);
   }
+  // G1: the signed author hint, made only after the tick check above.
+  // Without the server key there is none: stop here rather than make a
+  // reader account the author did not ask for.
+  const authorIntent = wantsAuthor ? createGoogleAuthorIntent() : null;
+  if (wantsAuthor && !authorIntent) {
+    redirect(failedPath);
+  }
 
   const next = fromSignup ? null : resolveSafeInternalPath(String(formData.get("next") ?? ""));
   const callback =
@@ -223,8 +231,8 @@ async function startGoogle(formData: FormData, fromSignup: boolean) {
 
   // Always set or cleared, so an old hint never outlives this attempt.
   const cookieStore = await cookies();
-  if (wantsAuthor) {
-    cookieStore.set(GOOGLE_AUTHOR_INTENT_COOKIE, "1", {
+  if (authorIntent) {
+    cookieStore.set(GOOGLE_AUTHOR_INTENT_COOKIE, authorIntent, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",

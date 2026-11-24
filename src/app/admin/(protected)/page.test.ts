@@ -104,6 +104,12 @@ vi.mock("./books/admin-book-reads", () => ({
   readPendingReviewsForStaff: (limit: number) => mockReadPendingReviews(limit),
 }));
 
+// G4: the failed pre-order emails box reads on its own (tested in
+// failed-preorder-emails.test.tsx); here only who gets it.
+vi.mock("./failed-preorder-emails", () => ({ FailedPreorderEmails: () => "FAILED-EMAILS-BOX" }));
+// G4 batch 3: the site totals card reads on its own (site-totals.test.ts).
+vi.mock("./site-totals", () => ({ SiteTotals: () => "SITE-TOTALS-CARD" }));
+
 const { default: AdminPage } = await import("./page");
 
 async function renderAs(role: StaffRole, search?: Record<string, string>): Promise<string> {
@@ -432,5 +438,22 @@ describe("AdminPage (Today)", () => {
       expect(html).toContain("Pre-orders overdue");
       expect(html).toContain("Pre-order overdue: the final file of “Libri” by Pena is waiting");
     });
+  });
+  it("G4: the failed pre-order emails box is for Owner and Admin only (people.view)", async () => {
+    for (const role of ["owner", "admin"] as const) {
+      expect(await renderAs(role)).toContain("FAILED-EMAILS-BOX");
+    }
+    for (const role of ["moderator", "support", "editor"] as const) {
+      expect(await renderAs(role)).not.toContain("FAILED-EMAILS-BOX");
+    }
+  });
+
+  it("G4 batch 3: site totals are for Owner and Admin only (g4q10 a)", async () => {
+    for (const role of ["owner", "admin"] as const) {
+      expect(await renderAs(role)).toContain("SITE-TOTALS-CARD");
+    }
+    for (const role of ["moderator", "support", "editor"] as const) {
+      expect(await renderAs(role)).not.toContain("SITE-TOTALS-CARD");
+    }
   });
 });

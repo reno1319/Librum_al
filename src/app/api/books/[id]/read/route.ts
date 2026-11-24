@@ -7,10 +7,11 @@ import { BOOK_MANUSCRIPTS_BUCKET, isOwnBookManuscriptPath } from "@/lib/book-sto
 import { readDownloadFilePath } from "@/lib/book-reviews";
 import { buildReaderContent } from "@/lib/epub-reader";
 import { resolveBookByline } from "@/lib/book-byline";
-import { buyerLineText } from "@/lib/epub-librum-pages";
 import { readLibrumPages } from "@/lib/librum-download-pages";
 import { parseMyDownloadStates } from "@/lib/book-downloads";
-import { buyerLineHtml, MAX_READ_RESPONSE_BYTES, readConfirmed } from "@/lib/owned-reader";
+import { MAX_READ_RESPONSE_BYTES, readConfirmed } from "@/lib/owned-reader";
+import { readRightsBasisForPages } from "@/lib/librum-download-rights";
+import { readerFrontPageHtml, readerLastPageHtml } from "@/lib/reader-librum-pages";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import type { PenNameRef } from "@/lib/pen-names";
 
@@ -35,7 +36,9 @@ import type { PenNameRef } from "@/lib/pen-names";
 // asks for the confirmation too (never skips it). The open is written
 // with record_book_download BEFORE any text is sent; if the record
 // fails nothing is sent. The author's own open is not recorded.
-// 2a: the buyer line of the downloaded book's first page opens the text.
+// lbnp2 (Renato 11-24): the online book is the downloaded book: Librum's
+// copyright page (buyer line included) after the cover, its last page at
+// the end, read exactly as the download reads them.
 // Never stored by a shared cache.
 
 type ReadBookRow = { id: string; title: string; pen: PenNameRef | null; original_author: unknown };
@@ -131,22 +134,39 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const content = await buildReaderContent(Buffer.from(await fileBlob.arrayBuffer()), "owned");
   if (!content.available) return fail(404, "unavailable");
 
-  // 2a: the buyer line, read exactly as the download's first page reads
-  // it. Best-effort, like the download: a missing line is logged and the
-  // book still opens.
-  let buyerLine = "";
-  if (!isAuthor && user.email) {
-    try {
-      const pages = await readLibrumPages(supabase, {
+  // lbnp2: Librum's pages, read exactly as the download reads them (the
+  // rights basis first: if it cannot be read, no pages, so a public-domain
+  // book never shows a false ©). Best-effort, like the download: a missing
+  // page is logged and the book still opens.
+  let frontPage = "";
+  let lastPage = "";
+  try {
+    const rights = await readRightsBasisForPages(admin, id);
+    const pages = rights.ok
+      ? await readLibrumPages(supabase, {
+          bookId: id,
+          buyer: !isAuthor && user.email ? { readerId: user.id, email: user.email } : null,
+          siteOrigin: resolveSiteOrigin(),
+          rights: rights.basis,
+        })
+      : null;
+    if (pages) {
+      frontPage = readerFrontPageHtml(pages.front);
+      lastPage = readerLastPageHtml(pages.last);
+      if (pages.buyerLineMissing) {
+        console.warn("Read: opened the book without the buyer line", { bookId: id, readerId: user.id });
+      }
+    } else {
+      console.warn("Read: opened the book without the Librum pages", {
         bookId: id,
-        buyer: { readerId: user.id, email: user.email },
-        siteOrigin: resolveSiteOrigin(),
+        readerId: user.id,
+        stage: rights.ok ? "missing_details" : "rights_read_failed",
       });
-      if (pages?.front.buyer) buyerLine = buyerLineHtml(buyerLineText(pages.front.buyer));
-      else console.warn("Read: opened the book without the buyer line", { bookId: id, readerId: user.id });
-    } catch {
-      console.warn("Read: opened the book without the buyer line", { bookId: id, readerId: user.id });
     }
+  } catch {
+    frontPage = "";
+    lastPage = "";
+    console.warn("Read: opened the book without the Librum pages", { bookId: id, readerId: user.id, stage: "unexpected_exception" });
   }
 
   // Audit r1 B2: the answer must fit in one response (Vercel: 4.5 MB)
@@ -157,7 +177,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     title: book.title,
     author: resolveBookByline(book),
     mode: "owned",
-    html: buyerLine + content.html,
+    html: frontPage + content.html + lastPage,
     toc: content.toc,
     approximatePercent: 100,
   });

@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 
 // BD15 P2: the Details tab renders every section, and the locks show.
 vi.mock("@/app/(public)/dashboard/books/editor-actions", () => ({ createSeriesFromEditor: async () => ({ ok: false, message: "" }) }));
 // Upload notes 1: the form re-reads the pen names when the author comes back.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
 
-const { BookDetailsForm, detailsExtrasInUse, isExtrasField } = await import("./book-details-form");
+const { BookDetailsForm, detailsExtrasInUse, firstErrorInPageOrder, isExtrasField } = await import("./book-details-form");
 
 const PEN = "d4444444-4444-4444-8444-444444444444";
 const OTHER_PEN = "d5555555-5555-4555-8555-555555555555";
@@ -361,5 +362,34 @@ describe("BookDetailsForm: upload notes", () => {
     const html = render({ title: "" });
     expect(html).not.toContain("Plotësojeni këtë para se ta dërgoni.");
     expect(html.match(/<input[^>]*name="title"[^>]*>/)![0]).not.toContain("border-red-700");
+  });
+});
+
+describe("DC L1: a failed save focuses the first error in page order", () => {
+  const fieldsInPage = () =>
+    [...render().matchAll(/data-field="([^"]+)"/g)].map((m) => ({ dataset: { field: m[1] } }));
+
+  it("a bad edition number (extras box) and a bad description: focus goes to the description above it", () => {
+    const order = fieldsInPage().map((el) => el.dataset.field);
+    expect(order.indexOf("description")).toBeLessThan(order.indexOf("editionNumber"));
+    // parse order puts editionNumber first; page order must win
+    const errors = { editionNumber: "x", description: "y" };
+    expect(Object.keys(errors)[0]).toBe("editionNumber");
+    expect(firstErrorInPageOrder(fieldsInPage(), errors)?.dataset.field).toBe("description");
+  });
+
+  it("only an extras error: focus goes to that field", () => {
+    expect(firstErrorInPageOrder(fieldsInPage(), { editionNumber: "x" })?.dataset.field).toBe("editionNumber");
+  });
+
+  it("no matching field: nothing", () => {
+    expect(firstErrorInPageOrder(fieldsInPage(), {})).toBeUndefined();
+  });
+
+  it("the form's save handler uses the page-order helper, not the first key of the errors (audit S1)", () => {
+    const source = readFileSync(new URL("./book-details-form.tsx", import.meta.url), "utf8");
+    const submit = source.slice(source.indexOf("const onSubmit = "), source.indexOf("const toggleCategory = "));
+    expect(submit).toContain('firstErrorInPageOrder(Array.from(form.querySelectorAll<HTMLElement>("[data-field]")), result.errors)');
+    expect(submit).not.toContain("Object.keys(result.errors)[0]");
   });
 });

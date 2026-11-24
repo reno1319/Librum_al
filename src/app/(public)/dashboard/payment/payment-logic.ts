@@ -120,6 +120,8 @@ export function paymentReadyCount(state: { hasTaxDetails: boolean; hasBankAccoun
 
 // Known set_author_tax_details() messages (none echoes the input).
 export function mapTaxRpcError(message: string): string {
+  // G1 (20261124150000): authors only.
+  if (message.includes("only authors can save")) return PAYMENT_AUTHORS_ONLY_MESSAGE;
   if (message.includes("country is required")) return TAX_COUNTRY_REQUIRED_MESSAGE;
   if (message.includes("legal name is required")) return TAX_LEGAL_NAME_REQUIRED_MESSAGE;
   if (message.includes("nid format is not valid")) return TAX_NID_INVALID_MESSAGE;
@@ -130,6 +132,7 @@ export function mapTaxRpcError(message: string): string {
 // Known set_author_payout_destination() messages (migration 055, and
 // the foreign-IBAN rule of 20261123200000). None echoes the input.
 export function mapBankRpcError(message: string): string {
+  if (message.includes("only authors can save")) return PAYMENT_AUTHORS_ONLY_MESSAGE;
   if (message.includes("beneficiary_name is required")) return BANK_NAME_REQUIRED_MESSAGE;
   if (message.includes("iban is required")) return BANK_IBAN_REQUIRED_MESSAGE;
   if (message.includes("does not match the expected Albanian IBAN format")) return BANK_ALBANIAN_IBAN_INVALID_MESSAGE;
@@ -148,6 +151,7 @@ export const TAX_NID_INVALID_MESSAGE =
 export const TAX_NUMBER_INVALID_MESSAGE =
   "Ky nuk duket si numër tatimor. Shkruani vetëm shkronjat dhe shifrat e tij.";
 export const TAX_NOT_SAVED_MESSAGE = "Të dhënat tatimore nuk u ruajtën. Provoni përsëri.";
+export const PAYMENT_AUTHORS_ONLY_MESSAGE = "Vetëm llogaritë e autorëve mund të ruajnë të dhënat e pagesës.";
 export const TAX_SAVED_MESSAGE = "Të dhënat tatimore u ruajtën.";
 export const TAX_LOAD_FAILED_MESSAGE = "Të dhënat e pagesës nuk u ngarkuan. Provoni përsëri.";
 

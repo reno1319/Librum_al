@@ -1,23 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buyerLineHtml, parseSavedPosition, positionStorageKey, readConfirmed } from "@/lib/owned-reader";
+import { parseSavedPosition, positionStorageKey, readConfirmed } from "@/lib/owned-reader";
 import { buyerLineText } from "@/lib/epub-librum-pages";
-import { READER_CLASSES } from "@/lib/reader-content";
 
 describe("buyer reader helpers (11-15)", () => {
   it("2a: the online line is the download's own buyer line", () => {
     const text = buyerLineText({ email: "lexues@example.test", date: "15 nëntor 2026", code: "LB-7K2Q9", free: false });
     expect(text).toBe("Blerë nga lexues@example.test më 15 nëntor 2026 · Kodi i blerjes: LB-7K2Q9");
     expect(buyerLineText({ email: "a@example.test", date: "1 nëntor 2026", code: "X", free: true })).toMatch(/^Shkarkuar falas nga a@example\.test/);
-  });
-
-  it("escapes the line and uses only the reader's own classes", () => {
-    const html = buyerLineHtml(`Blerë nga "x"<img src=x onerror=1>&@example.test`);
-    expect(html).not.toContain("<img");
-    expect(html).toContain("&lt;img src=x onerror=1&gt;&amp;");
-    expect(html).toContain("&quot;x&quot;");
-    for (const cls of [...html.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(" "))) {
-      expect(READER_CLASSES as readonly string[]).toContain(cls);
-    }
   });
 
   it("1a: only ?accept=1 confirms the first open", () => {

@@ -4,6 +4,7 @@ import { logout } from "@/app/(public)/auth/actions";
 import { resolveVisibleAdminNavGroups } from "./admin-nav";
 import { AdminMobileNav } from "./admin-mobile-nav";
 import { AdminSidebarNav } from "./admin-sidebar-nav";
+import { loadAdminNavCounts } from "./admin-nav-counts";
 import type { StaffRole } from "@/lib/types";
 
 // Informational only -- see the module comment below.
@@ -59,11 +60,11 @@ export async function AdminShell({
   children: React.ReactNode;
 }) {
   const supabase = await createClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("display_name")
-    .eq("id", userId)
-    .single();
+  // G4 batch 3: the menu count bubbles, read alongside the name.
+  const [{ data: profile }, navCounts] = await Promise.all([
+    supabase.from("profiles").select("display_name").eq("id", userId).single(),
+    loadAdminNavCounts(role),
+  ]);
 
   const navGroups = resolveVisibleAdminNavGroups(role);
 
@@ -106,12 +107,12 @@ export async function AdminShell({
       </header>
 
       <div className="px-4 pt-4 md:hidden">
-        <AdminMobileNav groups={navGroups} logoutAction={logout} />
+        <AdminMobileNav groups={navGroups} counts={navCounts} logoutAction={logout} />
       </div>
 
       <div className="flex flex-1 flex-col md:flex-row">
         <div className="hidden w-60 shrink-0 border-r border-border bg-surface px-4 py-6 md:block">
-          <AdminSidebarNav groups={navGroups} />
+          <AdminSidebarNav groups={navGroups} counts={navCounts} />
         </div>
 
         <div className="min-w-0 flex-1">{children}</div>

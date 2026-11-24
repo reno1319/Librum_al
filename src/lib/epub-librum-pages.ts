@@ -40,6 +40,8 @@ export type LibrumFrontPage = {
   rights: RightsBasis;
   librumYear: number;
   isbn: string | null;
+  // LBN (lbnq4 a, lbnq5 a): "LBN: LE…" on its own line under the ISBN.
+  lbn: string | null;
   publisher: string | null;
   edition: string | null;
   // D13 1b: the buyer's own email, the purchase date and code. null for
@@ -191,6 +193,7 @@ export function frontPageBody(p: LibrumFrontPage): string {
     }
   }
   if (p.isbn && clean(p.isbn)) out.push(line(`ISBN ${clean(p.isbn)}`));
+  if (p.lbn && clean(p.lbn)) out.push(line(`LBN: ${clean(p.lbn)}`));
   if (p.publisher && clean(p.publisher)) out.push(line(p.publisher));
   if (p.edition && clean(p.edition)) out.push(line(p.edition));
   out.push(line(`Botuar në Librum, ${p.librumYear} · librum.al`, "gap"));

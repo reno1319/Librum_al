@@ -10,6 +10,7 @@ import { ADMIN_LOGIN_PATH } from "@/lib/admin-safe-redirect";
 import { detectCoverImageKind, resolveVerifiedCoverStorageDetails } from "@/lib/cover-image";
 import { BLOG_COVER_SIZE, IMAGE_CACHE_CONTROL_SECONDS, shrinkImageToJpeg } from "@/lib/cover-resize";
 import { tiranaLocalToInstant } from "@/lib/blog-schedule";
+import { checkStagedUploadSize } from "@/lib/staged-upload-size";
 import {
   findDisallowedImageUrls,
   mapBlogRpcError,
@@ -61,6 +62,12 @@ async function resolveStagedCoverInput(
     redirect(
       `${errorRedirectPath}?error=${encodeURIComponent("That cover reference is no longer valid. Please choose your file again.")}`,
     );
+  }
+
+  // G2 c2: refuse an oversized file before reading it.
+  if ((await checkStagedUploadSize(supabase.storage.from(STAGING_BUCKET), tempPath, MAX_COVER_BYTES)) === "too_large") {
+    await supabase.storage.from(STAGING_BUCKET).remove([tempPath]);
+    redirect(`${errorRedirectPath}?error=${encodeURIComponent("Cover image must be under 5MB")}`);
   }
 
   const { data, error: downloadError } = await supabase.storage
@@ -512,6 +519,11 @@ export async function uploadBlogInlineImageAction(tempPath: string): Promise<Inl
     return { ok: false, error: "That image reference is no longer valid. Please choose the file again." };
   }
 
+  // G2 c2: refuse an oversized file before reading it.
+  if ((await checkStagedUploadSize(supabase.storage.from(STAGING_BUCKET), tempPath, MAX_COVER_BYTES)) === "too_large") {
+    await supabase.storage.from(STAGING_BUCKET).remove([tempPath]);
+    return { ok: false, error: "Images must be under 5 MB." };
+  }
   const { data, error: downloadError } = await supabase.storage.from(STAGING_BUCKET).download(tempPath);
   if (downloadError || !data) {
     console.error("uploadBlogInlineImageAction: temp download failed:", downloadError);

@@ -13,6 +13,7 @@ import {
   GOOGLE_AUTHOR_PENDING_MESSAGE,
   GOOGLE_CALLBACK_PARAM,
   finishGoogleSignIn,
+  isValidGoogleAuthorIntent,
 } from "@/lib/google-sign-in";
 
 // LAUNCH-1 P1-11: the installed @supabase/auth-js runtime attaches a
@@ -180,12 +181,14 @@ export async function GET(request: Request) {
 }
 
 // K7: true when the request carries the author hint cookie set by
-// signInWithGoogle() (the sign-up page, "Autor" + 18+ ticked).
+// signUpWithGoogle() (the sign-up page, "Autor" + 18+ ticked). G1: only
+// a value that server signed, and not expired, counts; a hand-set one
+// does not.
 function hasGoogleAuthorIntent(request: Request): boolean {
   const header = request.headers.get("cookie") ?? "";
   return header.split(";").some((part) => {
     const [name, value] = part.trim().split("=");
-    return name === GOOGLE_AUTHOR_INTENT_COOKIE && value === "1";
+    return name === GOOGLE_AUTHOR_INTENT_COOKIE && isValidGoogleAuthorIntent(value);
   });
 }
 

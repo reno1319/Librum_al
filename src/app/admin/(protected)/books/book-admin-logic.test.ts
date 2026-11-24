@@ -343,6 +343,19 @@ describe("adminBookDetailRows (walkthrough F1+F2)", () => {
     expect(value(rows, "Categories")).toBe("Romancë, Thriller");
     expect(value(rows, "Reading age")).toBe("12+");
   });
+
+  it("LBN (lbnq8 a): shows the book's LBN right after ISBN", () => {
+    const rows = adminBookDetailRows({
+      book: { ...base, isbn: "978-3-16-148410-0", lbn: "LE7K4M9X2D" },
+      aiUsed: null,
+      seriesTitle: null,
+      contributors: [],
+    });
+    const labels = rows.map((r) => r.label);
+    expect(labels.indexOf("LBN")).toBe(labels.indexOf("ISBN") + 1);
+    expect(value(rows, "LBN")).toBe("LE7K4M9X2D");
+    expect(value(adminBookDetailRows({ book: base, aiUsed: null, seriesTitle: null, contributors: [] }), "LBN")).toBe("Not set");
+  });
 });
 
 // BD16 P3: pre-orders in the books list, the eyebrow and the approval.

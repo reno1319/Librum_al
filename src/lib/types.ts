@@ -100,6 +100,10 @@ export type Book = {
   original_author: string | null;
   // X19 (migration 20261121180000): the translated work's own title.
   original_title?: string | null;
+  // LBN (migration 20261124190000): the Librum Book Number, given when
+  // the book is created and never changed (src/lib/lbn.ts). Optional
+  // only so older fixtures and narrow selects type-check.
+  lbn?: string;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;

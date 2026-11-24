@@ -10,6 +10,7 @@ import {
   BANK_ALBANIAN_IBAN_INVALID_MESSAGE,
   BANK_IBAN_INVALID_MESSAGE,
   BANK_NOT_SAVED_MESSAGE,
+  PAYMENT_AUTHORS_ONLY_MESSAGE,
   abroadCountryOptions,
   countryName,
   isAbroadCountry,
@@ -132,5 +133,13 @@ describe("RPC error messages", () => {
       BANK_IBAN_INVALID_MESSAGE,
     );
     expect(mapBankRpcError("boom")).toBe(BANK_NOT_SAVED_MESSAGE);
+  });
+
+  // G1 (20261124150000): both saves are authors only.
+  it("maps the authors-only refusal of both saves", () => {
+    expect(mapTaxRpcError("set_author_tax_details: only authors can save tax details")).toBe(PAYMENT_AUTHORS_ONLY_MESSAGE);
+    expect(mapBankRpcError("set_author_payout_destination: only authors can save a bank account")).toBe(
+      PAYMENT_AUTHORS_ONLY_MESSAGE,
+    );
   });
 });

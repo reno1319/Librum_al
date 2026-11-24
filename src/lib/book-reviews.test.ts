@@ -332,6 +332,12 @@ describe("requestBookReview / withdrawBookReview", () => {
     }
   });
 
+  it("G1: LB527 (a paid draft without Payment & tax details) is 'missing_payment_details'", async () => {
+    expect(
+      await requestBookReview(rpcClient({ error: { code: "LB527", message: "x" } }).client, BOOK),
+    ).toEqual({ ok: false, reason: "missing_payment_details" });
+  });
+
   it("calls the RPCs with the book id only", async () => {
     const request = rpcClient({});
     expect(await requestBookReview(request.client, BOOK)).toEqual({ ok: true });

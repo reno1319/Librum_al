@@ -150,6 +150,14 @@ insert into public.books (id, author_id, title, description, keywords, status, p
   ('e0871000-0000-4000-8000-0000000000a4', 'e0870000-0000-4000-8000-00000000000a', 'R087 Review', 'About it.', '', 'draft', 199, null,
    'e0870000-0000-4000-8000-00000000000a/e0871000-0000-4000-8000-0000000000a4/f0000000-0000-4000-8000-000000000001.epub',
    'e087c0de-0000-4000-8000-0000000000a4/cover.png', 'Homeri');
+
+-- G1 (migration 20261124150000): request_book_review() refuses a PAID
+-- draft whose author has no Payment & tax details (LB527), so the
+-- fixture author has them (made-up values; 113 tests the refusal).
+insert into public.author_tax_details (author_id, country_code, legal_name, tax_id) values
+  ('e0870000-0000-4000-8000-00000000000a', 'AL', 'R087 Author', 'J12345678A');
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('e0870000-0000-4000-8000-00000000000a', 'ALL', 'R087 Author', 'AL47212110090000000235698741');
 -- BD15 P5a (migration 20261104120000): request_book_review() refuses a
 -- book with no "AI used" answer (LB489), so each fixture book has one.
 insert into public.book_ai_disclosures (book_id, ai_used)

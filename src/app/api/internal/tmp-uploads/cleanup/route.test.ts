@@ -14,7 +14,22 @@ const OLD = "2020-01-01T00:00:00Z";
 const calls = { buckets: [] as string[], lists: [] as string[], removes: [] as string[][] };
 let removeError: unknown = null;
 
-function listing(prefix: string) {
+// G2 c1: the blog bucket's inline pictures and the posts' text.
+const USED = "11111111-1111-4111-8111-111111111111";
+const UNUSED = "22222222-2222-4222-8222-222222222222";
+let postTexts: { content_markdown: string }[] = [];
+let postsError: unknown = null;
+// B1 (audit r1): a count that differs from the rows returned (partial read).
+let postsCount: number | null = null;
+
+function listing(prefix: string, bucket = "manuscripts") {
+  if (bucket === "blog") {
+    if (prefix !== "inline") return [];
+    return [
+      { name: `${USED}.jpg`, id: "u", created_at: OLD, updated_at: OLD },
+      { name: `${UNUSED}.jpg`, id: "v", created_at: OLD, updated_at: OLD },
+    ];
+  }
   if (prefix === "") return [{ name: ACCOUNT, id: null }];
   if (prefix === `${ACCOUNT}/tmp`) return [{ name: "epub", id: null }];
   if (prefix === `${ACCOUNT}/tmp/epub`)
@@ -28,15 +43,28 @@ const mockCreateAdminClient = vi.fn(() => ({
       calls.buckets.push(bucket);
       return {
         async list(prefix: string, opts: { offset: number; limit: number }) {
-          calls.lists.push(prefix);
-          return { data: listing(prefix).slice(opts.offset, opts.offset + opts.limit), error: null };
+          calls.lists.push(bucket === "blog" ? `blog:${prefix}` : prefix);
+          return { data: listing(prefix, bucket).slice(opts.offset, opts.offset + opts.limit), error: null };
         },
         async remove(keys: string[]) {
-          calls.removes.push(keys);
+          calls.removes.push(bucket === "blog" ? keys.map((k) => `blog:${k}`) : keys);
           return { data: null, error: removeError };
         },
       };
     },
+  },
+  from(table: string) {
+    expect(table).toBe("blog_posts");
+    return {
+      select: (columns: string, opts: unknown) => {
+        expect(columns).toBe("content_markdown");
+        expect(opts).toEqual({ count: "exact" });
+        return {
+          range: async () =>
+            postsError ? { data: null, error: postsError, count: null } : { data: postTexts, error: null, count: postsCount ?? postTexts.length },
+        };
+      },
+    };
   },
 }));
 
@@ -57,6 +85,9 @@ beforeEach(() => {
   calls.lists = [];
   calls.removes = [];
   removeError = null;
+  postTexts = [{ content_markdown: `Tekst ![](https://x.supabase.co/storage/v1/object/public/blog/inline/${USED}.jpg)` }];
+  postsError = null;
+  postsCount = null;
   mockCreateAdminClient.mockClear();
   vi.stubEnv("CRON_SECRET", "test-cron-secret");
   vi.stubEnv("TMP_CLEANUP_OFF", "");
@@ -105,11 +136,44 @@ describe("GET /api/internal/tmp-uploads/cleanup", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ ok: true, removed: 1, accountsScanned: 1 });
-    expect(calls.buckets).toEqual(["manuscripts"]);
-    expect(calls.removes).toEqual([[`${ACCOUNT}/tmp/epub/${FILE}.epub`]]);
+    expect(calls.buckets).toEqual(["manuscripts", "blog"]);
+    expect(calls.removes).toEqual([[`${ACCOUNT}/tmp/epub/${FILE}.epub`], [`blog:inline/${UNUSED}.jpg`]]);
+    expect(body.blogImages).toMatchObject({ ok: true, posts: 1, pictures: 2, inUse: 1, removed: 1, removedKeys: [`inline/${UNUSED}.jpg`] });
+    // n2 a: the removed blog picture is named in the job log (never the kept one).
+    expect(JSON.stringify(log.mock.calls)).toContain(`inline/${UNUSED}.jpg`);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(USED);
     const logged = JSON.stringify(log.mock.calls) + JSON.stringify(body);
     expect(logged).not.toContain(ACCOUNT);
     expect(logged).not.toContain(FILE);
+  });
+
+  it("G2 c1: a failed posts read removes no blog picture and answers 500", async () => {
+    postsError = { message: "db down" };
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await GET(request());
+    expect(res.status).toBe(500);
+    expect(calls.removes.flat().some((k) => k.startsWith("blog:"))).toBe(false);
+    expect(JSON.stringify(err.mock.calls)).not.toContain(UNUSED);
+  });
+
+  it("G2 c1 (audit B1): a partial posts read (count above the rows returned) removes no blog picture and answers 500", async () => {
+    postsCount = postTexts.length + 1;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await GET(request());
+    expect(res.status).toBe(500);
+    expect((await res.json()).blogImages).toMatchObject({ ok: false, error: "posts read failed", removed: 0 });
+    expect(calls.removes.flat().some((k) => k.startsWith("blog:"))).toBe(false);
+  });
+
+  it("G2 c1 (audit B1): a post row whose text is not a string removes no blog picture and answers 500", async () => {
+    postTexts = [...postTexts, { content_markdown: null as unknown as string }];
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await GET(request());
+    expect(res.status).toBe(500);
+    expect(calls.removes.flat().some((k) => k.startsWith("blog:"))).toBe(false);
   });
 
   it("answers 500 when a removal fails", async () => {

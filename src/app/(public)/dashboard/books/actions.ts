@@ -126,6 +126,7 @@ import {
 } from "@/lib/price-change-confirm";
 import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
 import { scheduleDateMovedReaderEmails, scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
+import { checkStagedUploadSize } from "@/lib/staged-upload-size";
 import {
   CANCEL_PREORDER_CONFIRM_FIELD,
   CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE,
@@ -437,6 +438,11 @@ async function resolveCoverInput(
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
       redirect(withQuery(errorPath, "error", "Ballina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
+    }
+
+    // G2 c2: refuse an oversized file before reading it.
+    if ((await checkStagedUploadSize(supabase.storage.from("manuscripts"), tempPath, MAX_COVER_BYTES)) === "too_large") {
+      redirect(withQuery(errorPath, "error", "Imazhi i ballinës duhet të jetë nën 5 MB"));
     }
 
     const { data, error: downloadError } = await supabase.storage
@@ -1997,6 +2003,11 @@ async function performPublish(
       // the cover or the AI answer went missing after the app's check.
       if (request.reason === "incomplete") {
         return { ok: false, reason: "send_incomplete" };
+      }
+      // G1: the database's own Payment & tax check (LB527) -- the
+      // details changed after the app's check above.
+      if (request.reason === "missing_payment_details") {
+        return { ok: false, reason: "missing_payment_details" };
       }
       // "already_approved": an approval landed after the read above, so
       // the publish below goes ahead (the trigger re-checks it).

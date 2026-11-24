@@ -21,7 +21,9 @@ export function StickyBuyBar({
   const [show, setShow] = useState(false);
   useEffect(() => {
     const el = document.getElementById(targetId);
-    const footer = document.querySelector("footer");
+    // The site footer by its own hook, not the first <footer> on the
+    // page, so a <footer> inside page content can't stand in for it.
+    const footer = document.querySelector("[data-site-footer]");
     if (!el) return;
     let boxGone = false;
     let footerIn = false;

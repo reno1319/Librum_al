@@ -19,6 +19,13 @@ import {
   validateRejectForm,
   validateReviewName,
 } from "./reader-review-logic";
+import {
+  BULK_PICK_FIELD,
+  emptyReviewBulkCounts,
+  encodeReviewBulk,
+  parseReviewPicks,
+  tallyReviewResult,
+} from "../../bulk-select-logic";
 
 // BD13: approve or reject a reader review, and change or clear a
 // reader's public review name. requireStaff("reports.resolve") (owner,
@@ -61,6 +68,38 @@ export async function approveReaderReviewAsStaff(formData: FormData): Promise<vo
 
   revalidateBook(bookId);
   redirect(withQuery(READER_REVIEWS_PATH, "success", REVIEW_APPROVED_MESSAGE));
+}
+
+// G4 batch 3 (g4q11 a, b3e1 a, b3e2 a): "Approve selected". Acts at
+// once; each review goes through the same database function as the
+// single Approve, one at a time, with the version staff saw, so a
+// review the reader changed meanwhile is refused and stays in the list.
+// The others are still approved; the page shows both counts.
+export async function approveSelectedReaderReviewsAsStaff(formData: FormData): Promise<void> {
+  await requireStaff("reports.resolve");
+
+  const picks = parseReviewPicks(formData.getAll(BULK_PICK_FIELD));
+  if (!picks) {
+    redirect(withQuery(READER_REVIEWS_PATH, "error", STAFF_GENERIC_ERROR_MESSAGE));
+  }
+
+  const supabase = await createClient();
+  const counts = emptyReviewBulkCounts();
+  const approvedBooks = new Set<string>();
+  for (const pick of picks) {
+    const { data, error } = await supabase.rpc("staff_approve_reader_review", {
+      p_review_id: pick.reviewId,
+      p_seen_updated_at: pick.seen,
+    });
+    if (error) console.error("approveSelectedReaderReviewsAsStaff: staff_approve_reader_review failed:", error.code);
+    tallyReviewResult(counts, data, Boolean(error));
+    if (!error && data === "approved") approvedBooks.add(pick.bookId);
+  }
+
+  revalidatePath(READER_REVIEWS_PATH);
+  revalidatePath("/admin");
+  for (const bookId of approvedBooks) revalidatePath(`/libra/${bookId}`);
+  redirect(`${READER_REVIEWS_PATH}?bulk=${encodeReviewBulk(counts)}`);
 }
 
 export async function rejectReaderReviewAsStaff(formData: FormData): Promise<void> {

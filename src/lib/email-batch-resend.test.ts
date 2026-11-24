@@ -39,26 +39,27 @@ const json = (status: number, body: unknown) => async () =>
 describe("sendEmailBatch with the real Resend SDK", () => {
   it("a sent batch: nothing to retry", async () => {
     answer = json(200, { data: [{ id: "e0" }, { id: "e1" }] });
-    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [] });
+    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [], unknown: [] });
   });
 
   it("G1: a rejected fetch (connection dropped, maybe after Resend accepted it) is unknown, never 'not sent'", async () => {
     answer = async () => {
       throw new TypeError("socket hang up");
     };
-    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [] });
+    // G4: reported as unknown, so staff see an "unclear" failure.
+    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [], unknown: [0, 1] });
   });
 
   it.each([502, 500, 503, 504])("G1: a %s (HTML or JSON body) is unknown, never 'not sent'", async (status) => {
     answer = async () => new Response("<html>Bad gateway</html>", { status });
-    expect((await sendEmailBatch(messages(2), { pauseMs: 0 })).notSent).toEqual([]);
+    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [], unknown: [0, 1] });
     answer = json(status, { statusCode: status, name: "internal_server_error", message: "x" });
-    expect((await sendEmailBatch(messages(2), { pauseMs: 0 })).notSent).toEqual([]);
+    expect(await sendEmailBatch(messages(2), { pauseMs: 0 })).toEqual({ notSent: [], invalid: [], unknown: [0, 1] });
   });
 
   it.each([429, 422, 401, 403, 400])("a %s refusal is reported: every email of that batch surely not sent", async (status) => {
     answer = json(status, { statusCode: status, name: "rate_limit_exceeded", message: "for r0@example.test" });
-    expect(await sendEmailBatch(messages(3), { pauseMs: 0 })).toEqual({ notSent: [0, 1, 2], invalid: [] });
+    expect(await sendEmailBatch(messages(3), { pauseMs: 0 })).toEqual({ notSent: [0, 1, 2], invalid: [], unknown: [] });
     // Our own log never repeats Resend's message (which can name an
     // address). The SDK's own "[Resend API Error]" line is printed only
     // outside NODE_ENV=production and is not ours.
@@ -69,7 +70,7 @@ describe("sendEmailBatch with the real Resend SDK", () => {
 
   it("G2: permissive validation sends the header and reports the refused addresses as invalid (permanent)", async () => {
     answer = json(200, { data: [{ id: "e0" }, { id: "e2" }], errors: [{ index: 1, message: "Invalid `to` field" }] });
-    expect(await sendEmailBatch(messages(3), { pauseMs: 0, permissive: true })).toEqual({ notSent: [], invalid: [1] });
+    expect(await sendEmailBatch(messages(3), { pauseMs: 0, permissive: true })).toEqual({ notSent: [], invalid: [1], unknown: [] });
     expect(requests[0].headers.get("x-batch-validation")).toBe("permissive");
   });
 
@@ -90,7 +91,7 @@ describe("sendEmailBatch with the real Resend SDK", () => {
           : new Response(JSON.stringify({ statusCode: 429, name: "daily_quota_exceeded", message: "q" }), { status: 429 });
     };
     const result = await sendEmailBatch(messages(201), { pauseMs: 0, permissive: true });
-    expect(result).toEqual({ notSent: [200], invalid: [5, 100] });
+    expect(result).toEqual({ notSent: [200], invalid: [5, 100], unknown: [] });
   });
 
   it("isDefiniteRefusal: only 400/401/403/422/429", () => {

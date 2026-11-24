@@ -10,11 +10,11 @@ const rows = [
 ];
 vi.mock("@/lib/staff", () => ({ requireStaff: async () => ({ userId: "u", role }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc: async () => ({ data: rows, error: null }) }) }));
-vi.mock("./actions", () => ({ markFeedbackDone: vi.fn() }));
+vi.mock("./actions", () => ({ markFeedbackDone: vi.fn(), markSelectedFeedbackDone: vi.fn() }));
 const { default: AdminFeedbackPage } = await import("./page");
 
-async function render() {
-  const element = await AdminFeedbackPage({ searchParams: Promise.resolve({}) });
+async function render(search: { status?: string; bulk?: string } = {}) {
+  const element = await AdminFeedbackPage({ searchParams: Promise.resolve(search) });
   return renderToStaticMarkup(element);
 }
 
@@ -42,5 +42,26 @@ describe("admin Feedback page", () => {
     expect(html).toContain("Mark done");
     expect(html).not.toContain("From:");
     expect(html).not.toContain("mailto:");
+  });
+
+  it("G4 batch 3: a tick box per open message and the Mark selected done bar, only with reports.resolve", async () => {
+    role = "owner";
+    const html = await render();
+    expect(html).toContain("Mark selected done (0)");
+    expect(html).toContain('form="bulk-feedback-done"');
+    expect(html).toContain('value="f1"');
+    expect(html).toContain('name="status" value="open"');
+    role = "support";
+    const support = await render();
+    expect(support).not.toContain("Mark selected done");
+    expect(support).not.toContain('name="pick"');
+  });
+
+  it("G4 batch 3 (b3e1 a): after Mark selected done, the green and red lines from digits only", async () => {
+    role = "owner";
+    const html = await render({ bulk: "3.0.1" });
+    expect(html).toContain("3 messages marked done.");
+    expect(html).toContain("1 not marked done: something went wrong. It stays in Open; try again.");
+    expect(await render({ bulk: "x" })).not.toContain("marked done.");
   });
 });

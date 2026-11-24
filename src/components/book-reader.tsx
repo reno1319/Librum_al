@@ -137,6 +137,16 @@ const CHROME: Record<ReaderTheme, { bg: string; bar: string; text: string; muted
 
 // DD (13 Nov): classes of the controls that only show inside a menu or on
 // the end page, kept here so a test can guard their 44 px+ size.
+// DD follow-up: the ❮ ❯ page buttons use aria-disabled, not disabled,
+// so keyboard focus stays on them at the first or last page (a disabled
+// button drops focus to the page, and Esc then skips the reader). At the
+// end they stay hidden as before, but show faintly while keyboard
+// focused, so the focus ring is never drawn around nothing. The drop
+// shadow is a class, not an inline style: an inline box-shadow hid the
+// shared focus ring (.focus-ring:focus-visible) on these two buttons.
+export const CHEVRON_STATE =
+  "shadow-[0_1px_6px_rgba(0,0,0,0.15)] opacity-70 hover:opacity-100 aria-disabled:cursor-default aria-disabled:opacity-0 aria-disabled:focus-visible:opacity-60";
+
 export const READER_TAP_CLASSES = {
   tocRow: "focus-ring min-h-12 w-full px-4 py-3 text-left text-sm hover:bg-black/5",
   fontButton: "focus-ring flex h-11 flex-1 items-center justify-center rounded-md border font-serif disabled:opacity-40",
@@ -1251,20 +1261,24 @@ export function BookReader({
         <button
           type="button"
           aria-label="Faqja e mëparshme"
-          onClick={() => go(-1)}
-          disabled={viewIndex === 0}
-          className="focus-ring absolute left-1 top-1/2 z-10 hidden size-11 -translate-y-1/2 items-center justify-center rounded-full opacity-70 hover:opacity-100 disabled:opacity-0 sm:flex"
-          style={{ background: chrome.bar, color: chrome.text, boxShadow: "0 1px 6px rgba(0,0,0,0.15)" }}
+          onClick={() => {
+            if (viewIndex > 0) go(-1);
+          }}
+          aria-disabled={viewIndex === 0}
+          className={`focus-ring absolute left-1 top-1/2 z-10 hidden size-11 -translate-y-1/2 items-center justify-center rounded-full sm:flex ${CHEVRON_STATE}`}
+          style={{ background: chrome.bar, color: chrome.text }}
         >
           <Chevron dir="left" />
         </button>
         <button
           type="button"
           aria-label="Faqja tjetër"
-          onClick={() => go(1)}
-          disabled={viewIndex >= views.length - 1}
-          className="focus-ring absolute right-1 top-1/2 z-10 hidden size-11 -translate-y-1/2 items-center justify-center rounded-full opacity-70 hover:opacity-100 disabled:opacity-0 sm:flex"
-          style={{ background: chrome.bar, color: chrome.text, boxShadow: "0 1px 6px rgba(0,0,0,0.15)" }}
+          onClick={() => {
+            if (viewIndex < views.length - 1) go(1);
+          }}
+          aria-disabled={viewIndex >= views.length - 1}
+          className={`focus-ring absolute right-1 top-1/2 z-10 hidden size-11 -translate-y-1/2 items-center justify-center rounded-full sm:flex ${CHEVRON_STATE}`}
+          style={{ background: chrome.bar, color: chrome.text }}
         >
           <Chevron dir="right" />
         </button>

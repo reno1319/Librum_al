@@ -15,6 +15,11 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky nuk duket si numër personal (NID). Ka 10 shenja: një shkronjë, 8 shifra dhe një shkronjë.",
   "Ky nuk duket si numër tatimor. Shkruani vetëm shkronjat dhe shifrat e tij.",
   "Të dhënat tatimore nuk u ruajtën. Provoni përsëri.",
+  // G4 (2026-11-24): the failed pre-order emails box on admin Today.
+  "That failed pre-order email was already handled.",
+  "Couldn’t update that failed pre-order email. Reload the page and try again.",
+  // G1 security pass (2026-11-24): both Payment & tax saves are authors only.
+  "Vetëm llogaritë e autorëve mund të ruajnë të dhënat e pagesës.",
   "Para se të dërgoni një libër me çmim, plotësoni të dhënat e pagesës te Paratë › Të dhënat e pagesës.",
   "Para se të publikoni një paketë me çmim, plotësoni të dhënat e pagesës te Paratë › Të dhënat e pagesës.",
   "The author hasn't completed their payment and tax details, so this paid book can't go live.",

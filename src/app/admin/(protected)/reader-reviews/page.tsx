@@ -12,8 +12,11 @@ import {
 } from "@/lib/reader-reviews";
 import {
   approveReaderReviewAsStaff,
+  approveSelectedReaderReviewsAsStaff,
   rejectReaderReviewAsStaff,
 } from "./actions";
+import { BulkSelectBar } from "../../bulk-select-bar";
+import { BULK_PICK_FIELD, parseReviewBulk, reviewBulkLines } from "../../bulk-select-logic";
 import { accountAgeLabel, reviewCountLabel } from "./reader-review-logic";
 
 export const metadata: Metadata = {
@@ -51,15 +54,20 @@ type PendingReaderReview = {
 };
 
 const LOAD_ERROR = "Couldn't load the reviews. Please try again.";
+const BULK_FORM_ID = "bulk-approve-reviews";
 
 export default async function AdminReaderReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; bulk?: string }>;
 }) {
   const { userId } = await requireStaff("reports.resolve");
 
-  const { error: rawError, success: rawSuccess } = await searchParams;
+  const { error: rawError, success: rawSuccess, bulk: rawBulk } = await searchParams;
+  // G4 batch 3 (b3e1 a): after "Approve selected", how many worked and
+  // why the rest did not, built here from digits only.
+  const bulk = parseReviewBulk(rawBulk);
+  const bulkLines = bulk ? reviewBulkLines(bulk) : null;
   const errorMessage = pageErrorMessage(rawError);
   const success = pageSuccessMessage(rawSuccess);
 
@@ -70,6 +78,8 @@ export default async function AdminReaderReviewsPage({
   if (error)
     console.error("admin reader reviews: list failed", { code: error.code });
   const reviews = (data as PendingReaderReview[] | null) ?? [];
+  // G4 batch 3 (g4q11 a): the staff member's own review gets no tick box.
+  const canBulk = reviews.some((review) => review.reader_id !== userId);
   const now = new Date();
 
   return (
@@ -86,6 +96,8 @@ export default async function AdminReaderReviewsPage({
       </div>
 
       {success && <Alert variant="success">{success}</Alert>}
+      {bulkLines?.success && <Alert variant="success">{bulkLines.success}</Alert>}
+      {bulkLines?.error && <Alert variant="error">{bulkLines.error}</Alert>}
       {errorMessage && <Alert variant="error">{errorMessage}</Alert>}
       {error && <Alert variant="error">{LOAD_ERROR}</Alert>}
 
@@ -94,12 +106,33 @@ export default async function AdminReaderReviewsPage({
           No reviews waiting.
         </p>
       ) : (
+        <>
+        {canBulk && (
+          <BulkSelectBar
+            formId={BULK_FORM_ID}
+            action={approveSelectedReaderReviewsAsStaff}
+            actionLabel="Approve selected"
+          />
+        )}
         <ul className="flex flex-col gap-4">
           {reviews.map((review) => (
             <li
               key={review.review_id}
               className="rounded-card border border-border bg-surface p-5"
             >
+              {review.reader_id !== userId && (
+                <label className="mb-2 flex min-h-11 w-fit items-center gap-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    form={BULK_FORM_ID}
+                    name={BULK_PICK_FIELD}
+                    value={`${review.review_id}|${review.updated_at}|${review.book_id}`}
+                    className="size-5 accent-[#1E3A32]"
+                  />
+                  Select
+                  <span className="sr-only"> the review of {review.book_title ?? "Unknown book"}</span>
+                </label>
+              )}
               <p className="text-sm text-muted">
                 <Link
                   href={`/libra/${review.book_id}`}
@@ -247,6 +280,7 @@ export default async function AdminReaderReviewsPage({
             </li>
           ))}
         </ul>
+        </>
       )}
     </main>
   );
