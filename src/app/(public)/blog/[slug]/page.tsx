@@ -222,7 +222,7 @@ export default async function BlogArticlePage({
 
   const readingMinutes = calculateReadingTime(post.content_markdown);
   // Blog categories (2026-11-17): Editorial posts carry the yellow
-  // "Nga Librum" tag and a thin gold line (blog1/blog3); every other
+  // "Editorial" tag and a thin gold line (blog1/blog3); every other
   // post links its category name to the category page. The bottom
   // button follows the category (blog6). bs1: an Editorial post is the tick on top of a
   // real category, so it shows the tag AND its category link.

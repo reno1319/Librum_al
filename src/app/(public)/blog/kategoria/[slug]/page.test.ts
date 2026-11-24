@@ -140,7 +140,8 @@ describe("BlogCategoryPage", () => {
     expect(links).toContain("/blog/ed");
     expect(links).not.toContain("/blog/plain");
     const text = allText(page);
-    expect(text).toContain("Nga Librum");
+    expect(text).toContain("Editorial");
+    expect(text).not.toContain("Nga Librum");
     expect(text).toContain("Tregu i Librit & Botimet");
   });
 

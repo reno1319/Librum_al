@@ -38,7 +38,7 @@ export default async function EditBlogCategoryPage({
           title={`Edit: ${cat.label}`}
           description={
             isEditorial
-              ? "Editorial keeps its gold colour, its “Nga Librum” tag and its place first. You can change its name and description."
+              ? "Editorial keeps its gold colour, its “Editorial” tag and its place first. You can change its name and description."
               : `${cat.articleCount} article${cat.articleCount === 1 ? "" : "s"} in this category.`
           }
         />
