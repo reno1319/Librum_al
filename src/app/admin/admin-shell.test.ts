@@ -25,6 +25,9 @@ const mockCreateClient = vi.fn(() => Promise.resolve({ from: mockFrom }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
 vi.mock("@/app/auth/actions", () => ({ logout: vi.fn() }));
+// G4 batch 3: the count reads are tested in admin-nav-counts.test.ts.
+const mockLoadCounts = vi.fn((_role: string) => Promise.resolve({ "/admin/reports": 2 }));
+vi.mock("./admin-nav-counts", () => ({ loadAdminNavCounts: (role: string) => mockLoadCounts(role) }));
 
 const { AdminShell } = await import("./admin-shell");
 const { AdminMobileNav } = await import("./admin-mobile-nav");
@@ -206,5 +209,16 @@ describe("AdminShell", () => {
     expect(visit?.props.href).toBe("/");
     expect(visit?.props.target).toBeUndefined();
     expect(String(visit?.props.className).split(" ")).toEqual(expect.arrayContaining(["hidden", "md:inline-flex"]));
+  });
+
+  it("G4 batch 3: reads the menu counts for the role and hands them to both menus", async () => {
+    mockLoadCounts.mockClear();
+    const shell = await AdminShell({ userId: "user-1", role: "moderator", children: "content" });
+    expect(mockLoadCounts).toHaveBeenCalledWith("moderator");
+    for (const nav of [...findAllByType(shell, AdminSidebarNav), ...findAllByType(shell, AdminMobileNav)]) {
+      expect(nav.props.counts).toEqual({ "/admin/reports": 2 });
+    }
+    expect(findAllByType(shell, AdminSidebarNav)).toHaveLength(1);
+    expect(findAllByType(shell, AdminMobileNav)).toHaveLength(1);
   });
 });

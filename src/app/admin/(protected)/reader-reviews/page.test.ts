@@ -19,7 +19,11 @@ vi.mock("@/lib/supabase/server", () => ({
       },
     }),
 }));
-vi.mock("./actions", () => ({ approveReaderReviewAsStaff: vi.fn(), rejectReaderReviewAsStaff: vi.fn() }));
+vi.mock("./actions", () => ({
+  approveReaderReviewAsStaff: vi.fn(),
+  approveSelectedReaderReviewsAsStaff: vi.fn(),
+  rejectReaderReviewAsStaff: vi.fn(),
+}));
 
 const { default: Page } = await import("./page");
 
@@ -97,5 +101,30 @@ describe("/admin/reader-reviews", () => {
   it("shows only allowlisted messages", async () => {
     expect(await render({ success: "Review approved." })).toContain("Review approved.");
     expect(await render({ success: "pwned" })).not.toContain("pwned");
+  });
+
+  it("G4 batch 3: a tick box per review and the Approve selected bar", async () => {
+    rpcResult = { data: [row], error: null };
+    const html = await render();
+    expect(html).toContain("Select all");
+    expect(html).toContain("Approve selected (0)");
+    expect(html).toContain(`form="bulk-approve-reviews"`);
+    expect(html).toContain(`value="${row.review_id}|${row.updated_at}|${row.book_id}"`);
+  });
+
+  it("G4 batch 3: the staff member's own review gets no tick box, and no bar when it is the only one", async () => {
+    mockRequireStaff.mockResolvedValueOnce({ userId: row.reader_id, role: "moderator" });
+    rpcResult = { data: [row], error: null };
+    const html = await render();
+    expect(html).not.toContain("Select all");
+    expect(html).not.toContain(`name="pick"`);
+  });
+
+  it("G4 batch 3 (b3e1 a): after Approve selected, the green and red lines from digits only", async () => {
+    const html = await render({ bulk: "4.1.0.0.0" });
+    expect(html).toContain("4 reviews approved.");
+    expect(html).toContain("1 not approved: the reader changed it");
+    expect(html).toContain("it stays in the list.");
+    expect(await render({ bulk: "4 approved<script>" })).not.toContain("reviews approved.");
   });
 });

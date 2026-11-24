@@ -11,9 +11,9 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 const { AdminSidebarNav } = await import("./admin-sidebar-nav");
 
-function render(role: StaffRole, at: string): string {
+function render(role: StaffRole, at: string, counts?: Record<string, number>): string {
   pathname = at;
-  return renderToStaticMarkup(createElement(AdminSidebarNav, { groups: resolveVisibleAdminNavGroups(role) }));
+  return renderToStaticMarkup(createElement(AdminSidebarNav, { groups: resolveVisibleAdminNavGroups(role), counts }));
 }
 
 function anchor(html: string, href: string): string {
@@ -53,5 +53,16 @@ describe("AdminSidebarNav", () => {
     for (const m of html.matchAll(/<a [^>]*class="([^"]+)"/g)) {
       expect(m[1].split(" ")).toContain("min-h-11");
     }
+  });
+
+  it("G4 batch 3: a gold count bubble with a hidden 'waiting', inverted on the current row, none without a count", () => {
+    const html = render("owner", "/admin/feedback", { "/admin/reports": 2, "/admin/feedback": 4 });
+    const reports = html.match(/href="\/admin\/reports".*?<\/a>/)?.[0] ?? "";
+    expect(reports).toContain("bg-[#806510] text-white");
+    expect(reports).toContain('>2<span class="sr-only"> waiting</span>');
+    const feedback = html.match(/href="\/admin\/feedback".*?<\/a>/)?.[0] ?? "";
+    expect(feedback).toContain("bg-primary-foreground text-primary");
+    const refunds = html.match(/href="\/admin\/refunds".*?<\/a>/)?.[0] ?? "";
+    expect(refunds).not.toContain("waiting");
   });
 });

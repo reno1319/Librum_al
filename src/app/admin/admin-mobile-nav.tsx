@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { findCurrentAdminNavItem, isAdminNavItemCurrent, type AdminNavGroup } from "./admin-nav";
+import { AdminNavBubble } from "./admin-nav-bubble";
+import type { AdminNavCounts } from "./admin-nav-counts";
 
 // ADMIN-1 (A2 look): the phone menu (below md) is one "Section ▾"
 // control, replacing the earlier ☰ drawer. Same markup pattern as the
@@ -15,9 +17,11 @@ import { findCurrentAdminNavItem, isAdminNavItemCurrent, type AdminNavGroup } fr
 // reachable on a phone.
 export function AdminMobileNav({
   groups,
+  counts = {},
   logoutAction,
 }: {
   groups: readonly AdminNavGroup[];
+  counts?: AdminNavCounts;
   logoutAction: (formData: FormData) => void | Promise<void>;
 }) {
   const pathname = usePathname() ?? "";
@@ -68,7 +72,8 @@ export function AdminMobileNav({
                               : "border-transparent font-medium text-foreground hover:bg-surface-hover"
                           }`}
                         >
-                          {item.label}
+                          <span className="flex-1">{item.label}</span>
+                          <AdminNavBubble count={counts[item.href]} />
                         </Link>
                       </li>
                     );

@@ -16,10 +16,10 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
 
 const { AdminMobileNav } = await import("./admin-mobile-nav");
 
-function render(role: StaffRole, at: string): string {
+function render(role: StaffRole, at: string, counts?: Record<string, number>): string {
   pathname = at;
   return renderToStaticMarkup(
-    createElement(AdminMobileNav, { groups: resolveVisibleAdminNavGroups(role), logoutAction: vi.fn() }),
+    createElement(AdminMobileNav, { groups: resolveVisibleAdminNavGroups(role), counts, logoutAction: vi.fn() }),
   );
 }
 
@@ -111,5 +111,13 @@ describe("AdminMobileNav (phone Section control)", () => {
       expect(visitAt, role).toBeGreaterThan(-1);
       expect(html.indexOf(">Log out<"), role).toBeGreaterThan(visitAt);
     }
+  });
+
+  it("G4 batch 3: the same count bubbles in the phone menu, none without a count", () => {
+    const html = render("owner", "/admin", { "/admin/books": 2 });
+    const books = html.match(/href="\/admin\/books".*?<\/a>/)?.[0] ?? "";
+    expect(books).toContain("bg-[#806510] text-white");
+    expect(books).toContain('>2<span class="sr-only"> waiting</span>');
+    expect(html.match(/ waiting<\/span>/g)).toHaveLength(1);
   });
 });
