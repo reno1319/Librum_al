@@ -71,7 +71,7 @@ function isSampleStorageRow(data: unknown): data is SampleStorageRow {
 // route (src/app/api/books/[id]/download/route.ts): that route is the
 // SOLE full-manuscript delivery mechanism and stays untouched; this one
 // can only ever return a small, sanitized, non-reconstructible excerpt
-// (see extractEpubSample's own docs) -- never the manuscript's storage
+// (see buildReaderContent in epub-reader.ts) -- never the manuscript's storage
 // path, a signed URL to it, or its raw bytes.
 //
 // No recovery-session guard here (contrast the download route, which

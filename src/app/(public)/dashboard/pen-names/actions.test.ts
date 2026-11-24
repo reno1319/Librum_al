@@ -25,6 +25,8 @@ let queries: Query[] = [];
 let respond: (q: Query) => Result;
 let storageCalls: { client: string; bucket: string; op: string; path: unknown; bytes?: Buffer; opts?: unknown }[] = [];
 let stagedBytes: Buffer | null;
+// G2 c2: the stored size Storage reports for the staged file (null = no info).
+let stagedInfoSize: number | null;
 
 function method(q: Query, name: string): Op | undefined {
   return q.ops.find((op) => op.method === name);
@@ -59,6 +61,10 @@ function recordingClient(client: Query["client"]) {
           storageCalls.push({ client, bucket, op: "upload", path, bytes, opts }), { error: null }
         ),
         remove: async (paths: unknown) => (storageCalls.push({ client, bucket, op: "remove", path: paths }), { error: null }),
+        info: async (path: string) => {
+          storageCalls.push({ client, bucket, op: "info", path });
+          return stagedInfoSize === null ? { data: null, error: { message: "x" } } : { data: { size: stagedInfoSize }, error: null };
+        },
         download: async (path: string) => {
           storageCalls.push({ client, bucket, op: "download", path });
           return stagedBytes ? { data: new Blob([new Uint8Array(stagedBytes)]), error: null } : { data: null, error: { message: "x" } };
@@ -134,6 +140,7 @@ beforeEach(() => {
   queries = [];
   storageCalls = [];
   stagedBytes = null;
+  stagedInfoSize = null;
   respond = defaultRespond;
   ownRow = { id: PEN_ID, is_default: false, avatar_path: null };
   profileRole = "author";
@@ -219,6 +226,17 @@ describe("updatePenName", () => {
     );
     expect(target).toContain("nuk është më e vlefshme");
     expect(storageCalls).toEqual([]);
+  });
+
+  it("G2 c2: a staged photo over 5 MB is refused from its stored size, before any download", async () => {
+    stagedBytes = PNG;
+    stagedInfoSize = 5 * 1024 * 1024 + 1;
+    const target = await redirectOf(
+      updatePenName(PEN_ID, form({ name: "Jo", avatarStoragePath: `${USER_ID}/tmp/avatar/x.png` })),
+    );
+    expect(target).toContain("kalon kufirin prej 5 MB");
+    expect(storageCalls.some((c) => c.op === "info")).toBe(true);
+    expect(storageCalls.some((c) => c.op === "download")).toBe(false);
   });
 
   it("bytes that are not a JPEG or PNG are refused", async () => {

@@ -102,6 +102,14 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 // DC 5: the fields that live in the "Të dhëna shtesë" box.
 const EXTRAS_FIELDS: readonly DetailsField[] = ["seriesPosition", "editionNumber", "contributors"];
 
+// DC L1: the first element (in page order) whose data-field has an error.
+export function firstErrorInPageOrder<T extends { dataset: { field?: string } }>(
+  elements: readonly T[],
+  errors: Partial<Record<string, unknown>>,
+): T | undefined {
+  return elements.find((el) => el.dataset.field !== undefined && errors[el.dataset.field] !== undefined);
+}
+
 export function isExtrasField(field: DetailsField): boolean {
   return EXTRAS_FIELDS.includes(field);
 }
@@ -231,8 +239,9 @@ export function BookDetailsForm({
         extrasRef.current.open = true;
         setExtrasOpen(true);
       }
-      const first = Object.keys(result.errors)[0];
-      const target = form.querySelector<HTMLElement>(`[data-field="${first}"]`);
+      // DC L1: focus the first field with an error in PAGE order (the
+      // errors object lists fields in parse order, not page order).
+      const target = firstErrorInPageOrder(Array.from(form.querySelectorAll<HTMLElement>("[data-field]")), result.errors);
       target?.focus();
       return;
     }

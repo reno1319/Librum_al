@@ -43,3 +43,13 @@ describe("SOCIAL (soc3): Instagram icon in the footer", () => {
     expect(source).toContain("<IconInstagram");
   });
 });
+
+describe("DA follow-up: the phone buy bar finds the site footer by its hook", () => {
+  it("the site footer carries data-site-footer and the buy bar looks for that, not the first <footer>", () => {
+    const footer = readFileSync(path.join(__dirname, "site-footer.tsx"), "utf8");
+    const bar = readFileSync(path.join(__dirname, "sticky-buy-bar.tsx"), "utf8");
+    expect(footer).toMatch(/<footer data-site-footer=""/);
+    expect(bar).toContain('document.querySelector("[data-site-footer]")');
+    expect(bar).not.toContain('querySelector("footer")');
+  });
+});

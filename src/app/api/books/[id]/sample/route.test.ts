@@ -8,12 +8,12 @@ import {
 // LIBRUM 2.0 PRODUCT-1: same mocking discipline as the download route's
 // own test file (src/app/api/books/[id]/download/route.test.ts) --
 // mocks only the Supabase network boundary, uses a real Buffer/Blob for
-// the "manuscript" and the real extractEpubSample() (imported for real,
-// not mocked) so these tests also prove the route and the extractor
-// actually compose correctly end to end.
+// the "manuscript" and the real reader code (imported for real, not
+// mocked) so these tests also prove the route and the reader actually
+// compose correctly end to end.
 //
 // MANUSCRIPT-DELIVERY-STORAGE-AUTH-1: fixtures are real lowercase UUIDs
-// and the canonical `<author id>/<book id>.epub` key. extractEpubSample
+// and the canonical `<author id>/<book id>.epub` key. buildReaderContent
 // is still the real implementation, wrapped in a spy only so tests can
 // prove an invalid path never reaches it. The fake clients record the
 // selected columns, the id filter, the bucket and the key.
