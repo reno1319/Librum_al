@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 291 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 294 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -42,7 +42,8 @@
 --   20261121170000), plus BR1's three blog_post_reactions rows (migration
 --   20261123190000; authenticated SELECT only), plus build 3's three
 --   author_tax_details rows (migration 20261123200000; authenticated
---   SELECT only). A relation with no
+--   SELECT only), plus G4's three preorder_failure_alert_state rows, no
+--   privilege for any role (migration 20261124180000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -183,6 +184,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r error_email_throttle | anon | -'),
 ('rel','r error_email_throttle | authenticated | -'),
 ('rel','r error_email_throttle | service_role | -'),
+('rel','r preorder_failure_alert_state | anon | -'),
+('rel','r preorder_failure_alert_state | authenticated | -'),
+('rel','r preorder_failure_alert_state | service_role | -'),
 ('rel','r blog_post_reactions | anon | -'),
 ('rel','r blog_post_reactions | authenticated | SELECT'),
 ('rel','r blog_post_reactions | service_role | -'),
@@ -394,8 +398,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 291 then
-    raise exception 'FAIL: part1: the snapshot must hold 291 rows, holds %', v_expected;
+  if v_expected <> 294 then
+    raise exception 'FAIL: part1: the snapshot must hold 294 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

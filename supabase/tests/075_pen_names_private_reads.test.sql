@@ -592,7 +592,10 @@ insert into pg_temp.allow_fn values
   ('admin_list_people', 'people.view'),
   -- BD13 (20261102120000): the review queue returns reader_id (the link
   -- to the person's page); owner, admin and moderator.
-  ('staff_list_pending_reader_reviews', 'reports.resolve');
+  ('staff_list_pending_reader_reviews', 'reports.resolve'),
+  -- G4 (20261124180000): failed pre-order reader emails return user_id
+  -- (the link to the person's page); owner and admin only.
+  ('staff_list_preorder_email_failures', 'people.view');
 
 do $$
 declare

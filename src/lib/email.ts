@@ -81,7 +81,10 @@ export function emailSendingConfigured(): boolean {
 // with statusCode null or 5xx, it never throws), or a throw -- is an
 // UNKNOWN outcome: Resend may have sent it, so it is in neither list and
 // the caller keeps it marked (at most once, never twice).
-export type EmailBatchResult = { notSent: number[]; invalid: number[] };
+// G4 (Renato 11-24): unknown lists the indexes of those unknown
+// outcomes, so the pre-order emails can show staff an "unclear" failure.
+// They are still never retried by the sweep.
+export type EmailBatchResult = { notSent: number[]; invalid: number[]; unknown: number[] };
 
 const DEFINITE_REFUSAL_STATUSES = new Set([400, 401, 403, 422, 429]);
 
@@ -95,10 +98,11 @@ export async function sendEmailBatch(
 ): Promise<EmailBatchResult> {
   const notSent: number[] = [];
   const invalid: number[] = [];
-  if (messages.length === 0) return { notSent, invalid };
+  const unknown: number[] = [];
+  if (messages.length === 0) return { notSent, invalid, unknown };
   if (!process.env.RESEND_API_KEY) {
     console.warn(`RESEND_API_KEY not set — skipping ${messages.length} email(s) "${messages[0].subject}"`);
-    return { notSent: messages.map((_m, i) => i), invalid };
+    return { notSent: messages.map((_m, i) => i), invalid, unknown };
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -124,7 +128,7 @@ export async function sendEmailBatch(
             statusCode: error.statusCode ?? null,
           },
         );
-        if (definite) for (let i = start; i < start + batch.length; i++) notSent.push(i);
+        for (let i = start; i < start + batch.length; i++) (definite ? notSent : unknown).push(i);
       } else if (permissive) {
         const errors = (data as { errors?: { index?: unknown }[] } | null)?.errors ?? [];
         let refused = 0;
@@ -140,9 +144,10 @@ export async function sendEmailBatch(
       }
     } catch (error) {
       console.error("Email batch outcome unknown: the send threw", { error });
+      for (let i = start; i < start + batch.length; i++) unknown.push(i);
     }
   }
-  return { notSent, invalid };
+  return { notSent, invalid, unknown };
 }
 
 // ALL-TXN-CURRENCY-4: every purchase email states its amount in the

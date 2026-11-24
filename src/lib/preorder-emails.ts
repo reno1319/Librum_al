@@ -15,6 +15,8 @@ import {
   sendPreorderReleasedAuthorEmail,
 } from "@/lib/email";
 import type { PreorderDaySummary } from "@/lib/preorder-job";
+import { alertPreorderEmailFailures } from "@/lib/preorder-failure-alert";
+import type { PreorderEmailFailure } from "@/lib/preorder-email-failures";
 
 // BD16 P5 (PLAN-BD16-r1 §1 "Më njofto", §3.5, Q4 a, D2): the pre-order
 // emails. Best effort like every email: nothing here throws, and no
@@ -50,6 +52,14 @@ import type { PreorderDaySummary } from "@/lib/preorder-job";
 //
 // Every caller runs the same sweep over every waiting row, so whatever
 // one run leaves (a crash, a refusal, a timed-out page) the next one sends.
+//
+// G4 (Renato 11-24, g4q3 a, g4q4 a): each failure is written on its row
+// (send_failure, send_failed_at; migration 20261124180000) so Owner and
+// Admin see it on the admin Today page: 'batch_refused' (the definite
+// refusal above, un-claimed and retried by the next run), 'address_refused'
+// (invalid) and 'unclear' (an unknown outcome). A claim clears both, so a
+// retried row that then goes out leaves the list by itself. After the
+// sweep, at most one alert email a day (src/lib/preorder-failure-alert.ts).
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -149,7 +159,7 @@ async function sendBookChunk(
   const claimAt = new Date().toISOString();
   let claim = admin
     .from("preorder_notify_requests")
-    .update({ notified_at: claimAt })
+    .update({ notified_at: claimAt, send_failure: null, send_failed_at: null })
     .eq("book_id", bookId)
     .in("user_id", claimable)
     .is("notified_at", null);
@@ -172,27 +182,54 @@ async function sendBookChunk(
   // r3 (audit G1, G2): only a definite refusal is put back; a bad
   // address (invalid) stays marked and is never retried; an unknown
   // outcome stays marked too (it may have gone out).
-  const { notSent, invalid } = await sendEmailBatch(
+  const { notSent, invalid, unknown } = await sendEmailBatch(
     recipients.map(({ to }) => ({ to, subject, html })),
     { permissive: true },
   );
-  if (notSent.length > 0) {
-    // F3: surely not sent, so back to unsent -- only rows this claim
-    // marked (a later run's claim has another timestamp).
-    const { error: undoError } = await admin
+  // F3: surely not sent, so back to unsent -- only rows this claim
+  // marked (a later run's claim has another timestamp). G4: each failed
+  // row also gets its failure mark.
+  await markFailed(admin, kind, bookId, claimAt, notSent.map((i) => recipients[i].userId), "batch_refused");
+  await markFailed(admin, kind, bookId, claimAt, invalid.map((i) => recipients[i].userId), "address_refused");
+  await markFailed(admin, kind, bookId, claimAt, unknown.map((i) => recipients[i].userId), "unclear");
+  return {
+    sent: recipients.length - notSent.length - invalid.length - unknown.length,
+    settled: claimed.length - notSent.length,
+  };
+}
+
+/**
+ * G4: writes the failure on rows this claim marked. A batch refusal
+ * also un-claims them (F3) so the next run retries; the others stay
+ * marked (never retried by the sweep). A failed write is logged only.
+ */
+async function markFailed(
+  admin: AdminClient,
+  kind: ReaderKind,
+  bookId: string,
+  claimAt: string,
+  userIds: string[],
+  failure: PreorderEmailFailure,
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const failedAt = new Date().toISOString();
+  const change =
+    failure === "batch_refused"
+      ? { notified_at: null, send_failure: failure, send_failed_at: failedAt }
+      : { send_failure: failure, send_failed_at: failedAt };
+  try {
+    const { error } = await admin
       .from("preorder_notify_requests")
-      .update({ notified_at: null })
+      .update(change)
       .eq("book_id", bookId)
-      .in(
-        "user_id",
-        notSent.map((i) => recipients[i].userId),
-      )
+      .in("user_id", userIds)
       .eq("notified_at", claimAt)
       .select("book_id, user_id")
       .returns<ClaimedRow[]>();
-    if (undoError) console.error(`preorder emails: the ${kind} un-claim failed`, { bookId, code: undoError.code ?? null });
+    if (error) console.error(`preorder emails: the ${kind} failure mark failed`, { bookId, failure, code: error.code ?? null });
+  } catch (markError) {
+    console.error(`preorder emails: the ${kind} failure mark failed`, { bookId, failure, error: markError });
   }
-  return { sent: recipients.length - notSent.length - invalid.length, settled: claimed.length - notSent.length };
 }
 
 async function sweepKind(admin: AdminClient, kind: ReaderKind): Promise<number> {
@@ -242,6 +279,8 @@ export async function sendWaitingReaderEmails(admin: AdminClient): Promise<Reade
   } catch (sendError) {
     console.error("preorder emails: the released emails failed", { error: sendError });
   }
+  // G4 (g4q7 a): at most one alert email a day. Never throws.
+  await alertPreorderEmailFailures(admin);
   return counts;
 }
 

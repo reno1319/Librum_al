@@ -25,6 +25,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // The 30 days also keep the follower email's check safe: on release day
 // sendNewBookEmails skips readers with any row of this pre-order.
 // The Privacy page says the same («Kërkesat «Më njofto»»).
+// G4 (Renato 11-24, g4e1 a): a request whose email failed (send_failure
+// set) stays until staff press "Send again" or "Mark handled" on the
+// admin Today page, so no step deletes it.
 // Never throws; only counts are returned and logged, never an id.
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -70,6 +73,7 @@ export async function deleteOldNotifyRequests(
       .delete()
       .not("notified_at", "is", null)
       .lt("notified_at", cutoff)
+      .is("send_failure", null)
       .select("book_id")
       .returns<Row[]>();
     if (error || !data) console.error("notify cleanup: the sent step failed", { code: error?.code ?? null });
@@ -86,6 +90,7 @@ export async function deleteOldNotifyRequests(
       .is("notified_at", null)
       .not("book_cancelled_at", "is", null)
       .lt("book_cancelled_at", cutoff)
+      .is("send_failure", null)
       .select("book_id")
       .returns<Row[]>();
     if (error || !data) console.error("notify cleanup: the cancelled step failed", { code: error?.code ?? null });
@@ -122,6 +127,7 @@ export async function deleteOldNotifyRequests(
           .is("notified_at", null)
           .is("book_cancelled_at", null)
           .lt("created_at", cutoff)
+          .is("send_failure", null)
           .select("book_id")
           .returns<Row[]>();
         if (error || !data) console.error("notify cleanup: the released step failed", { code: error?.code ?? null });
