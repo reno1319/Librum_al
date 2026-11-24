@@ -182,6 +182,14 @@ insert into public.books (id, author_id, title, description, status, price_all, 
    'e0770000-0000-4000-8000-00000000000b/e0770001-0000-4000-8000-0000000000b1.epub', 'e077c0de-0000-4000-8000-0000000000b1/cover.jpg');
 
 update public.books set librum_choice_at = now() where id = 'e0770001-0000-4000-8000-0000000000a2';
+
+-- G1 (migration 20261124150000): request_book_review() refuses a PAID
+-- draft whose author has no Payment & tax details (LB527), so the
+-- fixture author has them (made-up values; 113 tests the refusal).
+insert into public.author_tax_details (author_id, country_code, legal_name, tax_id) values
+  ('e0770000-0000-4000-8000-00000000000a', 'AL', 'P077 Author', 'J12345678A');
+insert into public.author_payout_destinations (author_id, currency, beneficiary_name, iban) values
+  ('e0770000-0000-4000-8000-00000000000a', 'ALL', 'P077 Author', 'AL47212110090000000235698741');
 -- BD15 P5a (migration 20261104120000): request_book_review() refuses a
 -- book with no "AI used" answer (LB489), so each fixture book has one.
 insert into public.book_ai_disclosures (book_id, ai_used)

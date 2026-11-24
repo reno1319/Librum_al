@@ -116,3 +116,45 @@ describe("finishGoogleSignIn", () => {
     expect(calls).toEqual([]);
   });
 });
+
+// G1 (Renato 11-24): the author hint is signed by the server, so a
+// hand-set cookie no longer skips the 18+ tick.
+describe("signed author hint", () => {
+  const NOW = Date.UTC(2026, 10, 24, 12, 0, 0);
+  beforeEach(() => {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+  });
+
+  it("a value the server made is valid until it expires (10 minutes)", async () => {
+    const { createGoogleAuthorIntent, isValidGoogleAuthorIntent } = await import("./google-sign-in");
+    const value = createGoogleAuthorIntent(NOW)!;
+    expect(value).toMatch(/^[0-9]+\.[A-Za-z0-9_-]{43}$/);
+    expect(isValidGoogleAuthorIntent(value, NOW)).toBe(true);
+    expect(isValidGoogleAuthorIntent(value, NOW + 599_000)).toBe(true);
+    expect(isValidGoogleAuthorIntent(value, NOW + 600_000)).toBe(false);
+  });
+
+  it("refuses the old plain value, garbage, a changed expiry and another key's signature", async () => {
+    const { createGoogleAuthorIntent, isValidGoogleAuthorIntent } = await import("./google-sign-in");
+    const value = createGoogleAuthorIntent(NOW)!;
+    const [expiry, sig] = value.split(".");
+    for (const bad of ["1", "", "yes", `${expiry}.`, `.${sig}`, `${Number(expiry) + 1000}.${sig}`, `${expiry}.${sig}x`, null, undefined]) {
+      expect(isValidGoogleAuthorIntent(bad, NOW)).toBe(false);
+    }
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "another-key";
+    expect(isValidGoogleAuthorIntent(value, NOW)).toBe(false);
+  });
+
+  it("fails closed without the server key: no value is made and none is accepted", async () => {
+    const { createGoogleAuthorIntent, isValidGoogleAuthorIntent } = await import("./google-sign-in");
+    const value = createGoogleAuthorIntent(NOW)!;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    expect(createGoogleAuthorIntent(NOW)).toBeNull();
+    expect(isValidGoogleAuthorIntent(value, NOW)).toBe(false);
+  });
+
+  it("never puts the key in the value", async () => {
+    const { createGoogleAuthorIntent } = await import("./google-sign-in");
+    expect(createGoogleAuthorIntent(NOW)).not.toContain("test-service-role-key");
+  });
+});

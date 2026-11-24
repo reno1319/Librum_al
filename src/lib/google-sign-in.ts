@@ -1,4 +1,5 @@
 import "server-only";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordAgreements } from "@/lib/agreement-records";
@@ -11,11 +12,53 @@ import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 // The sign-up page's Google button uses the choices already on that
 // page: "Autor" + the 18+ tick make an author (Renato "b"). The Server
 // Action checks the tick, then leaves this short-lived cookie for the
-// callback. The cookie is only a hint carried across Google's screen:
+// callback (signed, see below). The cookie is a hint carried across Google's screen:
 // it can only ADD the author switch to a brand-new Google account, the
 // same thing ticking the 18+ box on the page does.
 export const GOOGLE_AUTHOR_INTENT_COOKIE = "librum_google_author";
 export const GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS = 600;
+
+// G1 (Renato 11-24): the hint used to be the plain value "1", so anyone
+// could set it by hand and become an author without the 18+ tick. It is
+// now "<expiry>.<signature>": the expiry (unix seconds) signed with a
+// key only the server holds (derived from SUPABASE_SERVICE_ROLE_KEY,
+// with its own label, so the signature never reveals the key). Only
+// the Server Action that checked the tick can make one. No key, a bad
+// signature or an expired value all mean "no hint" (fails closed: the
+// account stays a reader).
+const AUTHOR_INTENT_LABEL = "librum:google-author-18plus:v1";
+
+function authorIntentKey(): Buffer | null {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) return null;
+  return createHmac("sha256", secret).update(AUTHOR_INTENT_LABEL).digest();
+}
+
+function signAuthorIntent(key: Buffer, expiry: string): string {
+  return createHmac("sha256", key).update(`${AUTHOR_INTENT_LABEL}:${expiry}`).digest("base64url");
+}
+
+// The cookie value, or null when the server has no key (the caller then
+// sets no hint).
+export function createGoogleAuthorIntent(nowMs: number = Date.now()): string | null {
+  const key = authorIntentKey();
+  if (!key) return null;
+  const expiry = String(Math.floor(nowMs / 1000) + GOOGLE_AUTHOR_INTENT_MAX_AGE_SECONDS);
+  return `${expiry}.${signAuthorIntent(key, expiry)}`;
+}
+
+export function isValidGoogleAuthorIntent(value: string | null | undefined, nowMs: number = Date.now()): boolean {
+  if (typeof value !== "string") return false;
+  const match = /^([0-9]{1,12})\.([A-Za-z0-9_-]{43})$/.exec(value);
+  if (!match) return false;
+  const [, expiry, signature] = match;
+  if (Number(expiry) * 1000 <= nowMs) return false;
+  const key = authorIntentKey();
+  if (!key) return false;
+  const expected = Buffer.from(signAuthorIntent(key, expiry));
+  const given = Buffer.from(signature);
+  return expected.length === given.length && timingSafeEqual(expected, given);
+}
 
 // The callback's marker that the exchange started from our Google
 // button. Set by signInWithGoogle() in redirectTo.

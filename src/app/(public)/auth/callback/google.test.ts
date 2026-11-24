@@ -16,6 +16,10 @@ const mockScheduleAuthorWelcome = vi.fn();
 vi.mock("@/lib/author-welcome", () => ({ scheduleAuthorWelcome: (id: string) => mockScheduleAuthorWelcome(id) }));
 
 const { GET } = await import("./route");
+const { createGoogleAuthorIntent } = await import("@/lib/google-sign-in");
+// G1: the hint is a signed value; tests sign one with a test key.
+process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+const HINT = () => `librum_google_author=${createGoogleAuthorIntent()}`;
 const BASE = "https://librum.example/auth/callback";
 const USER = { id: "u1", identities: [{ provider: "google" }] };
 const FAILED = encodeURIComponent("Hyrja me Google nuk u krye. Provoni përsëri.");
@@ -52,7 +56,7 @@ describe("GET /auth/callback?google=1", () => {
 
   it("the author hint cookie is passed on; an author goes to the dashboard", async () => {
     mockFinish.mockResolvedValue("author");
-    const res = await get("google=1&code=c", "a=b; librum_google_author=1");
+    const res = await get("google=1&code=c", `a=b; ${HINT()}`);
     expect(mockFinish).toHaveBeenCalledWith(USER, true);
     expect(res.headers.get("location")).toBe("https://librum.example/dashboard");
     expect(hintCleared(res)).toBe(true);
@@ -63,9 +67,20 @@ describe("GET /auth/callback?google=1", () => {
     expect(mockFinish).toHaveBeenCalledWith(USER, false);
   });
 
+  // G1: the old hand-settable value, an expired value and a forged
+  // signature are all no hint (the account stays a reader).
+  it.each([
+    ["the old plain value 1", "1"],
+    ["an expired signed value", createGoogleAuthorIntent(Date.now() - 11 * 60 * 1000)],
+    ["a forged signature", `${Math.floor(Date.now() / 1000) + 600}.${"A".repeat(43)}`],
+  ])("%s is no hint", async (_l, value) => {
+    await get("google=1&code=c", `librum_google_author=${value}`);
+    expect(mockFinish).toHaveBeenCalledWith(USER, false);
+  });
+
   it("author_failed: to /account with the reader-account message", async () => {
     mockFinish.mockResolvedValue("author_failed");
-    const res = await get("google=1&code=c", "librum_google_author=1");
+    const res = await get("google=1&code=c", HINT());
     const loc = new URL(res.headers.get("location")!);
     expect(loc.pathname).toBe("/account");
     expect(loc.searchParams.get("error")).toContain("Bëhuni autor");
@@ -76,7 +91,7 @@ describe("GET /auth/callback?google=1", () => {
     ["no code (cancelled on Google)", "google=1&error=access_denied&error_description=raw", null],
   ])("%s: /login with our Google message only, nothing finished, hint cleared", async (_l, q, answer) => {
     if (answer) mockExchange.mockResolvedValue(answer);
-    const res = await get(q, "librum_google_author=1");
+    const res = await get(q, HINT());
     expect(res.headers.get("location")).toBe(`https://librum.example/login?error=${FAILED}`);
     expect(res.headers.get("location")).not.toContain("raw");
     expect(mockFinish).not.toHaveBeenCalled();
@@ -86,7 +101,7 @@ describe("GET /auth/callback?google=1", () => {
 
   it("audit B1: a recovery code with google=1 keeps containment (marker set, /reset-password, nothing finished)", async () => {
     mockExchange.mockResolvedValue({ data: { user: USER, session: {}, redirectType: "recovery" }, error: null });
-    const res = await get("google=1&code=c&next=/library", "librum_google_author=1");
+    const res = await get("google=1&code=c&next=/library", HINT());
     expect(res.headers.get("location")).toBe("https://librum.example/reset-password");
     expect(res.headers.get("set-cookie") ?? "").toContain(`${RECOVERY_COOKIE_NAME}=1`);
     expect(mockFinish).not.toHaveBeenCalled();
@@ -105,7 +120,7 @@ describe("GET /auth/callback?google=1", () => {
 describe("GET /auth/callback?google=1: author welcome", () => {
   it("is scheduled after the sign-in is finished", async () => {
     mockFinish.mockResolvedValue("author");
-    await get("google=1&code=c&next=/", "librum_google_author=1");
+    await get("google=1&code=c&next=/", HINT());
     expect(mockScheduleAuthorWelcome).toHaveBeenCalledExactlyOnceWith("u1");
     expect(mockFinish.mock.invocationCallOrder[0]).toBeLessThan(mockScheduleAuthorWelcome.mock.invocationCallOrder[0]);
   });

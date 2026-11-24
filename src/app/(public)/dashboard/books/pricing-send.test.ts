@@ -1176,6 +1176,16 @@ describe("BD16 P2: a draft asks for a pre-order listing", () => {
     expect(publishWrites()).toEqual([]);
   });
 
+  // G1 (migration 20261124150000): the database's own Payment & tax
+  // check (LB527) is named, never published.
+  it("the database's Payment & tax refusal (LB527) is named, nothing published", async () => {
+    bookReviewsDoubleState.requestResult = { ok: false, reason: "missing_payment_details" };
+    expect(await run(saveBookPricing(BOOK_ID, form({ ...SEND, releaseMode: "preorder", releaseDate: plus(20) })))).toBe(
+      err(PAYMENT_DETAILS_MISSING_MESSAGE),
+    );
+    expect(publishWrites()).toEqual([]);
+  });
+
   it("audit r1 F1: the day is written only onto a never-published book, in the write itself", async () => {
     await run(saveBookPricing(BOOK_ID, form({ intent: "save", priceMode: "free", releaseMode: "preorder", releaseDate: plus(20) })));
     expect(releaseWrites()[0].filters).toEqual(expect.arrayContaining([{ kind: "is", column: "published_at", value: null }]));
