@@ -1998,6 +1998,11 @@ async function performPublish(
       if (request.reason === "incomplete") {
         return { ok: false, reason: "send_incomplete" };
       }
+      // G1: the database's own Payment & tax check (LB527) -- the
+      // details changed after the app's check above.
+      if (request.reason === "missing_payment_details") {
+        return { ok: false, reason: "missing_payment_details" };
+      }
       // "already_approved": an approval landed after the read above, so
       // the publish below goes ahead (the trigger re-checks it).
       if (request.reason !== "already_approved") {

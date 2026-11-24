@@ -90,6 +90,9 @@ export type RequestBookReviewResult =
         | "preorder_date"
         | "preorder_used_up"
         | "preorder_public_domain"
+        // G1 (migration 20261124150000): a paid draft without the
+        // author's Payment & tax details (LB527).
+        | "missing_payment_details"
         | "not_found"
         | "failed";
     };
@@ -106,6 +109,7 @@ export async function requestBookReview(supabase: SessionClient, bookId: string)
   if (error.code === "LB500") return { ok: false, reason: "preorder_date" };
   if (error.code === "LB501") return { ok: false, reason: "preorder_used_up" };
   if (error.code === "LB502") return { ok: false, reason: "preorder_public_domain" };
+  if (error.code === "LB527") return { ok: false, reason: "missing_payment_details" };
   const message = typeof error.message === "string" ? error.message : "";
   if (message === "this book is already waiting for review") return { ok: false, reason: "already_pending" };
   if (message === "this book is already approved") return { ok: false, reason: "already_approved" };

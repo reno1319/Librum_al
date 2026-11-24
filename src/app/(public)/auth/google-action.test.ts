@@ -21,6 +21,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
 
 const { signInWithGoogle, signUpWithGoogle } = await import("./actions");
 const { AUTHOR_AGE_REQUIRED_MESSAGE } = await import("@/lib/author-age-statement");
+const { isValidGoogleAuthorIntent } = await import("@/lib/google-sign-in");
 
 async function run(fields: Record<string, string>): Promise<string> {
   const fd = new FormData();
@@ -38,6 +39,7 @@ const GOOGLE_URL = "https://erhzpapqwyfjotliqdjo.supabase.co/auth/v1/authorize?p
 
 beforeEach(() => {
   process.env.NEXT_PUBLIC_SITE_URL = "https://librum.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
   mockOAuth.mockReset().mockResolvedValue({ data: { url: GOOGLE_URL, provider: "google" }, error: null });
   cookieStore.set.mockClear();
   cookieStore.delete.mockClear();
@@ -75,12 +77,24 @@ describe("signInWithGoogle", () => {
 
   it("signup as author with the 18+ tick: short-lived httpOnly hint scoped to the callback", async () => {
     expect(await run({ google_from: "signup", role: "author", confirm_author_age: "on" })).toBe(GOOGLE_URL);
-    expect(cookieStore.set).toHaveBeenCalledWith("librum_google_author", "1", expect.objectContaining({
+    expect(cookieStore.set).toHaveBeenCalledWith("librum_google_author", expect.any(String), expect.objectContaining({
       httpOnly: true,
       sameSite: "lax",
       path: "/auth/callback",
       maxAge: 600,
     }));
+    // G1: a signed value the callback accepts, never the old plain "1".
+    const value = cookieStore.set.mock.calls[0][1];
+    expect(value).not.toBe("1");
+    expect(isValidGoogleAuthorIntent(value)).toBe(true);
+  });
+
+  it("G1: without the server key, an author sign-up stops before Google (no unsigned hint)", async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const to = await run({ google_from: "signup", role: "author", confirm_author_age: "on" });
+    expect(to.startsWith("/signup?error=")).toBe(true);
+    expect(mockOAuth).not.toHaveBeenCalled();
+    expect(cookieStore.set).not.toHaveBeenCalled();
   });
 
   it("signup as author WITHOUT the 18+ tick: the form's refusal, Google never started", async () => {
