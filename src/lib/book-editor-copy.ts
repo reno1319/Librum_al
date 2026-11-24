@@ -49,6 +49,8 @@ export const RIGHTS_NOT_SAVED_MESSAGE =
 export const TITLE_LOCKED_NOTE =
   "🔒 Titulli nuk ndryshohet pasi libri publikohet. Për ta korrigjuar, shkruani te Ndihma.";
 export const PEN_NAME_LOCKED_NOTE = "🔒 Emri i autorit nuk ndryshohet pasi libri publikohet.";
+// LBN (pictures lbnp1 a): under the read-only LBN in "ISBN dhe botuesi".
+export const LBN_LOCKED_NOTE = "🔒 Kodi i librit në Librum. Librum e jep vetë dhe nuk ndryshon kurrë.";
 export const TITLE_WILL_LOCK_NOTE = "Pas publikimit titulli nuk mund të ndryshohet më.";
 
 

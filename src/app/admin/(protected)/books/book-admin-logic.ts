@@ -504,6 +504,8 @@ export type BookDetailsSource = {
   keywords?: string | null;
   publisher?: string | null;
   isbn?: string | null;
+  // LBN (migration 20261124190000).
+  lbn?: string | null;
 };
 
 export type BookDetailRow = { label: string; value: string; unreadable?: boolean };
@@ -559,5 +561,7 @@ export function adminBookDetailRows(input: {
     { label: "Keywords", value: keywords.length > 0 ? keywords.join(", ") : "None" },
     { label: "Publisher", value: textOrNotSet(book.publisher) },
     { label: "ISBN", value: textOrNotSet(book.isbn) },
+    // LBN (lbnq8 a): right after ISBN.
+    { label: "LBN", value: textOrNotSet(book.lbn) },
   ];
 }

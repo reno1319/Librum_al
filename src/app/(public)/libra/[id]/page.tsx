@@ -1417,6 +1417,10 @@ export default async function BookDetailPage({
               {book.isbn && (
                 <DetailRow label="ISBN">{book.isbn}</DetailRow>
               )}
+              {/* LBN (lbnq8 a): every book's Librum Book Number, last. */}
+              {book.lbn && (
+                <DetailRow label="LBN">{book.lbn}</DetailRow>
+              )}
             </dl>
           </section>
           </div>

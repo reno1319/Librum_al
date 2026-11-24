@@ -246,7 +246,7 @@ describe("K4: the contents page and landmarks", () => {
     const front: LibrumFrontPage = {
       title: "Libri i detit", subtitle: null, penName: "Autor Prove", originalAuthor: null, copyrightYear: 2026,
       originalYear: null, translators: [], rights: "own_rights", librumYear: 2026,
-      isbn: null, publisher: null, edition: null, buyer: null,
+      isbn: null, lbn: null, publisher: null, edition: null, buyer: null,
     };
     const out = await addLibrumPages(bytes, { front, last: { penName: "Autor Prove", books: [], reviewUrl: "https://librum.al/libra/x" } });
     expect(out.added).toBe(true);
@@ -259,7 +259,7 @@ describe("K3: Librum's © page is tighter", () => {
     const page = frontPageXhtml({
       title: "Libri i detit", subtitle: null, penName: "Autor Prove", originalAuthor: null, copyrightYear: 2026,
       originalYear: null, translators: [], rights: "own_rights", librumYear: 2026,
-      isbn: null, publisher: null, edition: null, buyer: null,
+      isbn: null, lbn: null, publisher: null, edition: null, buyer: null,
     });
     expect(page).toContain("h1{font-size:1.5em;margin:1em 0 .3em;font-weight:bold}");
     expect(page).toContain(".author{margin:.5em 0 1.2em;font-size:1.15em}");

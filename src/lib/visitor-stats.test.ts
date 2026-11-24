@@ -20,6 +20,9 @@ const NOT_COUNTED_FOLDERS = [
   "dashboard",
   "following",
   "forgot-password",
+  // LBN (lbnq9 a): /lbn/<code> only sends the visitor on to /libra/<id>,
+  // which is counted there.
+  "lbn",
   "library",
   "login",
   "reset-password",

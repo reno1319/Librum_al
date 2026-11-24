@@ -5,6 +5,7 @@ import { BookSampleReader } from "@/components/book-sample-reader";
 import {
   EDITOR_CONTROL_CLASSES,
   EDITOR_FIELD_CLASSES,
+  EDITOR_HINT_CLASSES,
   EDITOR_LABEL_CLASSES,
   EDITOR_SMALL_BUTTON,
   EditorActionBar,
@@ -19,6 +20,7 @@ import {
   CONTENT_MISSING_COVER,
   CONTENT_MISSING_MANUSCRIPT,
   DRM_FREE_NOTE,
+  LBN_LOCKED_NOTE,
   LIVE_SAVE_BUTTON,
   MISSING_FOR_SEND_MESSAGE,
 } from "@/lib/book-editor-copy";
@@ -45,6 +47,8 @@ export type ContentFormBook = {
   title: string;
   language: string | null;
   isbn: string | null;
+  // LBN (lbnq8 a): shown read-only; null only if the read had none.
+  lbn: string | null;
   publisher: string | null;
   hasManuscript: boolean;
   coverUrl: string | null;
@@ -167,6 +171,14 @@ export function BookContentForm({
             className={EDITOR_CONTROL_CLASSES}
           />
         </label>
+        {/* LBN (pictures lbnp1 a): read-only, like the locked title. */}
+        {book.lbn && (
+          <div className={`${EDITOR_FIELD_CLASSES} max-w-80`}>
+            <span className={EDITOR_LABEL_CLASSES}>LBN</span>
+            <p className="rounded-md border border-border bg-background px-2.5 py-2 text-base text-muted sm:py-1.5 sm:text-sm">{book.lbn}</p>
+            <span className={EDITOR_HINT_CLASSES}>{LBN_LOCKED_NOTE}</span>
+          </div>
+        )}
         <label className={EDITOR_FIELD_CLASSES}>
           <span className={EDITOR_LABEL_CLASSES}>
             Botuesi / shtëpia botuese

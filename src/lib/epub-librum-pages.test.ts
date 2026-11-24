@@ -33,6 +33,7 @@ const FRONT: LibrumFrontPage = {
   rights: "own_rights",
   librumYear: 2026,
   isbn: null,
+  lbn: null,
   publisher: null,
   edition: null,
   buyer: { email: "ana@example.com", date: "1 nëntor 2026", code: "LB-7Q4K2ABC", free: false },
@@ -266,6 +267,15 @@ describe("front page wording (approved 1 Nov)", () => {
     expect(html).toContain("ISBN 978-0-00-000000-0");
     expect(html).toContain("Shtëpia Prova");
     expect(html).toContain("Botimi i dytë");
+  });
+
+  it("LBN (lbnq4 a, lbnq5 a): its own line under the ISBN, or where the ISBN would be", () => {
+    expect(frontPageBody(FRONT)).not.toMatch(/LBN/);
+    const withIsbn = frontPageBody({ ...FRONT, isbn: "978-0-00-000000-0", lbn: "LE7K4M9X2D", publisher: "Shtëpia Prova" });
+    expect(withIsbn).toContain("<p>ISBN 978-0-00-000000-0</p>\n<p>LBN: LE7K4M9X2D</p>\n<p>Shtëpia Prova</p>");
+    const withoutIsbn = frontPageBody({ ...FRONT, lbn: "LE7K4M9X2D" });
+    expect(withoutIsbn).toContain("<p>LBN: LE7K4M9X2D</p>");
+    expect(withoutIsbn).not.toContain("ISBN");
   });
 
   it("no subtitle, no subtitle line", () => {
