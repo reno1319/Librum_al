@@ -143,8 +143,15 @@ end $$;
 select pg_temp.assert(
   (select a.attname from pg_catalog.pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) = 'original_title',
-  'part2: original_title is public_books'' last column');
+    order by a.attnum desc limit 1) in ('original_title', 'lbn')
+  -- LBN (migration 20261124190000) appends lbn right after it.
+  and (select coalesce(max(a.attnum) filter (where a.attname = 'lbn'),
+                       max(a.attnum) filter (where a.attname = 'original_title') + 1)
+         from pg_catalog.pg_attribute a
+        where a.attrelid = 'public.public_books'::regclass and not a.attisdropped)
+      = (select a.attnum + 1 from pg_catalog.pg_attribute a
+          where a.attrelid = 'public.public_books'::regclass and a.attname = 'original_title'),
+  'part2: original_title is public_books'' last column, or right before lbn');
 
 do $$
 declare

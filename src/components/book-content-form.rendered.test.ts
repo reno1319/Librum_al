@@ -11,7 +11,7 @@ const BOOK = "c3333333-3333-4333-8333-333333333333";
 const AUTHOR = "a1111111-1111-4111-8111-111111111111";
 
 function render(
-  o: { hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[] } = {},
+  o: { lbn?: string | null; hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[] } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookContentForm, {
@@ -21,6 +21,7 @@ function render(
         title: "Dimri në <Valbonë>",
         language: "sq",
         isbn: "978-3-16-148410-0",
+        lbn: o.lbn === undefined ? "LE7K4M9X2D" : o.lbn,
         publisher: "Botime <X>",
         hasManuscript: o.hasManuscript ?? true,
         coverUrl: null,
@@ -104,6 +105,27 @@ describe("BookContentForm", () => {
     expect(checked(render({ aiAnswer: "no" }))).toBe("no");
     expect(checked(render({ aiAnswer: null }))).toBe("");
     expect(checked(render({ aiAnswer: "yes", aiUnreadable: true }))).toBe("");
+  });
+});
+
+describe("BookContentForm: LBN (pictures lbnp1 a)", () => {
+  it("shows the LBN read-only under the ISBN, with the locked note, and sends no lbn field", () => {
+    const html = render();
+    const isbnAt = html.indexOf('name="isbn"');
+    const lbnAt = html.indexOf(">LBN</span>");
+    const publisherAt = html.indexOf('name="publisher"');
+    expect(isbnAt).toBeGreaterThan(-1);
+    expect(lbnAt).toBeGreaterThan(isbnAt);
+    expect(publisherAt).toBeGreaterThan(lbnAt);
+    expect(html).toContain(">LE7K4M9X2D</p>");
+    expect(html).toContain("🔒 Kodi i librit në Librum. Librum e jep vetë dhe nuk ndryshon kurrë.");
+    expect(html).not.toMatch(/name="lbn"/);
+  });
+
+  it("shows no LBN line when the read had none", () => {
+    const html = render({ lbn: null });
+    expect(html).not.toContain(">LBN</span>");
+    expect(html).not.toContain("Kodi i librit në Librum");
   });
 });
 

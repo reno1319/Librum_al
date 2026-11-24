@@ -19,6 +19,7 @@ const BOOK_ROW = {
   title: "Lulja e marsit",
   subtitle: "Tregim",
   isbn: null,
+  lbn: "LE7K4M9X2D",
   publisher: null,
   edition: null,
   original_publication_date: "2015-03-08",
@@ -91,6 +92,7 @@ describe("readLibrumPages", () => {
       rights: "own_rights",
       librumYear: 2026,
       isbn: null,
+      lbn: "LE7K4M9X2D",
       publisher: null,
       edition: null,
       buyer: { email: "ana@example.com", date: "1 nëntor 2026", code: "LB-C0FFEE00", free: false },
@@ -205,6 +207,12 @@ describe("readLibrumPages", () => {
     expect(pages!.front.isbn).toBe("978-0-00-000000-0");
     expect(pages!.front.publisher).toBeNull();
     expect(pages!.front.edition).toBe("Botimi i dytë");
+  });
+
+  it("LBN (lbnq4 a): read with the book and passed through; blank becomes null", async () => {
+    const { client } = fakeAdmin({ book: { data: { ...BOOK_ROW, lbn: "  " }, error: null } });
+    const pages = await readLibrumPages(client, { bookId: BOOK_ID, buyer: null, siteOrigin: ORIGIN });
+    expect(pages!.front.lbn).toBeNull();
   });
 
   // Audit r2 (N1): "free" comes from how this reader got the book.

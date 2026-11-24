@@ -93,6 +93,8 @@ type EditorBook = {
   cover_path: string | null;
   price_all: number | null;
   isbn: string | null;
+  // LBN (migration 20261124190000): read-only here.
+  lbn?: string;
   publisher: string | null;
   // BD15 P7: set by staff when it is a public-domain work's edition.
   pd_work_id: string | null;
@@ -163,7 +165,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, original_title, status, published_at, file_path, cover_path, price_all, isbn, publisher, pd_work_id" +
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, original_title, status, published_at, file_path, cover_path, price_all, isbn, lbn, publisher, pd_work_id" +
         (preorderFeature ? ", release_date, preorder_count, preorder_slip_used, preorder_listed_at" : ""),
     )
     .eq("id", id)
@@ -493,6 +495,7 @@ export default async function BookEditorPage({
               title: book.title,
               language: book.language,
               isbn: book.isbn,
+              lbn: book.lbn ?? null,
               publisher: book.publisher,
               hasManuscript: working.filePath !== null,
               coverUrl,

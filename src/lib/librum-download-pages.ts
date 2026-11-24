@@ -22,6 +22,8 @@ type BookRow = {
   title: string;
   subtitle: string | null;
   isbn: string | null;
+  // LBN (lbnq4 a): its own line under the ISBN.
+  lbn: string | null;
   publisher: string | null;
   edition: string | null;
   original_publication_date: string | null;
@@ -72,7 +74,7 @@ export async function readLibrumPages(
   // any state, and a book they own (the route already checked one).
   const { data: bookData, error: bookError } = await supabase
     .from("public_books")
-    .select(`id, title, subtitle, isbn, publisher, edition, original_publication_date, original_author, published_at, pen_name_id, original_title, ${BOOK_PEN_NAME_EMBED}`)
+    .select(`id, title, subtitle, isbn, lbn, publisher, edition, original_publication_date, original_author, published_at, pen_name_id, original_title, ${BOOK_PEN_NAME_EMBED}`)
     .eq("id", input.bookId)
     .maybeSingle();
   if (bookError || !isPlainRow(bookData) || bookData.id !== input.bookId || typeof bookData.title !== "string" || typeof bookData.pen_name_id !== "string") {
@@ -166,6 +168,7 @@ export async function readLibrumPages(
       rights: input.rights ?? "own_rights",
       librumYear,
       isbn: textOrNull(book.isbn),
+      lbn: textOrNull(book.lbn),
       publisher: textOrNull(book.publisher),
       edition: textOrNull(book.edition),
       buyer,

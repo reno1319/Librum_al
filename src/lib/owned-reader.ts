@@ -2,21 +2,6 @@
 // page-turning reader. Small pure helpers shared by the read route
 // (src/app/api/books/[id]/read/route.ts) and the reader.
 
-/**
- * 2a: the buyer line from the downloaded book's first page, as the first
- * thing in the online book. The text is escaped here; only our own
- * reader classes are used (lb-c centred, lb-i italic), and the line is
- * added after the book went through the server cleaner.
- */
-export function buyerLineHtml(text: string): string {
-  const safe = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-  return `<p class="lb-c lb-i">${safe}</p><hr>`;
-}
-
 // 1a: the one-time check before the first open, while the 14 days run.
 export const OPEN_CANCEL_CONFIRM = "Kur e hapni librin, nuk mund ta anuloni më këtë blerje (njësoj si me shkarkimin).";
 

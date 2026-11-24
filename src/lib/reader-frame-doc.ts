@@ -111,6 +111,11 @@ aside.lb-note, aside { font-size: 0.85em; color: var(--lb-muted); margin: 1em 0 
 .lb-stanza { margin-top: 1em; }
 .lb-verse-in { text-indent: 0; margin-left: 3em; }
 .lb-gap { margin: 0; text-indent: 0; min-height: 1em; }
+/* lbnp2: Librum's own copyright and last pages (reader-librum-pages.ts), tighter so the copyright page fits one screen, like the download's. Never emitted by the book cleaner. */
+.lb-lp { line-height: 1.4; }
+.lb-lp > h1:first-child { margin: 1.2em 0 0.5em; }
+.lb-lp p { margin: 0.15em 0; text-indent: 0; }
+.lb-lp .lb-gap { min-height: 0.6em; }
 .lb-epi { text-indent: 0; margin: 0 1.5em 0 3em; font-style: italic; }
 .lb-episrc { text-indent: 0; text-align: right; margin: 0.4em 1.5em 1.8em 3em; color: var(--lb-muted); }
 mark { background: none; color: inherit; }
