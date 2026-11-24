@@ -118,7 +118,11 @@ export type PublishGateRefusal =
   | "missing_description"
   | "missing_rights"
   | "rights_unavailable"
-  | "paid_mode_required";
+  | "paid_mode_required"
+  // BUILD 3 (sg1 a): a PAID title needs the author's Payment & tax
+  // details (tax details + bank account). Unreadable fails closed.
+  | "missing_payment_details"
+  | "payment_details_unavailable";
 
 export type PublishGateResult = { ok: true } | { ok: false; reason: PublishGateRefusal };
 
@@ -127,6 +131,8 @@ export async function checkPublishGate(params: {
   description: string | null;
   readRights: () => Promise<"present" | "none" | "unavailable">;
   paidPublishingAvailable: () => boolean;
+  // BUILD 3: asked only for a paid title, after every other check.
+  readPaymentDetails: () => Promise<"ready" | "missing" | "unavailable">;
 }): Promise<PublishGateResult> {
   const priceState = resolveCatalogPriceState(params.priceAll);
   if (priceState === "unavailable") {
@@ -144,6 +150,15 @@ export async function checkPublishGate(params: {
   }
   if (priceState === "paid" && !params.paidPublishingAvailable()) {
     return { ok: false, reason: "paid_mode_required" };
+  }
+  if (priceState === "paid") {
+    const payment = await params.readPaymentDetails();
+    if (payment === "missing") {
+      return { ok: false, reason: "missing_payment_details" };
+    }
+    if (payment !== "ready") {
+      return { ok: false, reason: "payment_details_unavailable" };
+    }
   }
   return { ok: true };
 }

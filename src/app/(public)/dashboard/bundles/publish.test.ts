@@ -133,6 +133,13 @@ const mockCreateClient = vi.fn(() =>
   }),
 );
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
+// BUILD 3: the author's Payment & tax readiness, as a yes/no double.
+vi.mock("@/lib/author-tax-readiness", () => ({
+  BUNDLE_PAYMENT_DETAILS_MISSING_MESSAGE: "bundle payment details missing",
+  readPaymentDetailsReadiness: vi.fn(async () => "ready"),
+  readAuthorPaymentDetailsReadinessAsStaff: vi.fn(async () => "ready"),
+  readOwnPaymentDetailsState: vi.fn(async () => ({ ok: true, hasTaxDetails: true, hasBankAccount: true })),
+}));
 // CATALOG-WRITE-AUTH-1: the protected catalog writes go through
 // createCatalogWriteClient(). This focused suite routes that client onto
 // the same session double so its payload and filter assertions still see
@@ -246,6 +253,34 @@ describe("publishBundle: paid-publishing readiness gate", () => {
       expect(mockProfileSelectResult).not.toHaveBeenCalled();
       expect(mockBundleUpdatePayload).toHaveBeenCalledWith({ status: "published" });
     }
+  });
+
+  // BUILD 3 (sg1 a): a paid bundle needs the author's Payment & tax details.
+  it("paid bundle without payment details is refused with its own message, before any write", async () => {
+    const { readPaymentDetailsReadiness } = await import("@/lib/author-tax-readiness");
+    vi.mocked(readPaymentDetailsReadiness).mockResolvedValueOnce("missing");
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 999 }));
+    await expect(publishBundle(BUNDLE_ID)).rejects.toThrow();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+    expect(mockRedirect).toHaveBeenCalledWith(
+      `/dashboard/bundles?error=${encodeURIComponent("bundle payment details missing")}`,
+    );
+  });
+
+  it("paid bundle: an unreadable payment answer fails closed", async () => {
+    const { readPaymentDetailsReadiness } = await import("@/lib/author-tax-readiness");
+    vi.mocked(readPaymentDetailsReadiness).mockResolvedValueOnce("unavailable");
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 999 }));
+    await expect(publishBundle(BUNDLE_ID)).rejects.toThrow();
+    expect(mockBundleUpdatePayload).not.toHaveBeenCalled();
+  });
+
+  it("free bundle never asks about payment details", async () => {
+    const { readPaymentDetailsReadiness } = await import("@/lib/author-tax-readiness");
+    vi.mocked(readPaymentDetailsReadiness).mockClear();
+    mockBundleSelectResult.mockReturnValue(bundleRow({ price_all: 0 }));
+    await publishBundle(BUNDLE_ID);
+    expect(readPaymentDetailsReadiness).not.toHaveBeenCalled();
   });
 
   it("free bundle: published, profiles table never queried", async () => {

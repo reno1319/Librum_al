@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { WITHHOLDING_PERCENT } from "@/app/(public)/dashboard/payment/payment-logic";
 import { ROYALTY_RULE_SENTENCE, STANDARD_ROYALTY_FROM_ALL, STANDARD_ROYALTY_PERCENT } from "@/lib/royalty";
 import { calculateAuthorEarnings } from "@/lib/earnings-calculator";
 import { formatAllMinorUnits } from "@/lib/all-money";
@@ -234,6 +235,29 @@ export default async function HowItWorksPage() {
               </div>
               <Photo src={`${PHOTO_DIR}/earn.jpg`} className="aspect-[6/5] md:order-2" />
             </article>
+
+            {/* BUILD 3 (nr1 b): what a paid book needs, before anyone signs up. */}
+            <div className="rounded-card border border-border bg-white p-6 md:p-8">
+              <h3 className={STEP_TITLE}>Para se të shisni libra me çmim</h3>
+              <p className="mt-3 text-foreground/85">
+                Për librat falas nuk ka nevojë. Për një libër me çmim, plotësoni një herë te Paneli › Paratë › Të dhënat e
+                pagesës:
+              </p>
+              <ul className="mt-4 flex flex-col gap-3 text-foreground/85">
+                <li>
+                  <strong className="text-primary">Të dhënat tatimore.</strong> Emri juaj i plotë ligjor dhe numri personal
+                  (NID). Nëse jetoni jashtë Shqipërisë: shteti dhe numri tatimor atje. Nuk kërkojmë foto të dokumentit.
+                </li>
+                <li>
+                  <strong className="text-primary">Llogaria bankare.</strong> Një IBAN shqiptar ose i huaj. Paguajmë në lekë;
+                  një llogari jashtë Shqipërisë i merr në monedhën e llogarisë, me kursin e bankës në ditën e pagesës.
+                </li>
+              </ul>
+              <p className="mt-4 text-sm text-muted">
+                Mbajmë {WITHHOLDING_PERCENT}% tatim në burim nga honoraret, për të gjithë autorët, dhe e deklarojmë ne. Këto të
+                dhëna nuk shfaqen askund publikisht.
+              </p>
+            </div>
           </div>
         </div>
       </section>
