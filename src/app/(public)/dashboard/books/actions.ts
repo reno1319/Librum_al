@@ -126,6 +126,7 @@ import {
 } from "@/lib/price-change-confirm";
 import { getPreorderSchemaFeature } from "@/lib/catalog-schema-features";
 import { scheduleDateMovedReaderEmails, scheduleWaitingReaderEmails } from "@/lib/preorder-emails";
+import { checkStagedUploadSize } from "@/lib/staged-upload-size";
 import {
   CANCEL_PREORDER_CONFIRM_FIELD,
   CANCEL_PREORDER_CONFIRM_MISSING_MESSAGE,
@@ -437,6 +438,11 @@ async function resolveCoverInput(
     // the manuscript above.
     if (!isOwnTemporaryCoverUploadPath(tempPath, userId)) {
       redirect(withQuery(errorPath, "error", "Ballina e zgjedhur nuk vlen më. Zgjidhni skedarin përsëri"));
+    }
+
+    // G2 c2: refuse an oversized file before reading it.
+    if ((await checkStagedUploadSize(supabase.storage.from("manuscripts"), tempPath, MAX_COVER_BYTES)) === "too_large") {
+      redirect(withQuery(errorPath, "error", "Imazhi i ballinës duhet të jetë nën 5 MB"));
     }
 
     const { data, error: downloadError } = await supabase.storage

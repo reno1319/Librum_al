@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
 import { generateEpub, patchEpubMetadata } from "./epub-generator";
 import { validateEpubStructure } from "./epub-validation";
-import { extractEpubSample } from "./epub-sample";
+import { buildReaderContent } from "./epub-reader";
 import {
   EBOOK_COVER_IMAGE_ENTRY,
   EBOOK_COVER_PAGE_ENTRY,
@@ -168,9 +168,9 @@ describe("embedCoverInLibrumEpub", () => {
     const before = await librumEpub();
     const result = await embedCoverInLibrumEpub(before, { coverJpeg: COVER_A });
     if (!result.ok) throw new Error("embed failed");
-    const withCover = await extractEpubSample(result.bytes);
+    const withCover = await buildReaderContent(result.bytes, "sample");
     expect(withCover.available).toBe(true);
-    expect(withCover).toEqual(await extractEpubSample(before));
+    expect(withCover).toEqual(await buildReaderContent(before, "sample"));
     expect(JSON.stringify(withCover)).not.toContain("cover.jpg");
   });
 });

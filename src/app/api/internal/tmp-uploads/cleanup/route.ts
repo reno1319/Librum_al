@@ -11,6 +11,7 @@ import {
   type TmpCleanupStorage,
 } from "@/lib/tmp-upload-cleanup";
 import { alertIfCronFailed } from "@/lib/error-alerts";
+import { BLOG_IMAGE_BUCKET, runBlogImageCleanup } from "@/lib/blog-image-cleanup";
 
 // BD5 (W9): the daily clean-up of abandoned temporary uploads, called
 // by the Vercel cron in vercel.json (GET, "Authorization: Bearer
@@ -60,7 +61,8 @@ async function runJob(request: Request): Promise<Response> {
     return NextResponse.json({ ok: true, off: true });
   }
 
-  const bucket = createAdminClient().storage.from(TMP_CLEANUP_BUCKET);
+  const admin = createAdminClient();
+  const bucket = admin.storage.from(TMP_CLEANUP_BUCKET);
   const storage: TmpCleanupStorage = {
     list: (prefix, offset, limit) =>
       bucket.list(prefix, { limit, offset, sortBy: { column: "name", order: "asc" } }),
@@ -73,7 +75,35 @@ async function runJob(request: Request): Promise<Response> {
     return NextResponse.json(summary, { status: 500 });
   }
   console.log("[tmp-cleanup] run complete", summary);
-  return NextResponse.json(summary);
+
+  // G2 (c1 a): blog pictures no post uses, in the same nightly run
+  // (src/lib/blog-image-cleanup.ts). Counts only in the logs.
+  const blogBucket = admin.storage.from(BLOG_IMAGE_BUCKET);
+  const blogImages = await runBlogImageCleanup(
+    {
+      list: (prefix, offset, limit) =>
+        blogBucket.list(prefix, { limit, offset, sortBy: { column: "name", order: "asc" } }),
+      remove: (keys) => blogBucket.remove(keys),
+      // Every post in every state. The exact count must match the rows
+      // returned, so a capped or partial answer removes nothing.
+      async loadPostTexts() {
+        const { data, error, count } = await admin
+          .from("blog_posts")
+          .select("content_markdown", { count: "exact" })
+          .range(0, 4999);
+        if (error || !Array.isArray(data) || count !== data.length) return null;
+        const texts = data.map((row: { content_markdown: unknown }) => row.content_markdown);
+        return texts.every((t): t is string => typeof t === "string") ? texts : null;
+      },
+    },
+    Date.now(),
+  );
+  if (!blogImages.ok) {
+    console.error("[blog-image-cleanup] run failed", blogImages);
+    return NextResponse.json({ ...summary, blogImages }, { status: 500 });
+  }
+  console.log("[blog-image-cleanup] run complete", blogImages);
+  return NextResponse.json({ ...summary, blogImages });
 }
 
 // ALERTS-2: the cron entrypoint. A failed run (5xx) emails the team

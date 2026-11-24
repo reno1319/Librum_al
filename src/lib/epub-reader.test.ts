@@ -403,6 +403,21 @@ describe("buildReaderContent: the sample cut", () => {
     expect(wordsIn(r.html)).toBe(8800);
     expect(r.html).toContain("k01p07 ");
     expect(r.html).not.toContain("k01p08");
+    // SC1 N1: the % counts what the word cap counted, 7,500 of the
+    // book's ~103,000 words (titles add a few): 7%, not the old 6%.
+    expect(r.approximatePercent).toBe(7);
+  });
+
+  it("SC1 N1: a 9,000-word introduction cut by the word cap shows its real share, not ~1%", async () => {
+    const intro = { id: "f", href: "f.xhtml", body: Array.from({ length: 90 }, (_, j) => para(`intro${j}`, 100)).join("") };
+    const docs = [intro, ...book(20, 50)];
+    const guide = `<guide><reference type="text" href="c0.xhtml"/></guide>`;
+    const r = await buildReaderContent(await epub({ docs, guide }), "sample");
+    if (!r.available) throw new Error("unavailable");
+    expect(wordsIn(r.html)).toBe(8800); // 88 of the 90 intro paragraphs (first to reach 8,750)
+    expect(r.html).not.toContain("k00p00");
+    // 7,500 counted words of ~109,000: 7%.
+    expect(r.approximatePercent).toBe(7);
   });
 
   it("the cap also holds when each chapter is one big container (Calibre style)", async () => {

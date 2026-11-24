@@ -31,6 +31,7 @@ type MockSupabaseOptions = {
   downloadBytes?: Uint8Array;
   downloadError?: { message: string } | null;
   uploadError?: { message: string } | null;
+  infoSize?: number;
 };
 
 function makeMockSupabase(options: MockSupabaseOptions = {}) {
@@ -55,9 +56,13 @@ function makeMockSupabase(options: MockSupabaseOptions = {}) {
     Promise.resolve({ error: options.uploadError ?? null }),
   );
   const remove = vi.fn((_paths: string[]) => Promise.resolve({ error: null }));
-  const storageFrom = vi.fn((_bucket: string) => ({ download, upload, remove }));
+  // G2 c2: object info, read before any download.
+  const info = vi.fn((_path: string) =>
+    Promise.resolve(options.infoSize === undefined ? { data: null, error: { message: "n/a" } } : { data: { size: options.infoSize }, error: null }),
+  );
+  const storageFrom = vi.fn((_bucket: string) => ({ download, upload, remove, info }));
 
-  return { rpc, from, storage: { from: storageFrom }, _spies: { rpc, from, select, eq, maybeSingle, download, upload, remove, storageFrom } };
+  return { rpc, from, storage: { from: storageFrom }, _spies: { rpc, from, select, eq, maybeSingle, download, upload, remove, info, storageFrom } };
 }
 
 let currentMockSupabase: ReturnType<typeof makeMockSupabase>;
@@ -739,6 +744,41 @@ describe("images inside an article (e2)", () => {
     expect(r).toEqual({ ok: false, error: "That doesn't look like a JPG, PNG or WebP image." });
     expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith([tmp]);
     expect(currentMockSupabase._spies.upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("G2 c2: the 5 MB limit is checked before the staged file is read", () => {
+  const tmp = "editor-1/tmp/blog/11111111-1111-4111-8111-111111111111.jpg";
+
+  it("inline picture over 5 MB: refused from its stored size, never downloaded, staged file removed", async () => {
+    currentMockSupabase = makeMockSupabase({ infoSize: 5 * 1024 * 1024 + 1 });
+    const r = await uploadBlogInlineImageAction(tmp);
+    expect(r).toEqual({ ok: false, error: "Images must be under 5 MB." });
+    expect(currentMockSupabase._spies.info).toHaveBeenCalledWith(tmp);
+    expect(currentMockSupabase._spies.download).not.toHaveBeenCalled();
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith([tmp]);
+  });
+
+  it("inline picture at exactly 5 MB by its stored size: goes on to the download", async () => {
+    currentMockSupabase = makeMockSupabase({ infoSize: 5 * 1024 * 1024 });
+    const r = await uploadBlogInlineImageAction("editor-1/tmp/blog/11111111-1111-4111-8111-111111111111.png");
+    expect(r.ok).toBe(true);
+    expect(currentMockSupabase._spies.download).toHaveBeenCalled();
+  });
+
+  it("stored size unknown: falls back to the download and the old byte check", async () => {
+    currentMockSupabase = makeMockSupabase();
+    const r = await uploadBlogInlineImageAction("editor-1/tmp/blog/11111111-1111-4111-8111-111111111111.png");
+    expect(r.ok).toBe(true);
+    expect(currentMockSupabase._spies.download).toHaveBeenCalled();
+  });
+
+  it("cover over 5 MB: refused before the download, staged file removed", async () => {
+    currentMockSupabase = makeMockSupabase({ infoSize: 6 * 1024 * 1024 });
+    await expect(createBlogPostAction(validFormData({ coverStoragePath: tmp }))).rejects.toBeInstanceOf(RedirectSignal);
+    expect(String(mockRedirect.mock.calls.at(-1)?.[0])).toContain(encodeURIComponent("Cover image must be under 5MB"));
+    expect(currentMockSupabase._spies.download).not.toHaveBeenCalled();
+    expect(currentMockSupabase._spies.remove).toHaveBeenCalledWith([tmp]);
   });
 });
 

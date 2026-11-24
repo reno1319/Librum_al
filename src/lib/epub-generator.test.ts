@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import JSZip from "jszip";
 import { generateEpub, patchEpubMetadata } from "./epub-generator";
 import { validateEpubStructure } from "./epub-validation";
-import { extractEpubSample } from "./epub-sample";
+import { buildReaderContent } from "./epub-reader";
 import { convertDocxToDocument } from "./docx-converter";
 import {
   buildDocxBytes,
@@ -353,15 +353,13 @@ describe("DOCX -> EPUB -> Read Sample round trip", () => {
     const validation = await validateEpubStructure(epubBytes);
     expect(validation).toEqual({ valid: true });
 
-    // 2. The EXISTING, unmodified PRODUCT-1 sample extractor -- proves
-    // a DOCX-converted book works with Read Sample with zero
+    // 2. The readers' sample (G2: the reader's own, epub-reader.ts) --
+    // proves a DOCX-converted book works with Read Sample with zero
     // DOCX-specific code path anywhere in that pipeline.
-    const sample = await extractEpubSample(epubBytes);
+    const sample = await buildReaderContent(epubBytes, "sample");
     expect(sample.available).toBe(true);
     if (!sample.available) return;
-    expect(sample.sections.length).toBeGreaterThan(0);
-    const allSampleText = sample.sections.map((s) => s.html).join(" ");
-    expect(allSampleText).toContain("opening line of the story");
+    expect(sample.html).toContain("opening line of the story");
   });
 
   // LIBRUM 2.0 PRODUCT-5 EPUB-SAMPLE-AVAILABILITY CORRECTION: a
@@ -377,7 +375,7 @@ describe("DOCX -> EPUB -> Read Sample round trip", () => {
   // manuscript sized to genuinely stress the same pipeline (many
   // chapters, real paragraph volume approaching a real short novel,
   // multiple embedded images), proving the full DOCX -> EPUB ->
-  // validateEpubStructure() -> extractEpubSample() chain still succeeds
+  // validateEpubStructure() -> readers' sample (buildReaderContent) chain still succeeds
   // at production scale, not just on a minimal fixture.
   it("a large, multi-chapter, illustrated DOCX (production-scale, not a trivial fixture) still converts, validates, and extracts a real Read Sample", async () => {
     const CHAPTER_COUNT = 20;
@@ -423,17 +421,17 @@ describe("DOCX -> EPUB -> Read Sample round trip", () => {
     const validation = await validateEpubStructure(epubBytes);
     expect(validation).toEqual({ valid: true });
 
-    const sample = await extractEpubSample(epubBytes);
+    const sample = await buildReaderContent(epubBytes, "sample");
     expect(sample.available).toBe(true);
     if (!sample.available) return;
-    expect(sample.sections.length).toBeGreaterThan(0);
+    const sections = sample.html.split('<section class="lb-sec">').length - 1;
+    expect(sections).toBeGreaterThan(0);
     // A real ~10% sample of a 20-chapter book should land well short of
     // the whole book, not accidentally include everything.
-    expect(sample.sections.length).toBeLessThan(CHAPTER_COUNT);
+    expect(sections).toBeLessThan(CHAPTER_COUNT);
     expect(sample.approximatePercent).toBeGreaterThan(0);
     expect(sample.approximatePercent).toBeLessThanOrEqual(15);
-    const allSampleText = sample.sections.map((s) => s.html).join(" ");
-    expect(allSampleText).toContain("chapter 1, paragraph 1");
+    expect(sample.html).toContain("chapter 1, paragraph 1");
   }, 20000);
 });
 

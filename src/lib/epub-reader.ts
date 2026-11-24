@@ -517,11 +517,14 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   let included = 0;
   let includedWords = 0;
   let cut = units.length - 1;
+  // SC1 N1: true when the word cap, not the 10% share, ended the sample.
+  let cutByWords = false;
   for (let u = 0; u < units.length; u++) {
     included += units[u].text.length;
     includedWords += countWords(units[u].text);
     if (included >= target || includedWords >= wordTarget) {
       cut = u;
+      cutByWords = included < target;
       break;
     }
   }
@@ -541,7 +544,15 @@ export async function buildReaderContent(bytes: Buffer, mode: ReaderMode): Promi
   const wordsBefore = before.reduce((s, u) => s + countWords(u.text), 0);
   const giant = trimInsideBlock(cutHtml, regionStart, regionEnd, target - charsBefore, wordTarget - wordsBefore);
   if (giant) included = charsBefore + giant.keptText.length;
-  const sampleTextShare = Math.min(100, Math.max(1, Math.round((Math.max(0, included - frontFree) / total) * 100)));
+  // SC1 N1: a sample ended by the word cap reports its share in words,
+  // minus the same free front matter the word cap gave (at most
+  // FRONT_MATTER_FREE_MAX_WORDS), not the 3% character allowance; with a
+  // long introduction that allowance is far larger and made the % too low.
+  const frontFreeWords = wordTarget - SAMPLE_MAX_WORDS;
+  const keptWords = wordsBefore + (giant ? countWords(giant.keptText) : countWords(units[cut].text));
+  const sampleTextShare = cutByWords
+    ? Math.min(100, Math.max(1, Math.round((Math.max(0, keptWords - frontFreeWords) / totalWords) * 100)))
+    : Math.min(100, Math.max(1, Math.round((Math.max(0, included - frontFree) / total) * 100)));
 
   const SAMPLE_END = '<div class="lb-sample-end" id="lb-sample-end"></div>';
   const sections: string[] = [];

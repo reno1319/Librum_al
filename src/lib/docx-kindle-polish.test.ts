@@ -4,7 +4,8 @@ import { convertDocxToDocument } from "./docx-converter";
 import { buildDocxBytes, emptyPara, fmt } from "./docx-test-fixtures";
 import { canToggleGuess, emptyChoices, normalizeChoices, toggleGuess } from "./docx-preview-choices";
 import { generateEpub } from "./epub-generator";
-import { countEpubWords, extractEpubSample } from "./epub-sample";
+import { countEpubWords } from "./epub-sample";
+import { buildReaderContent } from "./epub-reader";
 import { validateEpubStructure } from "./epub-validation";
 import { addLibrumPages, frontPageXhtml, type LibrumFrontPage } from "./epub-librum-pages";
 
@@ -232,9 +233,9 @@ describe("K4: the contents page and landmarks", () => {
       { heading: "Kreu i dytë", html: `<p>${LONG}</p>` },
     ];
     const bytes = await generateEpub(input(sections));
-    const sample = await extractEpubSample(bytes);
+    const sample = await buildReaderContent(bytes, "sample");
     expect(sample.available).toBe(true);
-    if (sample.available) expect(sample.sections.map((s) => s.html).join("")).not.toContain("Përmbajtja");
+    if (sample.available) expect(sample.html).not.toContain("Përmbajtja");
     // Two titles plus two paragraphs: the contents page adds nothing.
     const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
     expect(await countEpubWords(bytes)).toBe(words(`Kreu i parë Kreu i dytë ${LONG} ${LONG}`));
