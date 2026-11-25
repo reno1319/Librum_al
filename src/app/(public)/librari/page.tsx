@@ -2,17 +2,17 @@ import Link from "next/link";
 import { AdultTag } from "@/components/adult-tag";
 import { bundleIsAdult } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
-import { formatCatalogPriceLabel, resolveCatalogPriceState } from "@/lib/catalog-price";
+import { formatCatalogPriceLabel } from "@/lib/catalog-price";
 import { parseBookstoreQuery, buildBookstoreHref, countCatalogueFacets, type FacetRow } from "@/lib/bookstore";
 import { GENRES } from "@/lib/genres";
 import { StoreBookCard } from "@/components/store-book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
-import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
+import { resolveBookByline } from "@/lib/book-byline";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import { getLibrumChoiceBook } from "@/lib/librum-choice";
-import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
+import { LibrariaBanner, type BannerSlide } from "@/components/libraria-banner";
+import { MAX_SHOWING_SLIDES } from "@/lib/libraria-banner";
 import {
   categoryButtons,
   NON_FICTION_GENRES,
@@ -21,9 +21,8 @@ import {
   type RatingSummary,
 } from "@/lib/libraria-store";
 import type { PublicBook, PublicBundle } from "@/lib/types";
-import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
+import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
-import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { DetailsCloseButton } from "@/components/details-close-button";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
@@ -39,8 +38,8 @@ export const dynamic = "force-dynamic";
 
 // LR1 (Renato 11-25, hand sketch, pictures r4 and patch 1 pictures v2):
 // Libraria is a shop front of shelves. Two views at one address:
-//   - the shelves (no search, no category): the small feature strip
-//     (until the banner, patch 3), "Më të rinjtë në Librum" with
+//   - the shelves (no search, no category): the banner slides (patch
+//     3; none saved = no banner), "Më të rinjtë në Librum" with
 //     category buttons and the "Më shumë kategori" box, "Libra
 //     jo-artistikë", "Paketat" (lr1-10 a), and, for visitors only,
 //     "Bota e leximit ju pret" (lr1-5 a, his text as written, lr1-11 b);
@@ -282,6 +281,61 @@ function coverUrlFor(supabase: SupabaseClient, coverPath: string | null | undefi
     : null;
 }
 
+// LR1 patch 3: the slides that show today (the view keeps only those
+// whose book Libraria lists, inside their days, Tirana), in staff order,
+// at most 6 (lr3-7 a). Each takes its book's title, byline, cover and
+// link (lr3-1 a, lr1-2c a). A failed read shows no banner.
+type SlideViewRow = {
+  id: string;
+  book_id: string;
+  description: string;
+  tag: string | null;
+  image_path: string;
+  phone_image_path: string | null;
+};
+async function fetchBannerSlides(supabase: SupabaseClient): Promise<BannerSlide[]> {
+  const { data, error } = await supabase
+    .from("public_libraria_banner_slides")
+    .select("id, book_id, description, tag, image_path, phone_image_path")
+    .order("position", { ascending: true })
+    .limit(MAX_SHOWING_SLIDES)
+    .returns<SlideViewRow[]>();
+  if (error) {
+    console.error("Libraria: failed to load the banner slides:", error);
+    return [];
+  }
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+  const { data: books, error: booksError } = await supabase
+    .from("public_books")
+    .select("*, pen:public_pen_names(id, name)")
+    .in("id", [...new Set(rows.map((r) => r.book_id))])
+    .returns<BookWithAuthor[]>();
+  if (booksError) {
+    console.error("Libraria: failed to load the banner books:", booksError);
+    return [];
+  }
+  const byId = new Map((books ?? []).map((b) => [b.id, b]));
+  const picture = (path: string) => supabase.storage.from("libraria").getPublicUrl(path).data.publicUrl;
+  return rows.flatMap((r) => {
+    const book = byId.get(r.book_id);
+    if (!book) return [];
+    return [
+      {
+        id: r.id,
+        href: `/libra/${book.id}`,
+        title: book.title,
+        author: resolveBookByline(book),
+        description: r.description,
+        tag: r.tag,
+        pictureUrl: picture(r.image_path),
+        phonePictureUrl: r.phone_image_path ? picture(r.phone_image_path) : null,
+        coverUrl: coverUrlFor(supabase, book.cover_path),
+      },
+    ];
+  });
+}
+
 // Books per shelf (5 across on a computer, as in the sketch).
 const SHELF_SIZE = 5;
 
@@ -459,12 +513,12 @@ export default async function BookstorePage({
     );
   }
 
-  const [newest, onlyOnLibrum, nonFiction, bundles, librumChoice, genresWithBooks, staffCategories] = await Promise.all([
+  const [newest, onlyOnLibrum, nonFiction, bundles, slides, genresWithBooks, staffCategories] = await Promise.all([
     fetchShelf(supabase),
     fetchShelf(supabase, undefined, { onlyOnLibrum: true }),
     fetchShelf(supabase, NON_FICTION_GENRES),
     fetchPublishedBundles(supabase),
-    getLibrumChoiceBook(),
+    fetchBannerSlides(supabase),
     fetchGenresWithBooks(supabase),
     fetchStaffCategoryButtons(supabase),
   ]);
@@ -472,21 +526,12 @@ export default async function BookstorePage({
   const ratings = await fetchRatings(supabase, [...new Set(shown.map((b) => b.id))]);
   const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
 
-  // Decision 1: the feature strip stays on top until the banner (patch
-  // 3): the priced pick as "Librum's choice", else the newest book.
-  const featured = newest && newest.length > 0 ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, newest[0]) : null;
-
   return (
     <main className="flex-1 bg-surface">
       <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
         <h1 className="sr-only">Libraria</h1>
-        {featured && (
-          <FeaturedStrip
-            book={featured.book}
-            label={featured.label}
-            coverUrl={coverUrlFor(supabase, featured.book.cover_path)}
-          />
-        )}
+        {/* LR1 patch 3: no slides saved or showing = no banner. */}
+        {slides.length > 0 && <LibrariaBanner slides={slides} />}
 
         {newest === null ? (
           <EmptyState
@@ -506,7 +551,7 @@ export default async function BookstorePage({
             }
           />
         ) : (
-          <Shelf title="Më të rinjtë në Librum" books={newest} ctx={ctx} first={!featured}>
+          <Shelf title="Më të rinjtë në Librum" books={newest} ctx={ctx} first={slides.length === 0}>
             <CategoryButtons genres={categoryButtons(genresWithBooks, staffCategories)} />
           </Shelf>
         )}
@@ -737,92 +782,6 @@ function ReadingInvite() {
     </section>
   );
 }
-
-// P2 (design B): the feature is one slim strip -- small cover, label,
-// title, "nga <author> · <genre>", the price and one "Shiko librin"
-// pill to the book's own page, which owns buying and the sample reader.
-// Same byline rule as before: an original author has no Librum page, so
-// it is plain text; the pen name keeps its link.
-function FeaturedStrip({
-  book,
-  label,
-  coverUrl,
-}: {
-  book: BookWithAuthor;
-  label: string;
-  coverUrl: string | null;
-}) {
-  const authorName = resolveBookByline(book);
-  const priceLabel = formatCatalogPriceLabel(book.price_all);
-  const isFree = resolveCatalogPriceState(book.price_all) === "free";
-
-  return (
-    <section
-      aria-labelledby="featured-book-title"
-      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-[12px] border border-border bg-[#fbf9f4] p-3 sm:gap-x-5 sm:px-5 sm:py-4"
-    >
-      <Link
-        href={`/libra/${book.id}`}
-        aria-hidden="true"
-        tabIndex={-1}
-        className="block w-14 shrink-0 sm:w-[76px]"
-      >
-        {coverUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={coverUrl}
-            alt=""
-            className="aspect-[5/8] w-full rounded-[2px] object-contain object-bottom drop-shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
-          />
-        ) : (
-          <CoverPlaceholder
-            title={book.title}
-            authorName={authorName}
-            className="aspect-[5/8] w-full rounded-[2px] shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
-          />
-        )}
-      </Link>
-
-      <div className="min-w-0 flex-[1_1_11rem]">
-        <p className="text-[0.8125rem] font-semibold text-[#806510]">{label}</p>
-        <h2 id="featured-book-title" className="mt-0.5 font-serif text-lg leading-snug text-primary sm:mt-1 sm:text-[1.375rem]">
-          <Link href={`/libra/${book.id}`} className="focus-ring rounded-sm hover:underline">
-            {book.title}
-          </Link>
-        </h2>
-        <p className="mt-0.5 text-sm text-muted">
-          {authorName && book.pen && !resolveOriginalAuthor(book) && (
-            <>
-              nga{" "}
-              <Link href={authorPagePath(book.pen.id)} className="focus-ring rounded-sm hover:underline">
-                {authorName}
-              </Link>
-            </>
-          )}
-          {authorName && resolveOriginalAuthor(book) && <>nga {authorName}</>}
-          {authorName && book.genre && " · "}
-          {book.genre}
-          {(authorName || book.genre) && " · "}
-          <span className={`font-semibold ${isFree ? "text-[#2f6b4f]" : "text-foreground"}`}>{priceLabel}</span>
-          {book.is_adult && (
-            <>
-              {" "}
-              <AdultTag />
-            </>
-          )}
-        </p>
-      </div>
-
-      <Link href={`/libra/${book.id}`} className={FEATURE_CTA_CLASSES}>
-        Shiko librin
-      </Link>
-    </section>
-  );
-}
-
-// DR1 fix 3: outlined on this light strip (gold only on dark green).
-const FEATURE_CTA_CLASSES =
-  "focus-ring inline-flex shrink-0 items-center justify-center rounded-full border border-primary px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 
 // Up to three member covers, fanned left to right as in the mockup.
 const BUNDLE_COVER_LIMIT = 3;

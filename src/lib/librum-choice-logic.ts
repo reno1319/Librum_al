@@ -1,22 +1,7 @@
-// F5: the pure rules around the "Librum's choice" pick, kept out of the
-// pages so each one is unit-testable without a render harness.
-
-// Bookstore (settled D7): the feature block says "Librum's choice" only
-// while a pick exists, is published (getLibrumChoiceBook's own filter) and
-// has a price -- the Bookstore lists only priced books, and an unpriced
-// pick would render "Buy · Price unavailable". Otherwise it shows the
-// newest book as "New on Librum", exactly as before F5.
-export const LIBRUMS_CHOICE_LABEL = "Zgjedhja e Librum";
-export const NEW_ON_LIBRUM_LABEL = "I ri në Librum";
-
-export function resolveBookstoreFeature<T extends { price_all: number | null }>(
-  pick: T | null,
-  newest: T | null,
-): { book: T; label: string } | null {
-  if (pick && pick.price_all != null) return { book: pick, label: LIBRUMS_CHOICE_LABEL };
-  if (newest) return { book: newest, label: NEW_ON_LIBRUM_LABEL };
-  return null;
-}
+// F5: the pure rules of the Featured picks admin search, kept out of the
+// page so they are unit-testable without a render harness. LR1 patch 3
+// (lr3-6 a, lr3-6b a): the Libraria banner replaced the "Librum's
+// choice" strip, so its label rule is gone.
 
 // Admin search (C1): a plain GET ?q=, trimmed and capped, then escaped
 // for an ILIKE pattern so `%`, `_` and `\` match themselves.

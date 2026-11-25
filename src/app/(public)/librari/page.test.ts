@@ -56,8 +56,7 @@ describe("BookstorePage: maintenance-mode gate", () => {
 // ============================================================
 type Row = Record<string, unknown>;
 
-// Makes every public_books LIST read fail (getLibrumChoiceBook's
-// maybeSingle still works).
+// Makes every public_books LIST read fail.
 let failBookList = false;
 
 function tableStub(rows: Row[]) {
@@ -125,6 +124,13 @@ let authorBookRows: Row[] = [];
 let ownedIds: string[] = [];
 let categoryRows: Row[] = [];
 let failCategoryRead = false;
+let slideRows: Row[] = [];
+let failSlideRead = false;
+
+const PIC = (n: number) => `slides/0000000${n}-0000-4000-8000-000000000000.jpg`;
+function slideRow(n: number, bookId: string, extra: Row = {}): Row {
+  return { id: `slide-${n}`, position: n, book_id: bookId, description: `Slide line ${n}.`, tag: null, image_path: PIC(n), phone_image_path: null, ...extra };
+}
 
 describe("BookstorePage: LR1 shop front", () => {
   beforeEach(() => {
@@ -140,6 +146,8 @@ describe("BookstorePage: LR1 shop front", () => {
     ownedIds = [];
     categoryRows = [];
     failCategoryRead = false;
+    slideRows = [];
+    failSlideRead = false;
     rpcCalls = [];
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
@@ -147,6 +155,7 @@ describe("BookstorePage: LR1 shop front", () => {
       from: (table: string) => {
         if (table === "public_books" && failBookList) return failing();
         if (table === "libraria_category_buttons") return failCategoryRead ? failing() : tableStub(categoryRows);
+        if (table === "public_libraria_banner_slides") return failSlideRead ? failing() : tableStub(slideRows);
         return tableStub(
           table === "public_books"
             ? bookRows
@@ -175,7 +184,13 @@ describe("BookstorePage: LR1 shop front", () => {
           error: null,
         });
       },
-      storage: { from: () => ({ getPublicUrl: () => ({ data: { publicUrl: "https://cdn.example/c.png" } }) }) },
+      storage: {
+        from: (bucket: string) => ({
+          getPublicUrl: (path: string) => ({
+            data: { publicUrl: bucket === "libraria" ? `https://cdn.example/libraria/${path}` : "https://cdn.example/c.png" },
+          }),
+        }),
+      },
     }));
   });
 
@@ -196,10 +211,11 @@ describe("BookstorePage: LR1 shop front", () => {
   const linkRe = (href: string, text: string, extra = "") =>
     new RegExp(`<a\\b(?=[^>]*href="${esc(href)}")${extra ? `(?=[^>]*${extra})` : ""}[^>]*>${esc(text)}<`);
 
-  it("the shelves view: hidden Libraria heading, the strip, the newest five, and none of the old page", async () => {
+  it("the shelves view: hidden Libraria heading, no strip, the newest five, and none of the old page", async () => {
     const html = await render();
     expect(html).toContain('<h1 class="sr-only">Libraria</h1>');
-    expect(html).toContain("I ri në Librum");
+    // lr3-6 a: the old "Zgjedhja e Librum" / "I ri në Librum" strip is gone.
+    for (const gone of ["I ri në Librum", "Zgjedhja e Librum"]) expect(html, gone).not.toContain(gone);
     expect(titles(section(html, "Më të rinjtë në Librum"))).toEqual(["Book 10", "Book 09", "Book 08", "Book 07", "Book 06"]);
     for (const gone of ["Filtrat", "Renditja", "Zhanri", "Klasikët shqiptarë", "Jeni autor?", "Filloni të publikoni", "Të gjithë librat", "Hiq të gjitha"]) {
       expect(html, gone).not.toContain(gone);
@@ -379,6 +395,45 @@ describe("BookstorePage: LR1 shop front", () => {
     expect(html).toContain("Asnjë libër nuk përputhet me kërkimin tuaj.");
     expect(html).toMatch(linkRe("/librari", "Kthehu te Libraria"));
     expect(await render({ genre: "Nope" })).toContain("Më të rinjtë në Librum");
+  });
+
+  it("no slides showing, or the slides read fails: no banner", async () => {
+    expect(await render()).not.toContain('aria-roledescription="carousel"');
+    slideRows = [slideRow(1, "book-03")];
+    failSlideRead = true;
+    expect(await render()).not.toContain('aria-roledescription="carousel"');
+  });
+
+  it("the banner: the view's slides in order, each with the book's own title, author, cover and link (lr3-1 a)", async () => {
+    slideRows = [
+      slideRow(1, "book-03", { tag: "Ofertë e javës", phone_image_path: PIC(7) }),
+      slideRow(2, "book-08"),
+      slideRow(3, "book-missing"),
+    ];
+    const html = await render();
+    expect(html).toContain('aria-roledescription="carousel"');
+    // A slide whose book the shop can't read hides by itself (lr3-5 a).
+    expect(html).not.toContain("Slide line 3.");
+    expect(html).toContain('aria-label="1 nga 2"');
+    expect(html.indexOf("Slide line 1.")).toBeLessThan(html.indexOf("Slide line 2."));
+    expect(html).toMatch(linkRe("/libra/book-03", "", 'class="[^"]*group relative'));
+    expect(html).toContain(">Book 03</p>");
+    expect(html).toContain("nga An Author");
+    expect(html).toContain(">Ofertë e javës</span>");
+    expect(html).toContain(`srcSet="https://cdn.example/libraria/${PIC(7)}"`);
+    expect(html).toContain(`src="https://cdn.example/libraria/${PIC(1)}"`);
+    expect(html).toContain("Shiko librin");
+    // Two slides: arrows and dots.
+    expect(html).toContain('aria-label="Slajdi tjetër"');
+    expect(html).toContain('aria-label="Shko te slajdi 2"');
+  });
+
+  it("one slide: no arrows and no dots", async () => {
+    slideRows = [slideRow(1, "book-03")];
+    const html = await render();
+    expect(html).toContain("Slide line 1.");
+    expect(html).not.toContain("Slajdi tjetër");
+    expect(html).not.toContain("Shko te slajdi");
   });
 
   it("an empty shop says so; a failed load says it could not open, with no strip", async () => {

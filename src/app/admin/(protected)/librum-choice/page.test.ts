@@ -13,8 +13,6 @@ vi.mock("@/lib/supabase/admin", () => ({
   },
 }));
 vi.mock("./actions", () => ({
-  pickLibrumChoiceFromForm: async () => undefined,
-  removeLibrumChoiceFromForm: async () => undefined,
   setHomeSlotFromForm: async () => undefined,
   removeHomeSlotFromForm: async () => undefined,
 }));
@@ -120,36 +118,16 @@ describe("/admin/librum-choice", () => {
     expect(html).not.toContain("Showing the first 20 books");
   });
 
-  it("nothing picked: the sentence, and every row has Pick", async () => {
+  // LR1 patch 3 (lr3-6b a): the Librum's choice part is gone; the page
+  // keeps the home page covers and the book search.
+  it("has no Librum's choice part: no current pick, no Pick button, no pick read", async () => {
+    rows[1] = book(2, { librum_choice_at: "2026-10-18T09:00:00Z" });
     const html = await render();
-    expect(html).toContain("Nothing picked. The Bookstore shows the newest book as New on Librum.");
-    expect(html.match(/>Pick</g)).toHaveLength(3);
-    expect(html).not.toContain(">Remove<");
-  });
-
-  it("with a pick: the current pick with Remove, its row says Picked", async () => {
-    rows[1] = book(2, { librum_choice_at: "2026-10-18T09:00:00Z", pen: { id: "pen-pena", name: "Pena" } });
-    const html = await render();
+    expect(html).not.toContain("Librum&#x27;s choice");
     expect(html).not.toContain("Nothing picked");
-    expect(html).toContain(">Remove<");
-    expect(html).toContain("Pena");
-    expect(html.match(/>Picked</g)).toHaveLength(1);
-    // F5 r2 (A2): "Picked" in the site's dark green token, never green-700.
-    expect(html).toContain('<span class="text-sm font-semibold text-primary">Picked</span>');
-    expect(html).not.toContain("green-700");
-    expect(html.match(/>Pick</g)).toHaveLength(2);
-  });
-
-  // F5 r2 (A3): the current-pick card has a visible "Current pick" heading
-  // that names its section, with and without a pick.
-  it.each([false, true])("the current-pick card has a visible Current pick heading (picked: %s)", async (picked) => {
-    if (picked) rows[0] = book(1, { librum_choice_at: "2026-10-18T09:00:00Z" });
-    const html = await render();
-    expect(html).toContain(
-      '<h2 id="librum-choice-current" class="mb-1 text-sm font-medium">Librum&#x27;s choice on the Bookstore: current pick</h2>',
-    );
-    expect(html).toContain('aria-labelledby="librum-choice-current"');
-    expect(html.indexOf("current pick</h2>")).toBeLessThan(html.indexOf(picked ? ">Remove<" : "Nothing picked."));
+    expect(html).not.toContain(">Pick<");
+    expect(html).not.toContain(">Picked<");
+    expect(queries.some((q) => q.some((c) => c.method === "not" && c.args[0] === "librum_choice_at"))).toBe(false);
   });
 
   it("a row without a cover says it can't go on the home page", async () => {
@@ -170,7 +148,7 @@ describe("/admin/librum-choice", () => {
   it("more than 20 books -> the first 20 and the line", async () => {
     rows = Array.from({ length: 25 }, (_, i) => book(i + 1));
     const html = await render();
-    expect(html.match(/>Pick</g)).toHaveLength(20);
+    expect(html.match(/aria-label="Put Book \d+ on the home page"/g)).toHaveLength(20);
     expect(html).toContain("Showing the first 20 books");
   });
 
@@ -179,31 +157,23 @@ describe("/admin/librum-choice", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const html = await render();
     expect(html).toContain("Something went wrong. Please try again.");
-    expect(html).not.toContain(">Pick<");
+    expect(html).not.toContain("on the home page\"");
     vi.restoreAllMocks();
   });
 
   it("success and error messages show", async () => {
     expect(await render({ success: "Saved." })).toContain("Saved.");
-    expect(await render({ error: "That book can't be picked." })).toContain("That book can&#x27;t be picked.");
-  });
-
-  it("feature off (before the migration): Nothing picked, and the list still loads", async () => {
-    // getLibrumChoiceBook's own read fails as feature-off; modelled by no
-    // row carrying librum_choice_at, which is what the page sees (null).
-    const html = await render();
-    expect(html).toContain("Nothing picked.");
-    expect(html).toContain(">Pick<");
+    expect(await render({ error: "That book can't go on the home page." })).toContain("That book can&#x27;t go on the home page.");
   });
 });
 
 describe("/admin/librum-choice: home page covers (HOME-PICKS-1)", () => {
-  const slotCards = (html: string) => html.slice(html.indexOf('id="home-slots"'), html.indexOf('id="librum-choice-current"'));
+  const slotCards = (html: string) => html.slice(html.indexOf('id="home-slots"'), html.indexOf('id="librum-choice-q"'));
 
-  it("is titled Featured picks, with the home slots before Librum's choice", async () => {
+  it("is titled Featured picks, with the home slots before the book search", async () => {
     const html = await render();
     expect(html).toContain(">Featured picks</h1>");
-    expect(html.indexOf("Home page covers")).toBeLessThan(html.indexOf("Librum&#x27;s choice on the Bookstore"));
+    expect(html.indexOf("Home page covers")).toBeLessThan(html.indexOf("Search published books"));
   });
 
   it("no slots filled: three Empty slots, labelled by place in the fan", async () => {
@@ -248,7 +218,7 @@ describe("/admin/librum-choice: home page covers (HOME-PICKS-1)", () => {
     const html = await render();
     expect(slotCards(html)).toContain("Something went wrong. Please try again.");
     expect(slotCards(html)).not.toContain("Empty:");
-    expect(html).toContain(">Pick<");
+    expect(html).toContain("Book 01");
   });
 
   it("each listed book with a cover can be put on the home page; not one in a slot, nor one without a cover", async () => {
