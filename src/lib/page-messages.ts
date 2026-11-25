@@ -8,6 +8,18 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // CART (2026-11-25, item 32): the book page, after Shto në shportë / Dhuroje.
+  "Ky libër nuk mund të shtohet në shportë.",
+  "Nuk mund ta blini ose ta dhuroni librin tuaj.",
+  "Këtë libër e keni tashmë në Bibliotekë.",
+  "Shporta mban deri në 50 libra.",
+  "Nuk u shtua në shportë. Provoni përsëri.",
+  // CART: the gift form and the cart page.
+  "Shkruani një email të saktë për personin që e merr.",
+  "Shënimi mund të ketë deri në 300 shkronja.",
+  "Ky libër është tashmë në shportë si dhuratë për këtë email.",
+  "Dhurata nuk u ndryshua. Provoni përsëri.",
+  "Shporta nuk u hap. Provoni përsëri pas pak.",
   // BUILD 3 Payment & tax (2026-11-23).
   "Zgjidhni ku paguani tatimet mbi të ardhurat.",
   "Zgjidhni shtetin ku paguani tatimet.",

@@ -97,6 +97,8 @@ import {
 import { BookDescriptionView } from "@/components/book-description-view";
 import { CoverZoom, ExpandableText } from "@/components/book-page-extras";
 import { StickyBuyBar } from "@/components/sticky-buy-bar";
+import { ADD_TO_CART_LABEL, CARD_PAYMENT_SOON_LINE, GIFT_LABEL, IN_CART_LABEL } from "@/lib/cart";
+import { addToCart } from "../../shporta/actions";
 import {
   IconCalendar,
   IconClock,
@@ -426,6 +428,10 @@ export default async function BookDetailPage({
   // from starting as soon as it's done.
   let owned = false;
   let wishlisted = false;
+  // CART (item 32): whether this book is already in the reader's cart as
+  // their own copy, so the button says "Në shportë" instead of adding it
+  // again.
+  let inCart = false;
   if (user) {
     const { data: ownsBook } = await supabase.rpc("user_owns_book", {
       target_book_id: id,
@@ -440,6 +446,14 @@ export default async function BookDetailPage({
         .eq("reader_id", user.id)
         .maybeSingle();
       wishlisted = !!wishlistRow;
+      const { data: cartRow } = await supabase
+        .from("cart_items")
+        .select("id")
+        .eq("book_id", id)
+        .eq("reader_id", user.id)
+        .is("gift_email", null)
+        .maybeSingle();
+      inCart = !!cartRow;
     }
   }
 
@@ -933,6 +947,12 @@ export default async function BookDetailPage({
           ? <Link href={`/login?next=/libra/${book.id}`} className={STICKY_BTN}>Më njofto</Link>
           : notifyOn ? null
           : <form action={notifyMeWhenOut.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>Më njofto</button></form>)
+      : purchaseState === "paid-unowned-checkout-closed"
+        ? (inCart
+            ? <Link href="/shporta" className={STICKY_BTN}>Në shportë</Link>
+            : <form action={addToCart.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>{ADD_TO_CART_LABEL}</button></form>)
+      : purchaseState === "anonymous-paid-checkout-closed"
+        ? <Link href={`/login?next=/libra/${book.id}`} className={STICKY_BTN}>{ADD_TO_CART_LABEL}</Link>
       : purchaseState === "paid-unowned"
         ? <form action={buyBook.bind(null, book.id)}><button type="submit" className={STICKY_BTN}>Blej librin</button></form>
         : purchaseState === "free-unowned"
@@ -1449,6 +1469,7 @@ export default async function BookDetailPage({
                 state={purchaseState}
                 bookId={book.id}
                 wishlisted={wishlisted}
+                inCart={inCart}
                 downloadNote={downloadNote}
                 sampleSlot={boxSample}
                 readSlot={ownedRead}
@@ -1969,7 +1990,6 @@ async function unfollowAuthorFromBook(penNameId: string, bookId: string) {
 
 // PAID-CHECKOUT-SURFACE-1: the one reader-facing sentence for a paid book
 // while paid checkout is closed. Deliberately says nothing about why.
-const PAID_CHECKOUT_UNAVAILABLE_NOTICE = "Ky libër nuk mund të blihet ende.";
 
 // REDESIGN STEP 3 (P2) -> P1 (design B): full-width pills inside the
 // price box -- the main one filled, the secondary one outlined under it,
@@ -2058,6 +2078,7 @@ function PurchasePanel({
   state,
   bookId,
   wishlisted,
+  inCart,
   downloadNote,
   sampleSlot,
   readSlot,
@@ -2066,6 +2087,7 @@ function PurchasePanel({
   state: BookPurchaseState;
   bookId: string;
   wishlisted: boolean;
+  inCart: boolean;
   // DOWNLOADS-1: the buyer's line under Download EPUB ("owned" only).
   downloadNote: string | null;
   // P1 (design B): the sample button, after the main action and before
@@ -2155,8 +2177,11 @@ function PurchasePanel({
   if (state === "anonymous-paid-checkout-closed" || state === "paid-unowned-checkout-closed") {
     return (
       <div className="flex flex-col gap-3">
-        <p data-checkout-unavailable-notice="" className={`${STATUS_PILL_CLASSES} text-muted`}>
-          {PAID_CHECKOUT_UNAVAILABLE_NOTICE}
+        {/* CART (c1 a): the cart replaces the "can't be bought yet"
+            notice; card payment itself opens later. */}
+        {<CartButtons state={state} bookId={bookId} inCart={inCart} primary />}
+        <p data-checkout-unavailable-notice="" className="text-center text-[0.8125rem] text-muted">
+          {CARD_PAYMENT_SOON_LINE}
         </p>
         {sampleSlot}
 
@@ -2171,6 +2196,7 @@ function PurchasePanel({
         <Link href={`/login?next=/libra/${bookId}`} className={PRIMARY_ACTION_CLASSES}>
           {state === "anonymous-free" ? "Merre falas" : "Blej librin"}
         </Link>
+        {state === "anonymous-paid" && <CartButtons state={state} bookId={bookId} inCart={inCart} primary={false} />}
         {sampleSlot}
       </div>
     );
@@ -2206,9 +2232,52 @@ function PurchasePanel({
           </details>
         </form>
       )}
+      {state === "paid-unowned" && <CartButtons state={state} bookId={bookId} inCart={inCart} primary={false} />}
 
       {sampleSlot}
       {wishlistForm}
     </div>
+  );
+}
+
+// CART (Renato 2026-11-25, item 32; c2 a, g1 a, g4 a; pictures r2):
+// Add to cart and Gift, on a paid book for anyone but its author (the
+// panel never renders these for the author, an owner, a free, unpriced
+// or pre-order book). A signed-out visitor is sent to sign in first.
+function CartButtons({
+  state,
+  bookId,
+  inCart,
+  primary,
+}: {
+  state: BookPurchaseState;
+  bookId: string;
+  inCart: boolean;
+  primary: boolean;
+}) {
+  const signedOut = state === "anonymous-paid" || state === "anonymous-paid-checkout-closed";
+  const loginHref = `/login?next=/libra/${bookId}`;
+  const mainClasses = primary ? PRIMARY_ACTION_CLASSES : SECONDARY_ACTION_CLASSES;
+  return (
+    <>
+      {signedOut ? (
+        <Link href={loginHref} className={mainClasses}>
+          {ADD_TO_CART_LABEL}
+        </Link>
+      ) : inCart ? (
+        <Link href="/shporta" className={mainClasses}>
+          {IN_CART_LABEL}
+        </Link>
+      ) : (
+        <form action={addToCart.bind(null, bookId)}>
+          <button type="submit" className={mainClasses}>
+            {ADD_TO_CART_LABEL}
+          </button>
+        </form>
+      )}
+      <Link href={signedOut ? loginHref : `/libra/${bookId}/dhurate`} className={SECONDARY_ACTION_CLASSES}>
+        {GIFT_LABEL}
+      </Link>
+    </>
   );
 }
