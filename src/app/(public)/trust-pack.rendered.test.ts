@@ -104,6 +104,19 @@ describe("TRUST PACK 1: links to the reader help page", () => {
     expect(text).toContain("Librum mund të rikuperojë nga ju vetëm honorarin që mbajtët realisht nga ajo shitje, asnjëherë më shumë.");
   });
 
+  // B18 (D13 4a): an author who finds their book shared online.
+  it("Help tells an author what to do when their book is shared online", async () => {
+    const html = renderToStaticMarkup(await HelpPage());
+    const text = toText(html);
+    expect(text).toContain("Gjeta librin tim të shpërndarë në internet. Çfarë të bëj?");
+    expect(text).toContain(
+      "Na shkruani te support@librum.al me titullin e librit dhe lidhjen ku e gjetët. Ju ndihmojmë ta hiqni kopjen dhe kontrollojmë kush e ka shkarkuar.",
+    );
+    // It sits in the rights group, after the report answer.
+    const rights = text.slice(text.indexOf("Të drejtat dhe raportimet Cilën"));
+    expect(rights.indexOf("Gjeta librin tim")).toBeGreaterThan(rights.indexOf("Gjeta një libër që nuk duhet"));
+  });
+
   it("the Library and the book page's owned panel link to it", () => {
     expect(read("src/app/(public)/library/page.tsx")).toContain('href="/ndihme/leximi"');
     const book = read("src/app/(public)/libra/[id]/page.tsx");
