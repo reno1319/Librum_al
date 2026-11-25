@@ -66,7 +66,20 @@ function addFailed(bookId: string): never {
 }
 
 export async function addToCart(bookId: string) {
-  const { supabase, user } = await signedInUser(`/libra/${bookId}`);
+  await addToCartThen(bookId, `/libra/${bookId}`, "/shporta");
+}
+
+// LR1 (Renato 11-25, lr1-4 a): "Shto" on a Libraria card adds the book
+// and keeps the reader on Libraria; the card then reads "Në shportë".
+// Same rules and refusals as the book page's button (a refusal still
+// opens the book page with its reason). No redirect: the page re-renders
+// in place, so the reader keeps their scroll position.
+export async function addToCartFromLibraria(bookId: string) {
+  await addToCartThen(bookId, "/librari", null);
+}
+
+async function addToCartThen(bookId: string, loginNext: string, done: string | null) {
+  const { supabase, user } = await signedInUser(loginNext);
 
   const refusal = await bookRefusal(supabase, bookId, user.id);
   if (refusal) refuseBook(bookId, refusal);
@@ -90,7 +103,7 @@ export async function addToCart(bookId: string) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/shporta");
+  if (done) redirect(done);
 }
 
 // g1 a: a gift is a cart row with the friend's email and an optional

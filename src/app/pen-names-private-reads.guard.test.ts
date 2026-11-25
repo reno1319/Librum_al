@@ -90,6 +90,9 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   // CART (item 32, g4 a): whether the reader is the book's author, so
   // they can't add or gift their own book.
   "app/(public)/shporta/actions.ts": ["books"],
+  // LR1 lr1-12 a: the signed-in author's own book ids (ids only), so
+  // their own cards on Libraria show "Shiko librin", not "Shto".
+  "app/(public)/librari/page.tsx": ["books"],
 };
 // A helper that takes the author id as a parameter names it so.
 const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {

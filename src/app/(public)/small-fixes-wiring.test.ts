@@ -28,10 +28,25 @@ const read = (relative: string) => readFileSync(path.join(root, relative), "utf8
 describe("FIX1 X2: every header Sign up preselects Author", () => {
   it("desktop header and phone menu link to /signup?role=author", () => {
     for (const file of ["src/components/site-header.tsx", "src/components/mobile-nav.tsx"]) {
-      const source = read(file);
+      // LR1: Libraria's own header (StoreHeaderRow, below the default
+      // header) is a reader's shop, so its "Krijo llogari" goes to the
+      // plain sign-up, Reader chosen; checked separately below.
+      const full = read(file);
+      const cut = full.indexOf("function StoreHeaderRow(");
+      const source = cut === -1 ? full : full.slice(0, cut);
       expect(source).toContain('href="/signup?role=author"');
       expect(source).not.toContain('href="/signup"');
     }
+  });
+
+  it("LR1: Libraria's own header and closing box send a visitor to the reader sign-up", () => {
+    const header = read("src/components/site-header.tsx");
+    const store = header.slice(header.indexOf("function StoreHeaderRow("));
+    expect(store).toContain('href="/signup"');
+    expect(store).not.toContain("role=author");
+    const page = read("src/app/(public)/librari/page.tsx");
+    expect(page).toContain('href="/signup"');
+    expect(page).not.toContain("role=author");
   });
 
   // AUTHOR PAGES REDESIGN: How it works' sign-up link is now the shared

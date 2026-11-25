@@ -101,18 +101,15 @@ describe("null-priced books are excluded from every discovery surface", () => {
     expect(occurrences).toBe(4);
   });
 
-  it("the bookstore's price RANGE filter is applied to price_all, not price_cents", () => {
+  // LR1 (lr1-6 c): Libraria has no price filter and no sort any more;
+  // what stays is that nothing on it filters or sorts on price_cents.
+  it("the bookstore never filters or sorts on price_cents", () => {
     const source = code(read("librari/page.tsx"));
-    expect(source).toContain('.gte("price_all"');
-    expect(source).toContain('.lte("price_all"');
     expect(source).not.toContain('.gte("price_cents"');
     expect(source).not.toContain('.lte("price_cents"');
-  });
-
-  it("the bookstore's price SORT reads price_all", () => {
-    const source = code(read("librari/page.tsx"));
-    expect(source).toMatch(/price_all\s*\?\?\s*0/);
     expect(source).not.toMatch(/a\.price_cents|b\.price_cents/);
+    expect(source).not.toContain('.gte("price_all"');
+    expect(source).not.toContain('.lte("price_all"');
   });
 
   // The searched path of the same page delegates to SQL, so the

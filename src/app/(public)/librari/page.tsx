@@ -2,38 +2,30 @@ import Link from "next/link";
 import { AdultTag } from "@/components/adult-tag";
 import { bundleIsAdult } from "@/lib/book-reader-details";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { formatCatalogPriceLabel, resolveCatalogPriceState } from "@/lib/catalog-price";
-import {
-  parseBookstoreQuery,
-  buildBookstoreHref,
-  toggleGenreHref,
-  togglePriceHref,
-  activePricePreset,
-  countCatalogueFacets,
-  sidebarGenres,
-  PRICE_PRESETS,
-  BOOKSTORE_SORT_OPTIONS,
-  sortByAlbanianTitle,
-  type BookstoreQuery,
-  type CatalogueFacets,
-  type FacetRow,
-} from "@/lib/bookstore";
-import { BookCard } from "@/components/book-card";
+import { parseBookstoreQuery, buildBookstoreHref, countCatalogueFacets, type FacetRow } from "@/lib/bookstore";
+import { GENRES } from "@/lib/genres";
+import { StoreBookCard } from "@/components/store-book-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { buttonClasses } from "@/components/ui/button";
 import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
-import { formatClassicYears, loadClassicAuthorsByWork, type PublicClassicAuthor } from "@/lib/classic-authors";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { resolveBookstoreFeature } from "@/lib/librum-choice-logic";
+import {
+  categoryButtons,
+  NON_FICTION_GENRES,
+  storeCardAction,
+  summarizeRatings,
+  type RatingSummary,
+} from "@/lib/libraria-store";
 import type { PublicBook, PublicBundle } from "@/lib/types";
 import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { DismissableDetails } from "@/components/dismissable-details";
-import { AutoSubmitSelect } from "@/components/auto-submit-select";
+import { DetailsCloseButton } from "@/components/details-close-button";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 export const metadata: Metadata = {
@@ -45,20 +37,21 @@ export const metadata: Metadata = {
 // this route must never be statically cached -- see V3 §3.
 export const dynamic = "force-dynamic";
 
-// LIBRUM 2.0 UI-4: this page is the READER/discovery-and-buying
-// marketplace -- permanent product boundary, locked alongside UI-3:
-// HOMEPAGE = AUTHORS, BOOKSTORE = READERS. No author-marketing
-// sections here (that's the homepage's job); this page exists purely
-// for search, genre discovery, sorting, and browsing toward book
-// detail, which owns the actual purchase CTA (UI-5).
-//
-// Previously this page had two structurally different templates -- a
-// marketing-style "curated home" (hero book, stats strip, value props,
-// a 14-box genre grid) shown when unfiltered, and a flat search grid
-// shown once any filter was active. UI-4 unifies these into one shell
-// (header, search/genre/sort toolbar, grid, empty state) that always
-// renders the same way -- the unfiltered case is just "Newest, no
-// filters applied", not a separate page.
+// LR1 (Renato 11-25, hand sketch, pictures r4 and patch 1 pictures v2):
+// Libraria is a shop front of shelves. Two views at one address:
+//   - the shelves (no search, no category): the small feature strip
+//     (until the banner, patch 3), "Më të rinjtë në Librum" with
+//     category buttons and the "Më shumë kategori" box, "Libra
+//     jo-artistikë", "Paketat" (lr1-10 a), and, for visitors only,
+//     "Bota e leximit ju pret" (lr1-5 a, his text as written, lr1-11 b);
+//   - the results (?q= and/or ?genre=): only the matching books, newest
+//     first, with no filters and no sort (lr1-6 c, lr1-6b a).
+// The sidebar filters, the price filter, the sort, the full list, the
+// Klasikët shelf (lr1-7 a) and the "Jeni autor?" band are gone. Old
+// links that carry ?sort=, ?minPrice= or ?maxPrice= still open, and
+// those parts are ignored. The header is Libraria's own (layout.tsx).
+// Buying stays on the book page except "Shto" (lr1-4 a), which adds a
+// paid live book to the cart without leaving the page.
 
 // PEN-NAMES-1 (migration 20261019184512): every byline on this page is
 // the book's (or bundle's) pen name, embedded from the public_pen_names
@@ -111,15 +104,9 @@ async function fetchSearchResults(
   {
     q,
     genre,
-    sort,
-    minPriceAll,
-    maxPriceAll,
   }: {
     q?: string;
     genre?: string;
-    sort?: string;
-    minPriceAll?: number;
-    maxPriceAll?: number;
   },
 ): Promise<{ books: BookWithAuthor[]; error: boolean; totalMatched: number }> {
   // ALL-WIRING-2: every price predicate on this page reads
@@ -140,8 +127,6 @@ async function fetchSearchResults(
     // BD15 P8: a category matches a book in ANY of its (up to 3)
     // categories, not only its primary one.
     if (genre) query = query.contains("categories", [genre]);
-    if (minPriceAll != null) query = query.gte("price_all", minPriceAll);
-    if (maxPriceAll != null) query = query.lte("price_all", maxPriceAll);
     return query;
   };
 
@@ -184,8 +169,9 @@ async function fetchSearchResults(
         // (any of the 3 categories), with no database change. Known
         // limit: the 500 candidate cap applies before the category.
         genre_filter: null,
-        min_price_cents: minPriceAll ?? null,
-        max_price_cents: maxPriceAll ?? null,
+        // LR1 (lr1-6 a): no price filter any more.
+        min_price_cents: null,
+        max_price_cents: null,
         result_limit: SEARCH_CANDIDATE_LIMIT,
       },
     );
@@ -227,54 +213,14 @@ async function fetchSearchResults(
 
       // .in() doesn't preserve the RPC's return order, and the RPC's
       // order isn't meaningful anyway -- explicitly apply the same
-      // newest-first default the no-search-term branch above uses, so
-      // "Newest" stays the true default regardless of match order. The
-      // sort dropdown below can still override this.
+      // newest-first order the no-search-term branch above uses.
       results = [...matchedBooks].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
     }
   }
 
-  // ALL-WIRING-2: price sorting reads `price_all`. Both queries above
-  // exclude `price_all is null`, so `?? 0` here is unreachable in
-  // practice -- it exists only so the comparator is total for the
-  // TypeScript type (which is `number | null`) rather than producing
-  // NaN, and never as a null-means-free fallback.
-  if (sort === "price_asc") {
-    results = [...results].sort((a, b) => (a.price_all ?? 0) - (b.price_all ?? 0));
-  } else if (sort === "price_desc") {
-    results = [...results].sort((a, b) => (b.price_all ?? 0) - (a.price_all ?? 0));
-  } else if (sort === "title_asc") {
-    // B2: A–Zh in Albanian alphabet order (see sortByAlbanianTitle).
-    results = sortByAlbanianTitle(results);
-  } else if (sort === "bestselling" && results.length > 0) {
-    // Real non-refunded purchase counts for exactly the books already in
-    // this result set, aggregated server-side (see bestselling_books in
-    // supabase/schema.sql) rather than fetching every purchases row.
-    const admin = createAdminClient();
-    const { data: counts, error: countsError } = await admin.rpc(
-      "bestselling_books",
-      { book_ids: results.map((b) => b.id) },
-    );
-
-    if (countsError) {
-      // Sort is a nice-to-have on top of an already-correct result set
-      // (e.g. the migration adding this function may not be applied
-      // yet) -- fail soft by leaving the existing order rather than
-      // erroring the whole search.
-      console.error("Bookstore search: bestselling sort unavailable:", countsError);
-    } else {
-      const countByBook = new Map(
-        (counts as { book_id: string; purchase_count: number }[] ?? []).map(
-          (row) => [row.book_id, row.purchase_count],
-        ),
-      );
-      results = [...results].sort(
-        (a, b) => Number(countByBook.get(b.id) ?? 0) - Number(countByBook.get(a.id) ?? 0),
-      );
-    }
-  }
+  // LR1 (lr1-6 b a): results are newest first, with no sort menu.
 
   // Captured before the final visible-result slice below, so the page
   // can show an honest "N books" (when we definitely have everything)
@@ -283,32 +229,6 @@ async function fetchSearchResults(
   const totalMatched = results.length;
 
   return { books: results.slice(0, SEARCH_RESULT_LIMIT), error: hadError, totalMatched };
-}
-
-// Patch C: the sidebar counts read the WHOLE listed catalogue -- the
-// same rows the unfiltered grid lists (listed status, an ALL price) --
-// never the current filtered result and not capped at
-// SEARCH_CANDIDATE_LIMIT. Cost: one extra light query per Libraria
-// view, two small columns per book (categories and the public pen name
-// embed; the embed is null when BD14 hides the pen name). Bounded at
-// FACET_SCAN_LIMIT, the Supabase API's default row cap; past it the
-// counts would undercount, and a counting RPC is the follow-up. A
-// failed read returns null: the lists stay, the counts go.
-const FACET_SCAN_LIMIT = 1000;
-
-async function fetchCatalogueFacets(supabase: SupabaseClient): Promise<CatalogueFacets | null> {
-  const { data, error } = await supabase
-    .from("public_books")
-    .select("categories, pen:public_pen_names(id, name)")
-    .in("status", LISTED_BOOK_STATUSES)
-    .not("price_all", "is", null)
-    .limit(FACET_SCAN_LIMIT)
-    .returns<FacetRow[]>();
-  if (error) {
-    console.error("Bookstore: failed to load the sidebar counts:", error);
-    return null;
-  }
-  return countCatalogueFacets(data ?? []);
 }
 
 // Published bundles only -- the same "published or own author" policy
@@ -356,46 +276,124 @@ async function fetchPublishedBundles(
   return data ?? [];
 }
 
-// REDESIGN STEP 3: the "Free to start reading" shelf (unfiltered view
-// only). Newest free books, the same published-only scoping as the
-// grid; `price_all = 0` already excludes an unpriced row. Fail-soft: an
-// error just hides the shelf. K6: free books are public-domain editions
-// only (BD15), so this is the "Klasikët shqiptarë" shelf.
-async function fetchFreeBooks(supabase: SupabaseClient): Promise<BookWithAuthor[]> {
-  const { data, error } = await supabase
-    .from("public_books")
-    .select("*, pen:public_pen_names(id, name)")
-    .eq("status", "published")
-    .eq("price_all", 0)
-    .order("created_at", { ascending: false })
-    .limit(SHELF_SIZE)
-    .returns<BookWithAuthor[]>();
-
-  if (error) {
-    console.error("Bookstore: failed to load free books:", error);
-    return [];
-  }
-
-  return data ?? [];
-}
-
 function coverUrlFor(supabase: SupabaseClient, coverPath: string | null | undefined) {
   return coverPath
     ? supabase.storage.from("covers").getPublicUrl(coverPath).data.publicUrl
     : null;
 }
 
-// REDESIGN STEP 3 (Renato D1/D7): the feature block shows the newest
-// published book as "New on Librum". F5: or the hand-picked book as
-// "Librum's choice" -- chosen, with its label, by resolveBookstoreFeature.
+// Books per shelf (5 across on a computer, as in the sketch).
+const SHELF_SIZE = 5;
 
-// Books per shelf on the unfiltered view.
-const SHELF_SIZE = 6;
+// The newest listed books, in any of `genres` when given -- the same
+// listed-and-priced scoping as the results. Fail-soft: an error gives
+// null, and the caller decides what that hides.
+async function fetchShelf(
+  supabase: SupabaseClient,
+  genres?: readonly string[],
+): Promise<BookWithAuthor[] | null> {
+  let query = supabase
+    .from("public_books")
+    .select("*, pen:public_pen_names(id, name)")
+    .in("status", LISTED_BOOK_STATUSES)
+    .not("price_all", "is", null);
+  if (genres) query = query.overlaps("categories", [...genres]);
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(SHELF_SIZE)
+    .returns<BookWithAuthor[]>();
+  if (error) {
+    console.error("Libraria: failed to load a shelf:", error);
+    return null;
+  }
+  return data ?? [];
+}
+
+// Which categories have a listed book (for the category buttons).
+// Bounded like the old sidebar counts; a failed read gives no buttons.
+const FACET_SCAN_LIMIT = 1000;
+
+async function fetchGenresWithBooks(supabase: SupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("public_books")
+    .select("categories, pen:public_pen_names(id, name)")
+    .in("status", LISTED_BOOK_STATUSES)
+    .not("price_all", "is", null)
+    .limit(FACET_SCAN_LIMIT)
+    .returns<FacetRow[]>();
+  if (error) {
+    console.error("Libraria: failed to load the categories:", error);
+    return [];
+  }
+  return countCatalogueFacets(data ?? []).genres.map((g) => g.genre);
+}
+
+// Approved reviews of the books on the page (public_reviews lists only
+// approved ones and no reader). Fail-soft: no stars.
+async function fetchRatings(supabase: SupabaseClient, bookIds: string[]): Promise<Map<string, RatingSummary>> {
+  if (bookIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("public_reviews")
+    .select("book_id, rating")
+    .in("book_id", bookIds)
+    .returns<{ book_id: string; rating: number }[]>();
+  if (error) {
+    console.error("Libraria: failed to load the ratings:", error);
+    return new Map();
+  }
+  return summarizeRatings(data ?? []);
+}
+
+// The signed-in reader's own cart rows (row rules return only theirs),
+// so a book already in it reads "Në shportë". Gift rows don't count.
+async function fetchCartBookIds(supabase: SupabaseClient, userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("cart_items")
+    .select("book_id")
+    .eq("reader_id", userId)
+    .is("gift_email", null)
+    .returns<{ book_id: string }[]>();
+  if (error) {
+    console.error("Libraria: failed to load the cart:", error);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => r.book_id));
+}
+
+// lr1-12 a (audit N1): the books this reader already owns (through
+// user_owns_book(), the same rule as the book page and the cart, so a
+// refunded or lost-disputed purchase does not count) and their own books
+// as an author. Their cards show "Shiko librin". One ownership call per
+// purchase row, as on the Bibliotekë page.
+async function fetchOwnedOrOwnBookIds(supabase: SupabaseClient, userId: string): Promise<Set<string>> {
+  const [purchases, own] = await Promise.all([
+    supabase.from("purchases").select("book_id").eq("reader_id", userId).returns<{ book_id: string }[]>(),
+    supabase.from("books").select("id").eq("author_id", userId).returns<{ id: string }[]>(),
+  ]);
+  if (purchases.error) console.error("Libraria: failed to load the reader's purchases:", purchases.error);
+  if (own.error) console.error("Libraria: failed to load the author's own books:", own.error);
+  const ids = new Set((own.data ?? []).map((r) => r.id));
+  const owned = await Promise.all(
+    (purchases.data ?? []).map(
+      async (r) => [r.book_id, !!(await supabase.rpc("user_owns_book", { target_book_id: r.book_id })).data] as const,
+    ),
+  );
+  for (const [id, yes] of owned) if (yes) ids.add(id);
+  return ids;
+}
 
 // A2 page heading: thin serif, as on the homepage (Renato D6).
 const SECTION_HEADING = "font-serif text-[1.75rem] font-normal leading-tight text-primary sm:text-3xl";
 const TEXT_LINK_CLASSES =
   "focus-ring rounded-sm text-sm font-medium text-primary underline underline-offset-2 hover:decoration-2";
+
+type CardContext = {
+  supabase: SupabaseClient;
+  ratings: Map<string, RatingSummary>;
+  signedIn: boolean;
+  cartBookIds: Set<string>;
+  ownedOrOwnBookIds: Set<string>;
+};
 
 export default async function BookstorePage({
   searchParams,
@@ -416,55 +414,50 @@ export default async function BookstorePage({
 
   const rawQuery = await searchParams;
   const supabase = await createClient();
-  const { q, genre, sort, minPriceAll, maxPriceAll, isFiltered } =
-    parseBookstoreQuery(rawQuery);
+  // Only the words and the category count now (lr1-6 c).
+  const { q, genre } = parseBookstoreQuery(rawQuery);
+  const words = q?.trim() || undefined;
+  const isResults = Boolean(words || genre);
 
-  // Bundles are a secondary discovery feature, not part of the book
-  // search result set -- showing unrelated bundles below filtered book
-  // results would weaken the reader's search/filter mental model, so
-  // the section (and the query behind it) is skipped entirely once any
-  // search/genre/sort/price filter is active. See BundlesSection's own
-  // render site below for where this is enforced a second time,
-  // defensively, rather than relying solely on the empty array here.
-  // REDESIGN STEP 3: the free shelf follows the same rule.
-  // FIX1 (X1): the author band's button depends on whether anyone is
-  // signed in, so the unfiltered view (the only one with the band) asks.
-  // F5: the unfiltered view also asks for Librum's choice (null when
-  // nothing is picked, the pick is unpublished, or before the migration).
-  // Patch C: the sidebar counts, on every view.
-  const [{ books, error, totalMatched }, bundles, freeBooks, signedIn, librumChoice, facets] = await Promise.all([
-    fetchSearchResults(supabase, { q, genre, sort, minPriceAll, maxPriceAll }),
-    isFiltered ? Promise.resolve([]) : fetchPublishedBundles(supabase),
-    isFiltered ? Promise.resolve([]) : fetchFreeBooks(supabase),
-    isFiltered
-      ? Promise.resolve(false)
-      : supabase.auth.getUser().then(({ data }) => !!data.user),
-    isFiltered ? Promise.resolve(null) : getLibrumChoiceBook(),
-    fetchCatalogueFacets(supabase),
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [cartBookIds, ownedOrOwnBookIds] = user
+    ? await Promise.all([fetchCartBookIds(supabase, user.id), fetchOwnedOrOwnBookIds(supabase, user.id)])
+    : [new Set<string>(), new Set<string>()];
+
+  if (isResults) {
+    const { books, error, totalMatched } = await fetchSearchResults(supabase, { q: words, genre });
+    const ratings = await fetchRatings(supabase, books.map((b) => b.id));
+    const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
+    return (
+      <main className="flex-1 bg-surface">
+        <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
+          <ResultsView words={words} genre={genre} books={books} error={error} totalMatched={totalMatched} ctx={ctx} />
+        </div>
+      </main>
+    );
+  }
+
+  const [newest, nonFiction, bundles, librumChoice, genresWithBooks] = await Promise.all([
+    fetchShelf(supabase),
+    fetchShelf(supabase, NON_FICTION_GENRES),
+    fetchPublishedBundles(supabase),
+    getLibrumChoiceBook(),
+    fetchGenresWithBooks(supabase),
   ]);
-  // K6: each classic's years on its card (none while unlinked).
-  const classicsByWork = await loadClassicAuthorsByWork(
-    supabase,
-    freeBooks.map((book) => book.pd_work_id),
-  );
+  const shown = [...(newest ?? []), ...(nonFiction ?? [])];
+  const ratings = await fetchRatings(supabase, [...new Set(shown.map((b) => b.id))]);
+  const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
 
-  // REDESIGN STEP 3 / F5 (C2): the feature only on the unfiltered view
-  // and never over a failed load; inside it, the priced pick as
-  // "Librum's choice", else the newest book as "New on Librum".
-  const showShelves = !isFiltered && !error && books.length > 0;
-  const featured = showShelves ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, books[0]) : null;
+  // Decision 1: the feature strip stays on top until the banner (patch
+  // 3): the priced pick as "Librum's choice", else the newest book.
+  const featured = newest && newest.length > 0 ? resolveBookstoreFeature<BookWithAuthor>(librumChoice, newest[0]) : null;
 
-  // Patch C (Renato 11-13, version A, Kolibër-style): the feature strip
-  // stays on top (A2 a); then a title row (serif "Libraria", the count,
-  // and from lg up "Renditja" with the sort); then two columns from lg
-  // up: a sidebar (search, Zhanri, Çmimi, Autorë with counts) and the
-  // chips over the grid. Under lg: the search, then "Filtrat" (the same
-  // lists in a panel) beside the sort, then the chips and the grid. The
-  // free shelf, bundles and the band follow at full width, as before.
-  const query = { ...rawQuery, genre };
   return (
     <main className="flex-1 bg-surface">
       <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
+        <h1 className="sr-only">Libraria</h1>
         {featured && (
           <FeaturedStrip
             book={featured.book}
@@ -473,355 +466,246 @@ export default async function BookstorePage({
           />
         )}
 
-        <TitleRow query={query} countLine={error ? null : countLineFor(totalMatched)} hasFeature={!!featured} />
-
-        <div className="mt-5 lg:mt-8 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
-          <div>
-            <SearchBox query={query} />
-            <nav aria-label="Filtrat" className="mt-6 hidden lg:block">
-              <FilterLists query={query} facets={facets} />
-            </nav>
-          </div>
-
-          <div className="min-w-0">
-            <div className="mt-3 grid grid-cols-2 gap-2 lg:hidden">
-              {/* r2 (audit B1): a tap on a filter closes the panel, so the
-                  new results are not hidden under it. */}
-              <DismissableDetails className="group" closeOnLinkClick>
-                <summary className={`${DROPDOWN_SUMMARY_CLASSES} justify-center`}>
-                  Filtrat
-                  <ChevronIcon />
-                </summary>
-                <nav
-                  aria-label="Filtrat"
-                  className="absolute inset-x-4 z-30 mt-2 max-h-[70vh] overflow-y-auto rounded-[8px] border border-border bg-surface p-4 shadow-md"
-                >
-                  <FilterLists query={query} facets={facets} />
-                </nav>
-              </DismissableDetails>
-              <SortForm query={query} id="bookstore-sort-phone" />
-            </div>
-
-            <FilterChips query={query} />
-
-            <BookGrid supabase={supabase} books={books} error={error} isFiltered={isFiltered} />
-          </div>
-        </div>
-
-        {freeBooks.length > 0 && (
-          <ClassicsShelf
-            seeAllHref={buildBookstoreHref({}, { maxPrice: "0" })}
-            books={freeBooks}
-            classicsByWork={classicsByWork}
-            supabase={supabase}
+        {newest === null ? (
+          <EmptyState
+            className="mt-10"
+            title="Libraria nuk u hap dot tani."
+            description="Ju lutemi provoni përsëri pas pak."
           />
+        ) : newest.length === 0 ? (
+          <EmptyState
+            className="mt-10"
+            title="Ende nuk ka libra."
+            description="Kthehuni së shpejti."
+            action={
+              <Link href="/" className={TEXT_LINK_CLASSES}>
+                Kthehuni në faqen kryesore
+              </Link>
+            }
+          />
+        ) : (
+          <Shelf title="Më të rinjtë në Librum" books={newest} ctx={ctx} first={!featured}>
+            <CategoryButtons genres={categoryButtons(genresWithBooks)} />
+          </Shelf>
         )}
 
-        {!isFiltered && bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
+        {nonFiction && nonFiction.length > 0 && <Shelf title="Libra jo-artistikë" books={nonFiction} ctx={ctx} />}
 
-        {!isFiltered && <AuthorBand signedIn={signedIn} />}
+        {bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
+
+        {!user && <ReadingInvite />}
       </div>
     </main>
   );
 }
 
-// The grid's count: every match when it fits, else the visible cap.
+// A shelf: a serif title, anything given (the category buttons), then
+// one row of cards -- 5 across from lg, a row that scrolls sideways on
+// phones. No "›" link (decision 4: there is no full list).
+function Shelf({
+  title,
+  books,
+  ctx,
+  first = false,
+  children,
+}: {
+  title: string;
+  books: BookWithAuthor[];
+  ctx: CardContext;
+  first?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className={`${first ? "mt-4" : "mt-10 sm:mt-12"} border-b border-border pb-9`}>
+      <h2 className={SECTION_HEADING}>{title}</h2>
+      {children}
+      <ul className="relative -mx-4 mt-5 flex gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-5">
+        {books.map((book) => (
+          <li key={book.id} className="w-[42%] shrink-0 sm:w-auto">
+            <Card book={book} ctx={ctx} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Card({ book, ctx }: { book: BookWithAuthor; ctx: CardContext }) {
+  return (
+    <StoreBookCard
+      book={book}
+      coverUrl={coverUrlFor(ctx.supabase, book.cover_path)}
+      authorName={resolveBookByline(book)}
+      rating={ctx.ratings.get(book.id) ?? null}
+      action={storeCardAction(book, ctx.signedIn, ctx.cartBookIds.has(book.id), ctx.ownedOrOwnBookIds.has(book.id))}
+    />
+  );
+}
+
+// The buttons under "Më të rinjtë": "Të gjitha kategoritë" (this view,
+// so it is the selected one), up to four categories (decision 2), then
+// "Më shumë kategori", a box with every category as plain text (Renato
+// 18:25Z). A tap on a category opens its results. The box closes on
+// its ✕, a tap outside, Escape or a tap on a category. On phones the
+// buttons stay one row that scrolls sideways and the box opens over
+// the page.
+const PILL =
+  "focus-ring inline-flex min-h-11 items-center rounded-full bg-[#ecebe8] px-5 text-[0.9375rem] whitespace-nowrap text-foreground transition-colors hover:bg-[#e0ded8]";
+
+function CategoryButtons({ genres }: { genres: string[] }) {
+  return (
+    <div className="-mx-4 mt-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:relative sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+      <Link href="/librari" aria-current="page" className={`${PILL} bg-primary! text-primary-foreground!`}>
+        Të gjitha kategoritë
+      </Link>
+      {genres.map((g) => (
+        <Link key={g} href={buildBookstoreHref({}, { genre: g })} className={PILL}>
+          {g}
+        </Link>
+      ))}
+      <DismissableDetails className="group" closeOnLinkClick>
+        <summary
+          className="focus-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-sm px-3 text-[0.9375rem] font-semibold whitespace-nowrap text-foreground underline decoration-2 underline-offset-4 [&::-webkit-details-marker]:hidden"
+        >
+          Më shumë kategori
+        </summary>
+        <div
+          role="group"
+          aria-label="Të gjitha kategoritë"
+          className="fixed inset-x-4 top-28 z-40 max-h-[75vh] overflow-y-auto rounded-[10px] border border-[#d9cdb0] bg-[#fffdf8] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:right-0 sm:w-[36rem] sm:max-h-none sm:p-6"
+        >
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="font-serif text-lg text-foreground">Të gjitha kategoritë</p>
+            <DetailsCloseButton label="Mbyll kategoritë" />
+          </div>
+          <ul className="grid grid-cols-2 gap-x-4 sm:grid-cols-3">
+            {GENRES.map((g) => (
+              <li key={g}>
+                <Link
+                  href={buildBookstoreHref({}, { genre: g })}
+                  className="focus-ring flex min-h-11 items-center rounded-sm px-1 text-[0.9375rem] text-foreground underline decoration-transparent underline-offset-2 hover:decoration-current"
+                >
+                  {g}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </DismissableDetails>
+    </div>
+  );
+}
+
+// The results view: the category (or the words) as the title, the
+// count, one chip per part that removes it, then the matching books.
+function ResultsView({
+  words,
+  genre,
+  books,
+  error,
+  totalMatched,
+  ctx,
+}: {
+  words: string | undefined;
+  genre: string | undefined;
+  books: BookWithAuthor[];
+  error: boolean;
+  totalMatched: number;
+  ctx: CardContext;
+}) {
+  const title = genre ?? `“${words}”`;
+  const chips: { label: string; href: string }[] = [];
+  if (genre) chips.push({ label: genre, href: buildBookstoreHref({}, { q: words }) });
+  if (words) chips.push({ label: `“${words}”`, href: buildBookstoreHref({}, { genre }) });
+
+  return (
+    <>
+      <div className="flex items-end justify-between gap-6 border-b border-border pb-4">
+        <h1 className="min-w-0 font-serif text-[2.25rem] leading-tight font-normal break-words text-primary sm:text-[2.75rem]">
+          {title}
+        </h1>
+        {!error && (
+          <p className="shrink-0 text-base whitespace-nowrap text-muted" aria-live="polite">
+            {countLineFor(totalMatched)}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {chips.map((c) => (
+          <Link
+            key={c.label}
+            href={c.href}
+            aria-label={`Hiq ${c.label}`}
+            className="focus-ring group -my-1 inline-flex min-h-11 max-w-full min-w-0 items-center rounded-full"
+          >
+            <span className="inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-sm font-semibold text-primary group-hover:bg-primary/15">
+              <span className="min-w-0 truncate">{c.label}</span>
+              <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 shrink-0">
+                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </span>
+          </Link>
+        ))}
+      </div>
+
+      {error ? (
+        <EmptyState
+          className="mt-10"
+          title="Libraria nuk u hap dot tani."
+          description="Ju lutemi provoni përsëri pas pak."
+        />
+      ) : books.length === 0 ? (
+        <EmptyState
+          className="mt-10"
+          title="Asnjë libër nuk përputhet me kërkimin tuaj."
+          description="Provoni një fjalë tjetër ose një kategori tjetër."
+          action={
+            <Link href="/librari" className={buttonClasses("outline", "sm")}>
+              Kthehu te Libraria
+            </Link>
+          }
+        />
+      ) : (
+        <ul className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-5">
+          {books.map((book) => (
+            <li key={book.id}>
+              <Card book={book} ctx={ctx} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+// The results' count: every match when it fits, else the visible cap.
 function countLineFor(totalMatched: number): string {
   return totalMatched <= SEARCH_RESULT_LIMIT
     ? `${totalMatched} ${totalMatched === 1 ? "libër" : "libra"}`
     : `Po shfaqen ${SEARCH_RESULT_LIMIT} librat e parë`;
 }
 
-// Patch C: the title row. The count sits on the right at every width
-// (none after a failed load); "Renditja" and the sort join it from lg up.
-function TitleRow({
-  query,
-  countLine,
-  hasFeature,
-}: {
-  query: BookstoreQuery;
-  countLine: string | null;
-  hasFeature: boolean;
-}) {
+// lr1-5 a / lr1-11 b: the closing box, for visitors only (decision 7),
+// with Renato's text exactly as he wrote it.
+function ReadingInvite() {
   return (
-    <div className={`${hasFeature ? "mt-10" : "mt-1"} flex items-end justify-between gap-6 border-b border-border pb-4`}>
-      <h1 className="font-serif text-[2.5rem] leading-none font-normal text-primary sm:text-[3.25rem]">Libraria</h1>
-      <div className="flex items-center gap-4">
-        {countLine && (
-          <p className="text-base whitespace-nowrap text-muted" aria-live="polite">
-            <span>{countLine}</span>
-          </p>
-        )}
-        <div className="hidden items-center gap-3 lg:flex">
-          <label htmlFor="bookstore-sort" className="text-base text-muted">
-            Renditja
-          </label>
-          <div className="w-56">
-            <SortForm query={query} id="bookstore-sort" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// The sort: its own small GET form keeping the words, genre and price.
-// It sends itself on change; "Rendit" shows only without JavaScript.
-// The title row's copy has a visible "Renditja" label; the phone copy
-// has a screen-reader one.
-function SortForm({ query, id }: { query: BookstoreQuery; id: string }) {
-  const { q, genre, sort, minPrice, maxPrice } = query;
-  const visibleLabel = id === "bookstore-sort";
-  return (
-    <form action="/librari" method="get" className="flex gap-2">
-      {q && <input type="hidden" name="q" value={q} />}
-      {genre && <input type="hidden" name="genre" value={genre} />}
-      {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-      {/* r2 (audit N2): the select fills the whole 44px pill, so a tap
-          anywhere on it opens the list. */}
-      <span className="relative flex h-11 min-w-0 flex-1 items-center rounded-full border border-control bg-surface has-[select:focus-visible]:shadow-[var(--focus-ring)]">
-        {!visibleLabel && (
-          <label htmlFor={id} className="sr-only">
-            Renditja
-          </label>
-        )}
-        <AutoSubmitSelect
-          id={id}
-          name="sort"
-          defaultValue={sort ?? ""}
-          className="h-full w-full min-w-0 cursor-pointer appearance-none truncate rounded-full bg-transparent pr-10 pl-4 text-base font-medium text-foreground outline-none"
-        >
-          {BOOKSTORE_SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </AutoSubmitSelect>
-        <span className="pointer-events-none absolute right-4 flex">
-          <ChevronIcon />
-        </span>
-      </span>
-      <noscript>
-        <button type="submit" className={`${buttonClasses("outline", "sm", "rounded-full")} h-11`}>
-          Rendit
-        </button>
-      </noscript>
-    </form>
-  );
-}
-
-// Patch C: a cream pill with a round search button inside. It keeps the
-// genre, sort and price; 16px text so iPhone Safari does not zoom in.
-function SearchBox({ query }: { query: BookstoreQuery }) {
-  const { q, genre, sort, minPrice, maxPrice } = query;
-  return (
-    <form id="bookstore-search" action="/librari" method="get" role="search" className="relative flex">
-      <label htmlFor="bookstore-q" className="sr-only">
-        Kërkoni libra ose autorë
-      </label>
-      <input
-        id="bookstore-q"
-        type="search"
-        name="q"
-        defaultValue={q ?? ""}
-        placeholder="Kërkoni libra, autorë…"
-        className="focus-ring h-11 w-full min-w-0 rounded-full border-0 bg-[#f1eee6] pr-12 pl-5 text-base text-foreground"
-      />
-      {genre && <input type="hidden" name="genre" value={genre} />}
-      {sort && <input type="hidden" name="sort" value={sort} />}
-      {minPrice && <input type="hidden" name="minPrice" value={minPrice} />}
-      {maxPrice && <input type="hidden" name="maxPrice" value={maxPrice} />}
-      {/* r2 (audit N1): a 44px tap area around the 36px green circle. */}
-      <button
-        type="submit"
-        aria-label="Kërko"
-        className="focus-ring group absolute top-0 right-0 flex size-11 items-center justify-center rounded-full"
+    <section className="mx-auto mt-14 flex max-w-[40rem] flex-col items-center gap-3 text-center">
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="size-10 text-[#806510]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V17h5v-1.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z" />
+      </svg>
+      <h2 className="font-serif text-[1.75rem] font-normal text-foreground sm:text-[2rem]">Bota e leximit ju pret</h2>
+      <p className="text-foreground/80">
+        Krijoni një llogari falas në Librum dhe regjistrohuni për të marrë emailet tona. Mësoni më shumë për librat e
+        rinj, ofertat dhe merrni sugjerime leximi nga ekipi ynë.
+      </p>
+      <Link
+        href="/signup"
+        className="focus-ring mt-2 inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-6 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
-        <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors group-hover:bg-primary-hover">
-          <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4">
-            <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="2" />
-            <path d="M13 13l4.5 4.5" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </span>
-      </button>
-    </form>
-  );
-}
-
-// Each list row is a 44px tap target; the active row is cream and bold
-// green, and tapping it again clears it.
-const SIDEBAR_ROW =
-  "focus-ring flex min-h-11 items-center justify-between gap-3 rounded-[6px] px-3 text-[15px] transition-colors hover:bg-[#f1eee6]";
-const sidebarRow = (active: boolean) =>
-  `${SIDEBAR_ROW} ${active ? "bg-[#f1eee6] font-semibold text-primary" : "text-foreground"}`;
-const SIDEBAR_HEADING = "mb-2 text-base font-semibold text-foreground";
-// How many authors show before "Shiko të gjithë" (A1 a: the rest open
-// in place, no separate page).
-const SIDEBAR_AUTHORS = 6;
-
-function Count({ n }: { n: number | null }) {
-  return n == null ? null : <span className="shrink-0 font-normal text-muted tabular-nums">{n}</span>;
-}
-
-// Zhanri, Çmimi and Autorë. The counts cover the whole listed catalogue
-// (fetchCatalogueFacets); when they failed to load (facets null) the
-// genre and price rows stay, without counts, and Autorë is left out.
-function FilterLists({ query, facets }: { query: BookstoreQuery; facets: CatalogueFacets | null }) {
-  const genres = sidebarGenres(facets, query.genre);
-  const preset = activePricePreset(query);
-  const authors = facets?.authors ?? [];
-  const shown = authors.slice(0, SIDEBAR_AUTHORS);
-  const more = authors.slice(SIDEBAR_AUTHORS);
-  const authorRow = (a: { id: string; name: string; count: number }) => (
-    <li key={a.id}>
-      <Link href={authorPagePath(a.id)} className={sidebarRow(false)}>
-        <span className="min-w-0">{a.name}</span>
-        <Count n={a.count} />
+        Krijo llogari
       </Link>
-    </li>
-  );
-
-  return (
-    <div className="flex flex-col gap-7">
-      <section>
-        <h2 className={SIDEBAR_HEADING}>Zhanri</h2>
-        <ul>
-          <li>
-            <Link
-              href={buildBookstoreHref(query, { genre: undefined })}
-              aria-current={!query.genre ? "true" : undefined}
-              className={sidebarRow(!query.genre)}
-            >
-              <span className="min-w-0">Të gjitha</span>
-              <Count n={facets?.total ?? null} />
-            </Link>
-          </li>
-          {genres.map(({ genre: g, count }) => (
-            <li key={g}>
-              <Link
-                href={toggleGenreHref(query, g)}
-                aria-current={query.genre === g ? "true" : undefined}
-                className={sidebarRow(query.genre === g)}
-              >
-                <span className="min-w-0">{g}</span>
-                <Count n={count} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section>
-        <h2 className={SIDEBAR_HEADING}>Çmimi</h2>
-        <ul>
-          {PRICE_PRESETS.map((p) => (
-            <li key={p.label}>
-              <Link
-                href={togglePriceHref(query, p)}
-                aria-current={preset === p ? "true" : undefined}
-                className={sidebarRow(preset === p)}
-              >
-                {p.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {shown.length > 0 && (
-        <section>
-          <h2 className={SIDEBAR_HEADING}>Autorë</h2>
-          <ul>{shown.map(authorRow)}</ul>
-          {more.length > 0 && (
-            // r2 (audit N4): the summary stays, so keyboard focus stays on
-            // it and the list can be closed again. A named group, so the
-            // open phone Filtrat panel (also a "group") does not switch it.
-            <details className="group/authors">
-              <summary
-                className={`${TEXT_LINK_CLASSES} ml-3 inline-flex min-h-11 list-none items-center text-[15px]! [&::-webkit-details-marker]:hidden`}
-              >
-                <span className="group-open/authors:hidden">Shiko të gjithë</span>
-                <span className="hidden group-open/authors:inline">Shiko më pak</span>
-              </summary>
-              <ul>{more.map(authorRow)}</ul>
-            </details>
-          )}
-        </section>
-      )}
-    </div>
-  );
-}
-
-// Patch B's chips (Renato 11-13), now over the grid: one per filter
-// that is really applied, each removing only itself, then "Hiq të
-// gjitha"; a sort-only view has "Hiq të gjitha" alone. Each link's tap
-// area is 44px tall around a 36px pill. A price that equals a sidebar
-// row reads as that row.
-function FilterChips({ query }: { query: BookstoreQuery }) {
-  const { q, genre } = query;
-  const words = q?.trim();
-  const { minPriceAll, maxPriceAll, isFiltered } = parseBookstoreQuery(query);
-  const preset = activePricePreset(query);
-  const noPrice = { minPrice: undefined, maxPrice: undefined };
-  const chips: { label: string; href: string }[] = [];
-  if (words) chips.push({ label: `“${words}”`, href: buildBookstoreHref(query, { q: undefined }) });
-  if (genre) chips.push({ label: genre, href: buildBookstoreHref(query, { genre: undefined }) });
-  if (preset) {
-    chips.push({ label: preset.label, href: buildBookstoreHref(query, noPrice) });
-  } else if (maxPriceAll === 0 && !minPriceAll) {
-    chips.push({ label: "Falas", href: buildBookstoreHref(query, noPrice) });
-  } else if (minPriceAll != null || maxPriceAll != null) {
-    // r2: an open-ended range reads "Nga X lekë" / "Deri X lekë".
-    const label =
-      minPriceAll != null && maxPriceAll != null
-        ? `Çmimi: ${minPriceAll}–${maxPriceAll} lekë`
-        : minPriceAll != null
-          ? `Nga ${minPriceAll} lekë`
-          : `Deri ${maxPriceAll} lekë`;
-    chips.push({ label, href: buildBookstoreHref(query, noPrice) });
-  }
-  if (chips.length === 0 && !isFiltered) return null;
-
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-2 lg:mt-0 lg:mb-6">
-      {chips.map((c) => (
-        <Link
-          key={c.label}
-          href={c.href}
-          aria-label={`Hiq filtrin ${c.label}`}
-          className="focus-ring group -my-1 inline-flex min-h-11 max-w-full min-w-0 items-center rounded-full"
-        >
-          <span className="inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-sm font-semibold text-primary group-hover:bg-primary/15">
-            {/* Long words are cut with "…" so the chip stays in the column. */}
-            <span className="min-w-0 truncate">{c.label}</span>
-            <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 shrink-0">
-              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-          </span>
-        </Link>
-      ))}
-      <Link href="/librari" className={`${TEXT_LINK_CLASSES} -my-1 inline-flex min-h-11 items-center ${chips.length > 0 ? "ml-1" : ""}`}>
-        Hiq të gjitha
-      </Link>
-    </div>
-  );
-}
-
-// The phone "Filtrat" button: a 44px pill, the same look as the sort
-// beside it. 16px text so the row matches the 16px select.
-const DROPDOWN_SUMMARY_CLASSES =
-  "focus-ring flex h-11 cursor-pointer list-none items-center gap-1.5 rounded-full border border-control bg-surface px-4 text-base font-semibold text-foreground select-none [&::-webkit-details-marker]:hidden";
-
-function ChevronIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 12 12"
-      className="size-3 transition-transform group-open:rotate-180 motion-reduce:transition-none"
-    >
-      <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
+    </section>
   );
 }
 
@@ -911,115 +795,6 @@ function FeaturedStrip({
 const FEATURE_CTA_CLASSES =
   "focus-ring inline-flex shrink-0 items-center justify-center rounded-full border border-primary px-4 py-2 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
 
-// REDESIGN STEP 3 (B2): a headed shelf of cover cards with "See all".
-// One row that scrolls sideways on phones; a grid from the small
-// breakpoint up. K6 (approved pictures v4, Q3 a): "Klasikët shqiptarë"
-// on a warm panel, the title and the books only; a linked classic's
-// card reads "Name · 1846–1900".
-function ClassicsShelf({
-  seeAllHref,
-  books,
-  classicsByWork,
-  supabase,
-}: {
-  seeAllHref: string;
-  books: BookWithAuthor[];
-  classicsByWork: Map<string, PublicClassicAuthor>;
-  supabase: SupabaseClient;
-}) {
-  return (
-    <section className="mt-12 rounded-[6px] border border-[#e3d9c3] bg-[#f6f1e6] px-4 py-6 sm:px-8 sm:py-8">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className={SECTION_HEADING}>Klasikët shqiptarë</h2>
-        <Link href={seeAllHref} className={TEXT_LINK_CLASSES}>
-          Shiko të gjithë klasikët
-        </Link>
-      </div>
-      <ul className="-mx-4 mt-6 flex gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-6">
-        {books.map((book) => {
-          const name = resolveBookByline(book);
-          const classic = book.pd_work_id ? classicsByWork.get(book.pd_work_id) : undefined;
-          return (
-            <li key={book.id} className="w-36 shrink-0 sm:w-auto">
-              <BookCard
-                book={book}
-                coverUrl={coverUrlFor(supabase, book.cover_path)}
-                authorName={name && classic ? `${name} · ${formatClassicYears(classic)}` : name}
-              />
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-// The grid alone: its count now sits in BookstoreHeading above.
-function BookGrid({
-  supabase,
-  books,
-  error,
-  isFiltered,
-}: {
-  supabase: SupabaseClient;
-  books: BookWithAuthor[];
-  error: boolean;
-  isFiltered: boolean;
-}) {
-  if (error) {
-    return (
-      <EmptyState
-        className="mt-10"
-        title="Libraria nuk u hap dot tani."
-        description="Ju lutemi provoni përsëri pas pak."
-      />
-    );
-  }
-
-  if (books.length === 0) {
-    return isFiltered ? (
-      <EmptyState
-        className="mt-10"
-        title="Asnjë libër nuk përputhet me kërkimin tuaj."
-        description="Provoni një fjalë tjetër, ose hiqni një filtër."
-        action={
-          <Link href="/librari" className={buttonClasses("outline", "sm")}>
-            Hiq filtrat
-          </Link>
-        }
-      />
-    ) : (
-      <EmptyState
-        className="mt-10"
-        title="Ende nuk ka libra."
-        description="Kthehuni së shpejti."
-        action={
-          <Link href="/" className={TEXT_LINK_CLASSES}>
-            Kthehuni në faqen kryesore
-          </Link>
-        }
-      />
-    );
-  }
-
-  return (
-    <section id="all-books" aria-label="Të gjithë librat" className="mt-6 scroll-mt-6 lg:mt-0">
-      {/* Patch C: beside the sidebar, 4 per row at md and lg, 5 at xl. */}
-      <ul className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 sm:gap-x-6 md:grid-cols-4 xl:grid-cols-5">
-        {books.map((book) => (
-          <li key={book.id}>
-            <BookCard
-              book={book}
-              coverUrl={coverUrlFor(supabase, book.cover_path)}
-              authorName={resolveBookByline(book)}
-            />
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 // Up to three member covers, fanned left to right as in the mockup.
 const BUNDLE_COVER_LIMIT = 3;
 const BUNDLE_COVER_OFFSETS = ["left-0 top-[10px]", "left-4 top-[5px]", "left-8 top-0"];
@@ -1091,28 +866,3 @@ function BundlesSection({
   );
 }
 
-// REDESIGN STEP 3 (B3): the mockup's closing band. FIX1 (X1): a
-// signed-out visitor goes to sign up with Author chosen (the same
-// target as Earnings, /signup?role=author), not to log in. Anyone
-// signed in keeps /dashboard/books/new, the existing author entry
-// route: a reader is sent to the become-an-author step, an author
-// straight to adding a book (see dashboard/layout.tsx and
-// books/new/page.tsx).
-function AuthorBand({ signedIn }: { signedIn: boolean }) {
-  return (
-    <section className="mt-16 flex flex-wrap items-center justify-between gap-5 rounded-[4px] bg-primary p-6 text-primary-foreground sm:p-8">
-      <div className="flex flex-col gap-1.5">
-        <h2 className="font-serif text-[1.625rem] font-normal">Jeni autor?</h2>
-        <p className="text-primary-foreground/80">
-          Botoni librin tuaj në Librum dhe fitoni honorar nga çdo shitje.
-        </p>
-      </div>
-      <Link
-        href={signedIn ? "/dashboard/books/new" : "/signup?role=author"}
-        className="focus-ring inline-flex items-center justify-center rounded-full bg-accent px-6 py-3.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
-      >
-        Filloni të publikoni
-      </Link>
-    </section>
-  );
-}

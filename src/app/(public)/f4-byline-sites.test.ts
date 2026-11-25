@@ -45,9 +45,11 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 
   // P2 (design B): the ornate shelf (the old fourth site) is gone; the
   // feature strip, the grid and the free shelf remain.
-  it("the bookstore resolves every book name through the byline (three sites), the bundle line through the bundle's pen name", () => {
+  // LR1: two sites now -- the feature strip and the one card every shelf
+  // and the results use.
+  it("the bookstore resolves every book name through the byline (two sites), the bundle line through the bundle's pen name", () => {
     const source = readSrc("app/(public)/librari/page.tsx");
-    expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(3);
+    expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(2);
     expect(source).toContain("const authorName = bundle.pen?.name ?? null;");
     expect(source).not.toContain("resolvePublicAuthorName");
   });

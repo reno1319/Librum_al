@@ -8,7 +8,6 @@ import { getAuthorInitials } from "@/lib/author-initials";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { canonicalMetadata } from "@/lib/seo";
-import { buildBookstoreHref } from "@/lib/bookstore";
 import {
   classicAuthorPath,
   formatClassicLifeLine,
@@ -20,8 +19,9 @@ import type { PublicBook } from "@/lib/types";
 
 // K6 free Albanian classics (Renato 2026-11-16, Q1 b; approved pictures
 // v4): a classic author's own page. Name and years, the birth and death
-// line, the staff-written bio, "Veprat në Librum" and the box back to
-// all the classics. No Follow button (Q1 b), no label (Q5 b), no "why
+// line, the staff-written bio and "Veprat në Librum". LR1 (lr1-8 a):
+// the box back to all the classics and its "Klasikët shqiptarë" step in
+// the path are gone with the Libraria list they opened. No Follow button (Q1 b), no label (Q5 b), no "why
 // free" line (Q3 a). Only while one of their works has a live edition
 // (Q3 a): public_classic_authors lists nobody else, so the page and its
 // metadata both 404 otherwise.
@@ -82,17 +82,12 @@ export default async function ClassicAuthorPage({ params }: { params: Promise<{ 
   const { author, books } = data;
   // Local URL construction only (no network call).
   const supabase = await createClient();
-  const classicsHref = buildBookstoreHref({}, { maxPrice: "0" });
 
   return (
     <main className="page-container flex-1 pt-5 pb-10 sm:pt-10">
       <nav aria-label="Rruga" className="mb-6 text-sm text-muted">
         <Link href="/librari" className="focus-ring rounded-sm underline underline-offset-2">
           Libraria
-        </Link>
-        {" › "}
-        <Link href={classicsHref} className="focus-ring rounded-sm underline underline-offset-2">
-          Klasikët shqiptarë
         </Link>
         {" › "}
         <span aria-current="page">{author.name}</span>
@@ -131,13 +126,6 @@ export default async function ClassicAuthorPage({ params }: { params: Promise<{ 
             </li>
           ))}
         </ul>
-      </section>
-
-      <section className="mt-12 flex flex-wrap items-center justify-between gap-4 rounded-[6px] border border-[#e3d9c3] bg-[#f6f1e6] p-5 sm:p-6">
-        <p className="font-serif text-lg">Më shumë klasikë shqiptarë, falas</p>
-        <Link href={classicsHref} className="focus-ring rounded-sm text-sm font-semibold underline underline-offset-2">
-          Shiko të gjithë klasikët
-        </Link>
       </section>
     </main>
   );
