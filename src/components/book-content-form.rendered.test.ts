@@ -11,7 +11,7 @@ const BOOK = "c3333333-3333-4333-8333-333333333333";
 const AUTHOR = "a1111111-1111-4111-8111-111111111111";
 
 function render(
-  o: { lbn?: string | null; hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[] } = {},
+  o: { lbn?: string | null; hasManuscript?: boolean; aiAnswer?: "yes" | "no" | null; aiUnreadable?: boolean; markMissing?: string[]; earlierFiles?: { id: string; liveFrom: string; replacedAt: string; sizeBytes: number | null }[] } = {},
 ) {
   return renderToStaticMarkup(
     createElement(BookContentForm, {
@@ -31,11 +31,37 @@ function render(
       aiAnswer: o.aiAnswer ?? null,
       aiUnreadable: o.aiUnreadable ?? false,
       markMissing: o.markMissing,
+      earlierFiles: o.earlierFiles,
     }),
   );
 }
 
 describe("BookContentForm", () => {
+  // FV1 (fv2 a): the files buyers got before the current one.
+  it("FV1: lists earlier files under the current manuscript, each with its own Shkarko link", () => {
+    const html = render({
+      earlierFiles: [
+        { id: "77777777-7777-4777-8777-777777777771", liveFrom: "2026-11-02T10:00:00Z", replacedAt: "2026-11-20T10:00:00Z", sizeBytes: 1363149 },
+        { id: "77777777-7777-4777-8777-777777777772", liveFrom: "2026-10-05T10:00:00Z", replacedAt: "2026-11-02T10:00:00Z", sizeBytes: 1258291 },
+      ],
+    });
+    const current = html.indexOf("Dorëshkrimi aktual: skedar EPUB");
+    const heading = html.indexOf(">Skedarët e mëparshëm<");
+    expect(current).toBeGreaterThan(-1);
+    expect(heading).toBeGreaterThan(current);
+    expect(html).toContain("Skedarët që lexuesit kanë marrë më parë. Lexuesit marrin gjithmonë skedarin aktual.");
+    const first = html.indexOf("skedar EPUB · në shitje 2 nëntor 2026 – 20 nëntor 2026 · 1,3 MB");
+    expect(first).toBeGreaterThan(heading);
+    expect(html.indexOf("skedar EPUB · në shitje 5 tetor 2026 – 2 nëntor 2026 · 1,2 MB")).toBeGreaterThan(first);
+    expect(html).toContain(`href="/api/books/${BOOK}/versions/77777777-7777-4777-8777-777777777771" download=""`);
+    expect(html).toContain(`href="/api/books/${BOOK}/versions/77777777-7777-4777-8777-777777777772" download=""`);
+  });
+
+  it("FV1: no earlier file, no block", () => {
+    expect(render()).not.toContain("Skedarët e mëparshëm");
+    expect(render({ earlierFiles: [] })).not.toContain("Skedarët e mëparshëm");
+  });
+
   it("shows the manuscript, cover, preview, AI and ISBN sections, the DRM line and both buttons", () => {
     const html = render();
     for (const text of [

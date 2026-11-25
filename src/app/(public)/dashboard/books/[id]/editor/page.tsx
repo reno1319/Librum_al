@@ -26,6 +26,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { BookContentForm } from "@/components/book-content-form";
+import { readEarlierBookFiles } from "@/lib/book-file-versions";
 import { readAiDisclosure } from "@/lib/book-ai-disclosure";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
 import { Alert } from "@/components/ui/alert";
@@ -333,6 +334,11 @@ export default async function BookEditorPage({
   // pen name, also after a cancel (books_lock_after_first_publish).
   const locked = book.published_at !== null || (book.preorder_listed_at ?? null) !== null;
   const penNameList = penNames ?? [];
+  // FV1 (fv2 a): the book's earlier live files, read by the trusted
+  // writer now that the book is proven the caller's own. Content tab
+  // only; an unreadable list shows nothing.
+  const earlierFiles =
+    tab === "content" ? ((await readEarlierBookFiles(createCatalogWriteClient(), { id: book.id, authorId: user.id })) ?? []) : [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
   const detailsMissingItems = missingDetailItems({
@@ -505,6 +511,7 @@ export default async function BookEditorPage({
             authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
             aiAnswer={ai.ok ? ai.answer : null}
             aiUnreadable={!ai.ok}
+            earlierFiles={earlierFiles}
             markMissing={showMissing ? contentMissing : []}
           />
         </>

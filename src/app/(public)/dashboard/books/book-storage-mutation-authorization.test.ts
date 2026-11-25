@@ -14,6 +14,13 @@ import sharp from "sharp";
 import { generateEpub } from "@/lib/epub-generator";
 import { embedCoverInLibrumEpub, readLibrumEbookCover } from "@/lib/epub-cover";
 
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
+
 // BOOK-STORAGE-MUTATION-AUTH-1 (F5): the real book actions that touch
 // Storage (saveBookContent, deleteBook, cancelBookReview) against one
 // recording Supabase double. BD15 cleanup: the tests written for the
@@ -262,6 +269,7 @@ vi.mock("@/lib/catalog-write-client", async () => {
 
 const { deleteBook, cancelBookReview, saveBookContent } = await import("./actions");
 const { bookReviewsDoubleState, resetBookReviewsDouble } = await import("@/lib/book-reviews-test-double");
+const { bookFileVersionsDoubleState, resetBookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
 const { BOOK_CHANGED_WHILE_EDITING_MESSAGE } = await import("@/lib/book-review-copy");
 
 // COVERS-1: a real 1x1 PNG and JPEG, since every cover is now decoded and re-encoded.
@@ -393,6 +401,7 @@ beforeEach(() => {
   consoleOutput = [];
   bundleBooksResult = { data: [], error: null };
   resetBookReviewsDouble();
+  resetBookFileVersionsDouble();
   aiWrites.length = 0;
   aiWriteOk = true;
   aiWriteResult = null;
@@ -1310,6 +1319,25 @@ describe("deleteBook and review snapshots (ADMIN-3)", () => {
 
   it("a failed snapshot read deletes nothing and removes nothing", async () => {
     bookReviewsDoubleState.snapshotsOk = false;
+    expect(await run(deleteBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
+    expect(bookDeletes()).toEqual([]);
+    expect(storageCalls).toEqual([]);
+  });
+
+  // FV1 (fv5 a): the files that were once live go with the unsold book.
+  it("FV1: removes every own once-live file too, once, after the delete; another book's key is skipped", async () => {
+    bookFileVersionsDoubleState.paths = { [BOOK_ID]: [V_OLD, OWN_EPUB, `${USER_ID}/${OTHER_BOOK}.epub`] };
+    await run(deleteBook(BOOK_ID));
+    expect(removals()).toEqual([
+      { op: "remove", bucket: "covers", paths: [OWN_PNG] },
+      { op: "remove", bucket: "manuscripts", paths: [OWN_EPUB, V_OLD] },
+    ]);
+    expect(events.indexOf("db:delete:books")).toBeLessThan(events.indexOf("storage:remove:manuscripts"));
+    expect(bookFileVersionsDoubleState.calls).toEqual([{ fn: "readFileVersionPaths", bookIds: [BOOK_ID] }]);
+  });
+
+  it("FV1: a failed once-live files read deletes nothing and removes nothing", async () => {
+    bookFileVersionsDoubleState.pathsOk = false;
     expect(await run(deleteBook(BOOK_ID))).toBe("/dashboard?error=Ky%20lib%C3%ABr%20nuk%20mund%20t%C3%AB%20fshihet%20tani");
     expect(bookDeletes()).toEqual([]);
     expect(storageCalls).toEqual([]);

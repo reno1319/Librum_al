@@ -2,6 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { BOOK_MANUSCRIPTS_BUCKET, isOwnBookManuscriptPath } from "@/lib/book-storage-path";
+import { readFileVersionPaths } from "@/lib/book-file-versions";
 import {
   AUTHOR_REVIEW_COLUMNS,
   buildAuthorReviewNotices,
@@ -271,7 +272,8 @@ export async function readDownloadFilePath(
 // KEEP the book's current file_path, its latest approved review's
 // file_path, its pending review's file_path and (BD15 P5b-2) the
 // manuscript of a live book's waiting changes (book_pending_changes,
-// sent or not). Every other key of this
+// sent or not), and (FV1) every file that was once its live file
+// (book_file_versions). Every other key of this
 // book's own (own-key classifier: canonical or versioned, for exactly
 // this author and book) among the key the caller just superseded and
 // every review snapshot may be removed. Race-free because keys only move
@@ -284,8 +286,9 @@ export function planManuscriptRemovals(params: {
   reviews: readonly ReviewSnapshot[];
   superseded?: readonly (string | null)[];
   pendingChangeFilePath?: string | null;
+  versionFilePaths?: readonly string[];
 }): string[] {
-  const keep = new Set<string>();
+  const keep = new Set<string>(params.versionFilePaths ?? []);
   if (params.currentFilePath) keep.add(params.currentFilePath);
   if (params.pendingChangeFilePath) keep.add(params.pendingChangeFilePath);
   const approved = latestApprovedReview(params.reviews);
@@ -308,15 +311,21 @@ export function planManuscriptRemovals(params: {
 }
 
 // Every manuscript key a deleted book may leave behind: its current
-// file_path and every review snapshot, own-key classified (N3, P5).
+// file_path, every review snapshot and (FV1, fv5 a) every file that was
+// once its live file, own-key classified (N3, P5).
 export function deletedBookManuscriptKeys(params: {
   authorId: string;
   bookId: string;
   currentFilePath: string | null;
   reviews: readonly ReviewSnapshot[];
+  versionFilePaths?: readonly string[];
 }): string[] {
   const keys: string[] = [];
-  for (const candidate of [params.currentFilePath, ...params.reviews.map((review) => review.file_path)]) {
+  for (const candidate of [
+    params.currentFilePath,
+    ...params.reviews.map((review) => review.file_path),
+    ...(params.versionFilePaths ?? []),
+  ]) {
     if (isOwnBookManuscriptPath(candidate, params.authorId, params.bookId) && !keys.includes(candidate)) {
       keys.push(candidate);
     }
@@ -365,6 +374,12 @@ export async function removeUnretainedManuscripts(
       console.error(`${params.caller}: retention read failed; nothing removed`, { bookId: params.bookId });
       return;
     }
+    // FV1: every once-live file is kept. An unreadable list removes nothing.
+    const versions = await readFileVersionPaths(service, [params.bookId]);
+    if (!versions.ok) {
+      console.error(`${params.caller}: retention read failed; nothing removed`, { bookId: params.bookId });
+      return;
+    }
     const removals = planManuscriptRemovals({
       authorId: params.authorId,
       bookId: params.bookId,
@@ -372,6 +387,7 @@ export async function removeUnretainedManuscripts(
       reviews: read.byBook.get(params.bookId) ?? [],
       superseded: params.superseded,
       pendingChangeFilePath: pending?.file_path ?? null,
+      versionFilePaths: versions.byBook.get(params.bookId) ?? [],
     });
     if (removals.length === 0) return;
     const { error: removeError } = await remover.storage.from(BOOK_MANUSCRIPTS_BUCKET).remove(removals);
