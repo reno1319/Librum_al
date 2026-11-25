@@ -109,6 +109,7 @@ import {
   requestBookReview,
   withdrawBookReview,
 } from "@/lib/book-reviews";
+import { readFileVersionPaths } from "@/lib/book-file-versions";
 import {
   ALREADY_IN_REVIEW_MESSAGE,
   BOOK_CHANGED_WHILE_EDITING_MESSAGE,
@@ -2414,6 +2415,12 @@ export async function deleteBook(bookId: string) {
   if (!pendingAtDelete.ok) {
     redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
   }
+  // FV1 (fv5 a): the files that were once live go with the unsold book.
+  // Read now (the rows go with the book); a failed read stops the delete.
+  const versionsAtDelete = await readFileVersionPaths(catalogWriter, [book.id]);
+  if (!versionsAtDelete.ok) {
+    redirect(`/dashboard?error=${encodeURIComponent("Ky libër nuk mund të fshihet tani")}`);
+  }
 
   // The books row is deleted BEFORE any storage cleanup is attempted --
   // deliberately, not incidentally. The count check above is only an
@@ -2501,6 +2508,7 @@ export async function deleteBook(bookId: string) {
     bookId: book.id,
     currentFilePath: book.file_path,
     reviews: snapshots.byBook.get(book.id) ?? [],
+    versionFilePaths: versionsAtDelete.byBook.get(book.id) ?? [],
   })) {
     removals.push({ bucket: BOOK_MANUSCRIPTS_BUCKET, path });
   }

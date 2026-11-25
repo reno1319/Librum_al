@@ -9,6 +9,7 @@ import {
   isOwnBookManuscriptPath,
 } from "@/lib/book-storage-path";
 import { deletedBookManuscriptKeys, readReviewSnapshots } from "@/lib/book-reviews";
+import { readFileVersionPaths } from "@/lib/book-file-versions";
 import { readPendingChangesForBooks } from "@/lib/book-pending-changes";
 import { readWaitingReadersForBooks, scheduleDeletedBooksCancelledEmails } from "@/lib/preorder-emails";
 
@@ -253,12 +254,20 @@ export async function deleteAccountNow(service: ServiceClient, userId: string): 
       console.error("deleteAccount: review snapshots read failed; nothing was deleted");
       return "prepare_failed";
     }
+    // FV1 (fv5 a): the files that were once live go with the (unsold)
+    // books. Read now, before deleteUser; a failed read stops the deletion.
+    const versions = await readFileVersionPaths(service, bookIds);
+    if (!versions.ok) {
+      console.error("deleteAccount: file versions read failed; nothing was deleted");
+      return "prepare_failed";
+    }
     for (const book of authoredBooks) {
       for (const path of deletedBookManuscriptKeys({
         authorId: userId,
         bookId: book.id,
         currentFilePath: null,
         reviews: snapshots.byBook.get(book.id) ?? [],
+        versionFilePaths: versions.byBook.get(book.id) ?? [],
       })) {
         manuscriptPaths.add(path);
       }

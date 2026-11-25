@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/staff";
+import { earlierFileLine, readEarlierBookFiles } from "@/lib/book-file-versions";
 import { roleHasPermission } from "@/lib/staff-permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolvePublicAuthorName } from "@/lib/author-name";
@@ -284,6 +285,9 @@ export default async function AdminBookPage({
       .order("created_at", { ascending: true })
       .returns<{ name: string; role: string }[]>(),
   ]);
+  // FV1 (fv2 a): the files buyers got before the current one. null =
+  // couldn't be read (the card says so); an empty list shows no card.
+  const earlierFiles = await readEarlierBookFiles(admin, { id: book.id, authorId: book.author_id });
   // Upload notes D: the word count of the book's CURRENT file, if any.
   const wordsResult = book.file_path
     ? await admin
@@ -679,6 +683,36 @@ export default async function AdminBookPage({
                   {wordsResult.data ? "Count pages again" : "Count pages"}
                 </button>
               </form>
+            )}
+          </section>
+        )}
+
+        {(earlierFiles === null || earlierFiles.length > 0) && (
+          <section aria-labelledby="book-earlier-files" className={SECTION_CLASSES}>
+            <h2 id="book-earlier-files" className={SECTION_HEADING_CLASSES}>
+              Earlier book files
+            </h2>
+            {earlierFiles === null ? (
+              <p className="text-sm text-red-700">Couldn’t load the earlier files.</p>
+            ) : (
+              <>
+                <p className="text-sm text-muted">Files buyers got before the current one. Buyers always get the current file.</p>
+                <ul className="mt-3 flex flex-col divide-y divide-border rounded-[3px] border border-border text-sm">
+                  {earlierFiles.map((file) => (
+                    <li key={file.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <span>{earlierFileLine(file, "en")}</span>
+                      {canReview && (
+                        <a
+                          href={`/admin/books/${book.id}/versions/${file.id}`}
+                          className="focus-ring inline-flex min-h-11 items-center font-semibold text-primary underline underline-offset-2"
+                        >
+                          Download
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </section>
         )}

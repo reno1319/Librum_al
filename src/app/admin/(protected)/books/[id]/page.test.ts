@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement } from "react";
 
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
+const { bookFileVersionsDoubleState, resetBookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+
 // ADMIN-2-TAKEDOWN (C): the admin book page. Rendered to static HTML per
 // permission and state: who sees the Unpublish panel, the taken-down
 // panel and its "Allow again" button, and that ?report= is carried only
@@ -740,6 +748,50 @@ describe("AdminBookPage", () => {
       const html = await render("admin");
       expect(html).not.toContain(">Page estimate<");
       expect(selects.some((sel) => sel.table === "book_file_words")).toBe(false);
+    });
+  });
+
+  // ============================================================
+  // FV1 (fv2 a): the files buyers got before the current one.
+  // ============================================================
+  describe("FV1: earlier book files", () => {
+    const EARLIER = [
+      { id: "77777777-7777-4777-8777-777777777771", liveFrom: "2026-11-02T10:00:00Z", replacedAt: "2026-11-20T10:00:00Z", sizeBytes: 1363149 },
+      { id: "77777777-7777-4777-8777-777777777772", liveFrom: "2026-10-05T10:00:00Z", replacedAt: "2026-11-02T10:00:00Z", sizeBytes: null },
+    ];
+    beforeEach(() => resetBookFileVersionsDouble());
+
+    it("lists them newest first, with a Download link for reviewers", async () => {
+      bookFileVersionsDoubleState.earlier = EARLIER;
+      const html = await render("admin");
+      expect(html).toContain(">Earlier book files<");
+      expect(html).toContain("Files buyers got before the current one. Buyers always get the current file.");
+      const first = html.indexOf("EPUB · live 2 Nov 2026 – 20 Nov 2026 · 1.3 MB");
+      const second = html.indexOf("EPUB · live 5 Oct 2026 – 2 Nov 2026<");
+      expect(first).toBeGreaterThan(-1);
+      expect(second).toBeGreaterThan(first);
+      expect(html).toContain(`href="/admin/books/${BOOK_ID}/versions/${EARLIER[0].id}"`);
+      expect(html).toContain(`href="/admin/books/${BOOK_ID}/versions/${EARLIER[1].id}"`);
+      expect(bookFileVersionsDoubleState.calls).toEqual([{ fn: "readEarlierBookFiles", bookIds: [BOOK_ID] }]);
+    });
+
+    it("a role that may only look sees the list without links", async () => {
+      bookFileVersionsDoubleState.earlier = EARLIER;
+      const html = await render("moderator");
+      expect(html).toContain(">Earlier book files<");
+      expect(html).not.toContain("/versions/");
+    });
+
+    it("no earlier file: no card", async () => {
+      const html = await render("admin");
+      expect(html).not.toContain("Earlier book files");
+    });
+
+    it("an unreadable list says so", async () => {
+      bookFileVersionsDoubleState.earlier = null;
+      const html = await render("admin");
+      expect(html).toContain(">Earlier book files<");
+      expect(html).toContain("Couldn’t load the earlier files.");
     });
   });
 
