@@ -112,3 +112,57 @@ describe("SiteHeader cart", () => {
     expect(menuProps.at(-1)?.cartCount).toBeNull();
   });
 });
+
+// LR1 (Renato 11-25, lb7 b): Libraria's own header. Logo, search,
+// "Lista ime" and "Shporta", then the account; no menu links and no
+// menu button. Every other page keeps the default header (above).
+describe("SiteHeader store variant (Libraria)", () => {
+  async function renderStore(): Promise<string> {
+    return renderToStaticMarkup((await SiteHeader({ variant: "store" })) as ReactElement);
+  }
+
+  beforeEach(() => {
+    user = null;
+    recovery = false;
+    cartCount = 0;
+    cartQueries.length = 0;
+    menuProps.length = 0;
+  });
+
+  it("a visitor: search to Libraria, both icons through log in, Krijo llogari and Hyni, no menu", async () => {
+    const html = await renderStore();
+    expect(html).toMatch(/<form[^>]*action="\/librari"[^>]*method="get"|<form[^>]*method="get"[^>]*action="\/librari"/);
+    expect(html).toMatch(/id="store-header-q"[^>]*name="q"|name="q"[^>]*id="store-header-q"/);
+    expect(html).toContain('href="/login?next=/wishlist"');
+    expect(html).toContain(">Lista ime</span>");
+    expect(html).toContain('href="/login?next=/shporta"');
+    expect(html).toContain(">Shporta</span>");
+    expect(html).toMatch(/href="\/signup"[^>]*>Krijo llogari</);
+    expect(html).toMatch(/Keni llogari\?/);
+    expect(html).toMatch(/href="\/login"[^>]*>Hyni</);
+    expect(menuProps).toHaveLength(0);
+    expect(cartQueries).toHaveLength(0);
+  });
+
+  it("a signed-in reader: icons open the wishlist and the cart with its number, the greeting, no sign-up", async () => {
+    user = { id: "reader-1", email: "ana@example.test" };
+    cartCount = 2;
+    const html = await renderStore();
+    expect(html).toContain('href="/wishlist"');
+    expect(html).toMatch(/aria-label="Shporta, 2 libra"/);
+    expect(html).toContain(">2</span>");
+    expect(html).toContain("Përshëndetje, ");
+    expect(html).not.toContain("Krijo llogari");
+    expect(menuProps).toHaveLength(0);
+  });
+
+  it("password recovery: no icons, no cart read, and Dil stays visible", async () => {
+    user = { id: "reader-1", email: "ana@example.test" };
+    recovery = true;
+    const html = await renderStore();
+    expect(html).not.toContain("/wishlist");
+    expect(html).not.toContain("/shporta");
+    expect(cartQueries).toHaveLength(0);
+    expect(html).toMatch(/<form class="block"[\s\S]*?>Dil</);
+  });
+});

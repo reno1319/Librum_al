@@ -62,7 +62,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("K6: the classic author page", () => {
-  it("shows name and years, the life line, the bio, the works and the box back to all classics", async () => {
+  it("shows name and years, the life line, the bio and the works; LR1: no box back to all classics", async () => {
     const html = await render();
     expect(html).toMatch(/<h1[^>]*>Naim Frashëri <span class="text-muted">\(1846⁠–⁠1900\)<\/span><\/h1>/);
     expect(html).toContain("Lindi në Frashër, 1846 · Vdiq në Stamboll, 1900");
@@ -70,8 +70,14 @@ describe("K6: the classic author page", () => {
     expect(html).toContain("whitespace-pre-line");
     expect(html).toContain(">Veprat në Librum</h2>");
     expect(html).toContain('href="/libra/b1"');
-    expect(html).toContain("Më shumë klasikë shqiptarë, falas");
-    expect(html.match(/href="\/librari\?maxPrice=0"/g)).toHaveLength(2);
+    // LR1 (lr1-8 a): the Libraria list of classics is gone, so the box
+    // and the "Klasikët shqiptarë" step in the path are gone with it; the
+    // path is Libraria › name.
+    expect(html).not.toContain("Më shumë klasikë shqiptarë, falas");
+    expect(html).not.toContain("Shiko të gjithë klasikët");
+    expect(html).not.toContain("maxPrice");
+    expect(html).not.toContain("Klasikët shqiptarë");
+    expect(html).toMatch(/<nav aria-label="Rruga"[^>]*><a[^>]*href="\/librari"[^>]*>Libraria<\/a> › <span aria-current="page">Naim Frashëri<\/span><\/nav>/);
   });
 
   it("asks for this slug and for live, priced editions of the author's live works only", async () => {

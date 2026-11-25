@@ -1,4 +1,6 @@
+import { headers } from "next/headers";
 import { SiteHeader } from "@/components/site-header";
+import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 import { SiteFooter } from "@/components/site-footer";
 import { VisitorStats } from "@/components/visitor-stats";
 import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
@@ -36,7 +38,13 @@ import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
 // VISITOR STATS (pipeline item 6): the Vercel Web Analytics script loads
 // here, so /admin/* (outside this group) never loads it; on Production
 // only, and src/lib/visitor-stats.ts decides which of these pages count.
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
+//
+// LR1 (Renato 11-25, lb7 b): Libraria alone gets the shop header (logo,
+// search, "Lista ime", "Shporta", account; no menu links). Every other
+// page keeps today's header. The path comes from the header Proxy sets
+// on every request (see src/lib/supabase/middleware.ts).
+export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+  const pathname = (await headers()).get(INTERNAL_PATHNAME_HEADER);
   return (
     <>
       <a
@@ -45,7 +53,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       >
         Kaloni te përmbajtja
       </a>
-      <SiteHeader />
+      <SiteHeader variant={pathname === "/librari" ? "store" : "default"} />
       <div id="main-content" className="flex flex-1 flex-col">
         {children}
       </div>
