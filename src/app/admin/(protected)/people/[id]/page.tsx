@@ -301,6 +301,20 @@ export default async function AdminPersonPage({
         </dl>
       </section>
 
+      {canManage && (
+        // B18 (D13 3a): the staff rule for a leaked copy, right above Suspend.
+        <section aria-labelledby="person-leak-rule" className="rounded-card border border-border bg-surface p-4 text-sm text-muted">
+          <h2 id="person-leak-rule" className="font-semibold text-foreground">
+            Leaked copy?
+          </h2>
+          <ol className="mt-2 flex list-decimal flex-col gap-1 pl-5">
+            <li>Check Purchases below first.</li>
+            <li>First time: get it taken down and warn them. Don&apos;t suspend.</li>
+            <li>Suspend on a repeat, or if they sold or uploaded it on purpose.</li>
+          </ol>
+        </section>
+      )}
+
       {canManage && !suspensionsResult.error && (
         <SuspensionPanel
           userId={id}

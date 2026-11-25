@@ -134,6 +134,14 @@ describe("planManuscriptRemovals (N3 / P1)", () => {
     expect(planManuscriptRemovals({ authorId: AUTHOR, bookId: BOOK, currentFilePath: V3, reviews, superseded: [V1, V2] })).toEqual([V1, V2]);
   });
 
+  it("FV1: keeps every file that was once the book's live file", () => {
+    const reviews = [snap("approved", V1, "2026-10-02T00:00:00Z"), snap("approved", V2, "2026-10-05T00:00:00Z")];
+    expect(
+      planManuscriptRemovals({ authorId: AUTHOR, bookId: BOOK, currentFilePath: V3, reviews, superseded: [CANONICAL], versionFilePaths: [V1, CANONICAL] }),
+    ).toEqual([]);
+    expect(planManuscriptRemovals({ authorId: AUTHOR, bookId: BOOK, currentFilePath: V3, reviews, superseded: [CANONICAL] })).toEqual([CANONICAL, V1]);
+  });
+
   it("removes a superseded key the history does not keep, once", () => {
     expect(
       planManuscriptRemovals({
@@ -188,6 +196,18 @@ describe("deletedBookManuscriptKeys (N3 / P5)", () => {
         reviews: [snap("approved", CANONICAL, "2026-10-01T00:00:00Z"), snap("pending", V2, null), snap("cancelled", V1, "2026-10-02T00:00:00Z")],
       }),
     ).toEqual([V2, CANONICAL, V1]);
+  });
+
+  it("FV1 (fv5 a): the once-live files go with the book too, own keys only", () => {
+    expect(
+      deletedBookManuscriptKeys({
+        authorId: AUTHOR,
+        bookId: BOOK,
+        currentFilePath: V2,
+        reviews: [snap("approved", V2, "2026-10-01T00:00:00Z")],
+        versionFilePaths: [V1, V2, `${OTHER_AUTHOR}/${BOOK}.epub`, `${AUTHOR}/${OTHER_BOOK}.epub`],
+      }),
+    ).toEqual([V2, V1]);
   });
 
   it("skips anything that is not this author's own key for this book", () => {
@@ -464,6 +484,7 @@ describe("removeUnretainedManuscripts", () => {
       books: { data: { file_path: V3 }, error: null },
       book_reviews: { data: [snap("approved", V1, "2026-10-02T00:00:00Z"), snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
       book_pending_changes: { data: null, error: null },
+      book_file_versions: { data: [], error: null },
     });
     const remover = tableClient({});
     await removeUnretainedManuscripts(service.client, remover.client, { authorId: AUTHOR, bookId: BOOK, superseded: [CANONICAL], caller: "test" });
@@ -484,6 +505,13 @@ describe("removeUnretainedManuscripts", () => {
         book_reviews: { data: [snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
         book_pending_changes: { data: null, error: { code: "42501" } },
       },
+      // FV1: the once-live files unreadable.
+      {
+        books: { data: { file_path: V3 }, error: null },
+        book_reviews: { data: [snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
+        book_pending_changes: { data: null, error: null },
+        book_file_versions: { data: null, error: { code: "42501" } },
+      },
     ];
     for (const results of cases) {
       const remover = tableClient({});
@@ -499,6 +527,7 @@ describe("removeUnretainedManuscripts", () => {
       books: { data: { file_path: V3 }, error: null },
       book_reviews: { data: [snap("cancelled", V2, "2026-10-03T00:00:00Z")], error: null },
       book_pending_changes: { data: { file_path: V2 }, error: null },
+      book_file_versions: { data: [], error: null },
     });
     const remover = tableClient({});
     await removeUnretainedManuscripts(service.client, remover.client, { authorId: AUTHOR, bookId: BOOK, superseded: [V1, V2], caller: "test" });
@@ -508,6 +537,24 @@ describe("removeUnretainedManuscripts", () => {
       filters: [["eq", "book_id", BOOK]],
     });
     expect(remover.removed).toEqual([{ bucket: "manuscripts", paths: [V1] }]);
+  });
+
+  // FV1: a file that was once live stays, read by book id.
+  it("keeps every once-live file (book_file_versions), read by book id", async () => {
+    const service = tableClient({
+      books: { data: { file_path: V3 }, error: null },
+      book_reviews: { data: [snap("approved", V2, "2026-10-03T00:00:00Z")], error: null },
+      book_pending_changes: { data: null, error: null },
+      book_file_versions: { data: [{ book_id: BOOK, file_path: V1 }, { book_id: BOOK, file_path: V3 }], error: null },
+    });
+    const remover = tableClient({});
+    await removeUnretainedManuscripts(service.client, remover.client, { authorId: AUTHOR, bookId: BOOK, superseded: [V1, CANONICAL], caller: "test" });
+    expect(service.recorded.find((r) => r.table === "book_file_versions")).toEqual({
+      table: "book_file_versions",
+      columns: "book_id, file_path",
+      filters: [["in", "book_id", [BOOK]]],
+    });
+    expect(remover.removed).toEqual([{ bucket: "manuscripts", paths: [CANONICAL] }]);
   });
 
   it("never throws, and logs no key", async () => {

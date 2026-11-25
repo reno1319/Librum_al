@@ -1,5 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
+
 // PHASE-2C bundle-membership-integrity: dedicated coverage for
 // unpublishBook() and deleteBook()'s new published-bundle-membership
 // protection (bookBelongsToPublishedBundle(), shared by both -- see its

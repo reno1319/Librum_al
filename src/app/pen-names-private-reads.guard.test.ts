@@ -148,6 +148,9 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     // ADMIN-3-REVIEW (H): the staff file link checks the book's current
     // file against the pending snapshot, after requireStaff("books.review").
     "app/admin/(protected)/books/[id]/file/route.ts",
+    // FV1 (fv2 a): the staff download of an earlier file reads the book's
+    // author id (no pen name), after requireStaff("books.review").
+    "app/admin/(protected)/books/[id]/versions/[versionId]/route.ts",
     // PEOPLE-1 (10a): a person's page lists their books, after
     // requireStaff("people.view").
     "app/admin/(protected)/people/[id]/page.tsx",
