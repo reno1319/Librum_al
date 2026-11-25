@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 320 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 323 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -53,7 +53,9 @@
 --   columns) (migration 20261125130000), plus the gifts' three rows, no
 --   table-wide privilege for any role, and ten column rows
 --   (authenticated SELECT of every column but token_hash, claimed_by and
---   purchase_id) (migration 20261125140000). A relation with no
+--   purchase_id) (migration 20261125140000), plus LR1 patch 2's three
+--   libraria_category_buttons rows (SELECT for every role; migration
+--   20261125150000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -223,6 +225,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r gifts | anon | -'),
 ('rel','r gifts | authenticated | -'),
 ('rel','r gifts | service_role | -'),
+('rel','r libraria_category_buttons | anon | SELECT'),
+('rel','r libraria_category_buttons | authenticated | SELECT'),
+('rel','r libraria_category_buttons | service_role | SELECT'),
 ('rel','r blog_post_reactions | anon | -'),
 ('rel','r blog_post_reactions | authenticated | SELECT'),
 ('rel','r blog_post_reactions | service_role | -'),
@@ -434,8 +439,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 320 then
-    raise exception 'FAIL: part1: the snapshot must hold 320 rows, holds %', v_expected;
+  if v_expected <> 323 then
+    raise exception 'FAIL: part1: the snapshot must hold 323 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

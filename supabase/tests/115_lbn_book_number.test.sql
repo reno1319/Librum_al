@@ -249,8 +249,16 @@ end $$;
 select pg_temp.assert(
   (select a.attname from pg_catalog.pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) = 'lbn',
-  'part6: lbn is public_books'' last column');
+    order by a.attnum desc limit 1) in ('lbn', 'only_on_librum')
+  -- LR1 patch 2 (migration 20261125150000) appends only_on_librum right
+  -- after it.
+  and (select coalesce(max(a.attnum) filter (where a.attname = 'only_on_librum'),
+                       max(a.attnum) filter (where a.attname = 'lbn') + 1)
+         from pg_catalog.pg_attribute a
+        where a.attrelid = 'public.public_books'::regclass and not a.attisdropped)
+      = (select a.attnum + 1 from pg_catalog.pg_attribute a
+          where a.attrelid = 'public.public_books'::regclass and a.attname = 'lbn'),
+  'part6: lbn is public_books'' last column, or right before only_on_librum');
 
 do $$
 declare
