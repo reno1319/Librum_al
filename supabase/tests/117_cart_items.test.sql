@@ -2,7 +2,7 @@
 -- Do not execute against Staging or Production.
 --
 -- Committed SQL regression suite for the cart
--- (supabase/migrations/20261125120000_cart_items.sql):
+-- (supabase/migrations/20261125130000_cart_items.sql):
 --
 -- * part1 the table: row level security on; anon has no grants;
 --   authenticated may only insert the four columns and update the two
@@ -22,7 +22,7 @@
 --   createdb librum_test
 --   psql -d librum_test -f supabase/tests/00_stub_supabase_platform.sql
 --   psql -d librum_test -f supabase/schema.sql
---   psql -d librum_test -v ON_ERROR_STOP=1 -f supabase/tests/116_cart_items.test.sql
+--   psql -d librum_test -v ON_ERROR_STOP=1 -f supabase/tests/117_cart_items.test.sql
 --
 -- Against the BASE schema it fails at part1 (no table): the negative
 -- control. Everything runs inside one transaction and is rolled back.
@@ -206,8 +206,8 @@ begin
   if v_n < 34 then
     raise exception 'FAIL: only % assertions ran (expected at least 34)', v_n;
   end if;
-  raise warning '116_cart_items: % assertions passed', v_n;
-  raise notice 'ALL PASSED: 116_cart_items.test.sql (% assertions)', v_n;
+  raise warning '117_cart_items: % assertions passed', v_n;
+  raise notice 'ALL PASSED: 117_cart_items.test.sql (% assertions)', v_n;
 end $$;
 
 rollback;

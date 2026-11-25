@@ -2,7 +2,7 @@ import { formatCatalogAmountAll, resolveCatalogPriceState } from "@/lib/catalog-
 
 // CART (Renato 2026-11-25, item 32): the cart's pure rules and copy.
 // The database enforces the same rules (migration
-// 20261125120000_cart_items.sql); these give readers a clear message
+// 20261125130000_cart_items.sql); these give readers a clear message
 // before a refused insert would.
 
 export const CART_MAX_ITEMS = 50;

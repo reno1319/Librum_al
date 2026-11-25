@@ -49,7 +49,7 @@
 --   (authenticated DELETE and SELECT; nothing for anon or service_role)
 --   and four column rows (authenticated INSERT of book_id, reader_id,
 --   gift_email, gift_note, and UPDATE of the two gift columns)
---   (migration 20261125120000). A relation with no
+--   (migration 20261125130000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on

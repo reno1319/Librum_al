@@ -2,7 +2,7 @@
 
 // CART (Renato 2026-11-25, item 32): the cart's server actions. Every
 // write goes through the reader's own session, so the row rules of
-// public.cart_items (migration 20261125120000_cart_items.sql) decide;
+// public.cart_items (migration 20261125130000_cart_items.sql) decide;
 // the checks here only turn a refusal into a clear message.
 
 import { redirect } from "next/navigation";

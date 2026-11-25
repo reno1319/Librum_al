@@ -23306,7 +23306,7 @@ as
      or b.author_id = auth.uid()
      or public.user_owns_book(b.id);
 
--- CART (migration 20261125120000_cart_items.sql)
+-- CART (migration 20261125130000_cart_items.sql)
 create table public.cart_items (
   id uuid primary key default gen_random_uuid(),
   reader_id uuid not null references public.profiles(id) on delete cascade,
