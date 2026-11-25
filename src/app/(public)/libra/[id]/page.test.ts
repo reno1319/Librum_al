@@ -19,6 +19,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 // book_views insert.
 const mockCreateAdminClient = vi.fn((): unknown => { throw new Error("ADMIN_CLIENT_CALLED"); });
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockCreateAdminClient() }));
+vi.mock("../../shporta/actions", () => ({ addToCart: vi.fn(), saveGift: vi.fn(), removeFromCart: vi.fn(), pressPay: vi.fn() }));
 vi.mock("./actions", () => ({
   buyBook: vi.fn(), getFreeBook: vi.fn(), submitReview: vi.fn(),
   addToWishlist: vi.fn(), removeFromWishlist: vi.fn(),
@@ -766,15 +767,18 @@ describe("BookDetailPage: patch A buy box and sticky bar", () => {
     expect(bar(await render({ user: null, book: FREE }))).toContain(`${LOGIN}>Merre falas</a>`);
   });
 
-  it("no bar for the author, an owner, an unavailable price, or a closed checkout (signed in or not)", async () => {
+  it("no bar for the author, an owner or an unavailable price; a closed checkout's bar adds to the cart (signed in or not)", async () => {
     expect(bar(await render({ user: { id: "author" } }))).toBeNull();
     expect(bar(await render({ user: { id: "reader" }, owns: true }))).toBeNull();
     expect(bar(await render({ user: { id: "reader" }, book: { ...BOOK_ROW, price_all: null } }))).toBeNull();
     expect(bar(await render({ user: null, book: { ...BOOK_ROW, price_all: null } }))).toBeNull();
     const closedReader = await render({ user: { id: "reader" }, open: false });
     const closedAnon = await render({ user: null, open: false });
+    // CART (item 32, c1 a): the bar repeats the box's main action.
+    expect(bar(closedReader)).toContain(">Shto në shportë</button>");
+    expect(bar(closedAnon)).toContain('href="/login?next=/libra/');
+    expect(bar(closedAnon)).toContain(">Shto në shportë</a>");
     for (const html of [closedReader, closedAnon]) {
-      expect(bar(html)).toBeNull();
       expect(html).not.toContain("Blej librin");
       expect(html).not.toContain('name="code"');
     }

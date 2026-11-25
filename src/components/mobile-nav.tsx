@@ -62,6 +62,7 @@ export function MobileNav({
   accountHref,
   logoutAction,
   recoveryActive = false,
+  cartCount = null,
 }: {
   items: NavItem[];
   loggedIn: boolean;
@@ -73,6 +74,9 @@ export function MobileNav({
   // back to the logged-out branch's Sign up link (also a dead end
   // during recovery; see the P2-5 audit's RECOVERY_ALLOWED_PATHS trace).
   recoveryActive?: boolean;
+  // CART (item 32, p1 c): the cart line, for a signed-in reader; null
+  // hides it.
+  cartCount?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -165,6 +169,11 @@ export function MobileNav({
               <div className="mt-4 flex flex-col border-t border-primary-foreground/15 pt-4">
                 {loggedIn ? (
                   <>
+                    {cartCount !== null && (
+                      <Link href="/shporta" className={linkClassName}>
+                        {cartCount > 0 ? `Shporta (${cartCount})` : "Shporta"}
+                      </Link>
+                    )}
                     <Link href={accountHref} className={linkClassName}>
                       Llogaria
                     </Link>

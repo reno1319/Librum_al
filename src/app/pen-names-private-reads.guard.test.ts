@@ -87,11 +87,15 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   // (always the authenticated user's own id, or the review's author on
   // the staff side).
   "lib/book-reviews.ts": ["books"],
+  // CART (item 32, g4 a): whether the reader is the book's author, so
+  // they can't add or gift their own book.
+  "app/(public)/shporta/actions.ts": ["books"],
 };
 // A helper that takes the author id as a parameter names it so.
 const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {
   "lib/book-reviews.ts": /\.eq\("author_id",\s*params\.authorId\)/,
   "lib/account-deletion.ts": /\.eq\("author_id",\s*userId\)/,
+  "app/(public)/shporta/actions.ts": /\.eq\("author_id",\s*userId\)/,
 };
 
 describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base tables", () => {

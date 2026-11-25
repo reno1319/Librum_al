@@ -15,7 +15,7 @@ export function isVisitorStatsEnabled(env: Record<string, string | undefined>): 
 // /admin/* never loads the script at all (it sits outside the
 // (public) layout); it is still refused here in case that ever moves.
 // Everything else under (public) -- dashboard, account, library,
-// wishlist, following, sign-in, sign-up and password pages -- is left
+// wishlist, the cart (/shporta), following, sign-in, sign-up and password pages -- is left
 // out so the team's own work and signed-in areas stay out of the
 // numbers. visitor-stats.test.ts fails when a (public) folder is in
 // neither list, so each new page needs a decision.

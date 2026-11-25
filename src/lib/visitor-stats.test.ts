@@ -26,6 +26,8 @@ const NOT_COUNTED_FOLDERS = [
   "library",
   "login",
   "reset-password",
+  // CART (item 32): a signed-in reader's own cart.
+  "shporta",
   "signup",
   "wishlist",
 ];
@@ -98,6 +100,8 @@ describe("VISITOR STATS: which pages count", () => {
       "/account",
       "/library",
       "/wishlist",
+      "/shporta",
+      "/shporta/pagesa",
       "/following",
       "/login",
       "/signup",

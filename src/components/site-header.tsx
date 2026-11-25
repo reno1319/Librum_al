@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/(public)/auth/actions";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
-import { IconPerson } from "@/components/icons";
+import { IconBag, IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
 import { FeedbackButton } from "@/components/feedback-button";
@@ -11,6 +11,7 @@ import { accountFirstName } from "@/lib/account-first-name";
 import { LibrumLogo } from "@/components/librum-logo";
 import { StaffBar } from "@/components/staff-bar";
 import { roleHasPermission } from "@/lib/staff-permissions";
+import { cartCountLabel } from "@/lib/cart";
 import type { StaffRole } from "@/lib/types";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
@@ -156,6 +157,18 @@ export async function SiteHeader() {
   const cookieStore = await cookies();
   const recoveryActive = isRecoverySessionActive(cookieStore);
 
+  // CART (item 32, c2 a): how many rows the signed-in reader's cart has.
+  // Only the reader's own rows come back (row rules); an error shows the
+  // cart with no number.
+  let cartCount = 0;
+  if (user && !recoveryActive) {
+    const { count } = await supabase
+      .from("cart_items")
+      .select("id", { count: "exact", head: true })
+      .eq("reader_id", user.id);
+    cartCount = count ?? 0;
+  }
+
   const nav = buildSiteHeaderNav({
     user: user ? { id: user.id, email: user.email } : null,
     displayName,
@@ -244,6 +257,28 @@ export async function SiteHeader() {
               an ellipsis at about 12 letters, and shrinks further rather
               than wrap the bar on a narrow phone. The accessible name
               starts with the visible text. */}
+          {/* CART (item 32): the bag, signed-in readers only (c2 a), from
+              1024px up. On phones the cart is a line in the menu (p1 c),
+              so the greeting keeps its room. */}
+          {user && !recoveryActive && (
+            <Link
+              href="/shporta"
+              aria-label={cartCount > 0 ? `Shporta, ${cartCountLabel(cartCount)}` : "Shporta"}
+              className="focus-ring relative hidden size-11 shrink-0 items-center justify-center rounded-sm text-primary-foreground lg:flex"
+            >
+              <span aria-hidden="true">
+                <IconBag className="size-5" />
+              </span>
+              {cartCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1 right-0.5 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-accent px-1 text-[0.6875rem] font-bold text-accent-foreground"
+                >
+                  {cartCount > 99 ? "99+" : cartCount}
+                </span>
+              )}
+            </Link>
+          )}
           {nav.showAccountLink &&
             (nav.headerName ? (
               <Link
@@ -279,6 +314,7 @@ export async function SiteHeader() {
             loggedIn={!!user}
             accountHref={nav.accountHref}
             logoutAction={logout}
+            cartCount={user && !recoveryActive ? cartCount : null}
             recoveryActive={recoveryActive}
           />
         </div>
