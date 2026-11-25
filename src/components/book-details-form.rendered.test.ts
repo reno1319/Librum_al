@@ -40,6 +40,7 @@ function render(
         rightsBasis: "",
         originalAuthor: "",
         originalTitle: "",
+        onlyOnLibrum: false,
         ...overrides,
       },
       locked,
@@ -54,6 +55,14 @@ function render(
       ],
     }),
   );
+}
+
+function baseInitial() {
+  return {
+    title: "T", subtitle: "", language: "sq", seriesId: "", seriesPosition: "", editionNumber: "", penNameId: PEN,
+    description: "", isAdult: false, readingAge: "", bookType: "", categories: [], keywords: "", contributors: [],
+    rightsBasis: "" as const, originalAuthor: "", originalTitle: "", onlyOnLibrum: false,
+  };
 }
 
 // DC 5 (Renato 11-13, a): series, edition and contributors live in one
@@ -312,6 +321,55 @@ describe("BookDetailsForm: a picked public-domain edition (N5)", () => {
 });
 
 // Upload notes 1 and 2 (Enkelejd 11-06).
+// LR1 patch 2 (lr1-1 c, lr2-1 a): the "Vetëm në Librum" box.
+describe("BookDetailsForm: only on Librum", () => {
+  const tick = (html: string) => html.match(/<input type="checkbox"[^>]*value="yes"[^>]*\/>/g)?.find((t) => !t.includes("categories")) ?? "";
+  it("a box after Të drejtat and before Lexuesit, with one tick sent as onlyOnLibrum", () => {
+    const html = render({ onlyOnLibrum: true });
+    expect(html.indexOf(">Të drejtat<")).toBeLessThan(html.indexOf(">Vetëm në Librum<"));
+    expect(html.indexOf(">Vetëm në Librum<")).toBeLessThan(html.indexOf(">Lexuesit<"));
+    expect(html).toContain("Ky libër shitet ekskluzivisht në Librum");
+    expect(tick(html)).toContain('name="onlyOnLibrum"');
+    expect(tick(html)).toContain('checked=""');
+    expect(tick(render())).not.toContain('checked=""');
+  });
+
+  it("removed by staff: unticked, greyed, not sent, and no note", () => {
+    const html = renderToStaticMarkup(
+      createElement(BookDetailsForm, {
+        action: async () => undefined,
+        initial: { ...baseInitial(), onlyOnLibrum: true },
+        locked: false,
+        lockedPenName: null,
+        penNames: [{ id: PEN, name: "Arta Kodra", is_default: true }],
+        series: [],
+        onlyOnLibrumRemoved: true,
+      }),
+    );
+    expect(tick(html)).toContain('disabled=""');
+    expect(tick(html)).not.toContain("name=");
+    expect(tick(html)).not.toContain('checked=""');
+    const box = html.slice(html.indexOf(">Vetëm në Librum<"), html.indexOf(">Lexuesit<"));
+    expect(box).not.toMatch(/staf|Librum e hoq|hequr/i);
+  });
+
+  it("never on a public-domain edition", () => {
+    expect(render({}, false, { pdFrozen: true })).not.toContain("Vetëm në Librum");
+    const html = renderToStaticMarkup(
+      createElement(BookDetailsForm, {
+        action: async () => undefined,
+        initial: baseInitial(),
+        locked: false,
+        lockedPenName: null,
+        penNames: [{ id: PEN, name: "Arta Kodra", is_default: true }],
+        series: [],
+        onlyOnLibrumOffered: false,
+      }),
+    );
+    expect(html).not.toContain("Vetëm në Librum");
+  });
+});
+
 describe("BookDetailsForm: upload notes", () => {
   // AUTHOR PROFILI (build 1): pen names are managed on Profili.
   it("the pen-name page opens in a new tab, and says so", () => {

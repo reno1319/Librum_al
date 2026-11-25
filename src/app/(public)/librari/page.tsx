@@ -291,6 +291,7 @@ const SHELF_SIZE = 5;
 async function fetchShelf(
   supabase: SupabaseClient,
   genres?: readonly string[],
+  { onlyOnLibrum = false }: { onlyOnLibrum?: boolean } = {},
 ): Promise<BookWithAuthor[] | null> {
   let query = supabase
     .from("public_books")
@@ -298,6 +299,9 @@ async function fetchShelf(
     .in("status", LISTED_BOOK_STATUSES)
     .not("price_all", "is", null);
   if (genres) query = query.overlaps("categories", [...genres]);
+  // LR1 patch 2: the view's only_on_librum is already false on a free
+  // classic (a public-domain edition, lr1-1 c).
+  if (onlyOnLibrum) query = query.eq("only_on_librum", true);
   const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(SHELF_SIZE)
@@ -326,6 +330,22 @@ async function fetchGenresWithBooks(supabase: SupabaseClient): Promise<string[]>
     return [];
   }
   return countCatalogueFacets(data ?? []).genres.map((g) => g.genre);
+}
+
+// LR1 patch 2 (lb5 a): the category buttons staff chose, in their
+// order. Fail-soft: a failed read gives none, so the page falls back to
+// the A–Zh rule (lr2-5 b).
+async function fetchStaffCategoryButtons(supabase: SupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("libraria_category_buttons")
+    .select("category")
+    .order("position", { ascending: true })
+    .returns<{ category: string }[]>();
+  if (error) {
+    console.error("Libraria: failed to load the category buttons:", error);
+    return [];
+  }
+  return (data ?? []).map((r) => r.category);
 }
 
 // Approved reviews of the books on the page (public_reviews lists only
@@ -439,14 +459,16 @@ export default async function BookstorePage({
     );
   }
 
-  const [newest, nonFiction, bundles, librumChoice, genresWithBooks] = await Promise.all([
+  const [newest, onlyOnLibrum, nonFiction, bundles, librumChoice, genresWithBooks, staffCategories] = await Promise.all([
     fetchShelf(supabase),
+    fetchShelf(supabase, undefined, { onlyOnLibrum: true }),
     fetchShelf(supabase, NON_FICTION_GENRES),
     fetchPublishedBundles(supabase),
     getLibrumChoiceBook(),
     fetchGenresWithBooks(supabase),
+    fetchStaffCategoryButtons(supabase),
   ]);
-  const shown = [...(newest ?? []), ...(nonFiction ?? [])];
+  const shown = [...(newest ?? []), ...(onlyOnLibrum ?? []), ...(nonFiction ?? [])];
   const ratings = await fetchRatings(supabase, [...new Set(shown.map((b) => b.id))]);
   const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
 
@@ -485,8 +507,14 @@ export default async function BookstorePage({
           />
         ) : (
           <Shelf title="Më të rinjtë në Librum" books={newest} ctx={ctx} first={!featured}>
-            <CategoryButtons genres={categoryButtons(genresWithBooks)} />
+            <CategoryButtons genres={categoryButtons(genresWithBooks, staffCategories)} />
           </Shelf>
+        )}
+
+        {/* LR1 patch 2 (lr1-1 c): the books their authors ticked, newest
+            first; hidden while there are none. */}
+        {onlyOnLibrum && onlyOnLibrum.length > 0 && (
+          <Shelf title="Libra që i gjeni vetëm në Librum" books={onlyOnLibrum} ctx={ctx} />
         )}
 
         {nonFiction && nonFiction.length > 0 && <Shelf title="Libra jo-artistikë" books={nonFiction} ctx={ctx} />}
@@ -543,7 +571,8 @@ function Card({ book, ctx }: { book: BookWithAuthor; ctx: CardContext }) {
 }
 
 // The buttons under "Më të rinjtë": "Të gjitha kategoritë" (this view,
-// so it is the selected one), up to four categories (decision 2), then
+// so it is the selected one), the categories (staff's, or A–Zh: see
+// categoryButtons), then
 // "Më shumë kategori", a box with every category as plain text (Renato
 // 18:25Z). A tap on a category opens its results. The box closes on
 // its ✕, a tap outside, Escape or a tap on a category. On phones the

@@ -88,6 +88,8 @@ vi.mock("../actions", () => ({
   countBookPagesAsStaff: vi.fn(),
 }));
 
+vi.mock("./only-on-librum-actions", () => ({ removeOnlyOnLibrum: vi.fn() }));
+
 const { default: AdminBookPage } = await import("./page");
 
 const BOOK_ID = "22222222-2222-4222-8222-222222222222";
@@ -140,6 +142,29 @@ describe("AdminBookPage", () => {
       book_takedowns: { data: null, error: null },
       bundle_books: { data: [{ bundle_id: "bundle-1", bundles: { title: "Set A", status: "published" } }], error: null },
     };
+  });
+
+  // LR1 patch 2 (lr1-1 c, lr2-1 a): the Only on Librum box.
+  it("Only on Librum: the author's tick, with Remove from the shelf for catalog.feature only", async () => {
+    Object.assign(rows.books.data as Record<string, unknown>, { only_on_librum: true, only_on_librum_removed_at: null });
+    const owner = await render("owner");
+    expect(owner).toContain(">Only on Librum<");
+    expect(owner).toContain("Remove from the shelf");
+    expect(selects.find((s) => s.table === "books")!.columns).toContain("only_on_librum, only_on_librum_removed_at");
+    const moderator = await render("moderator");
+    expect(moderator).toContain(">Only on Librum<");
+    expect(moderator).not.toContain("Remove from the shelf");
+  });
+
+  it("Only on Librum: removed by staff, not ticked, and never on a public-domain edition", async () => {
+    Object.assign(rows.books.data as Record<string, unknown>, { only_on_librum: false, only_on_librum_removed_at: "2026-11-24T10:00:00Z" });
+    const removed = await render("owner");
+    expect(removed).toContain("Removed by staff on 24 Nov 2026. The author can’t tick it again.");
+    expect(removed).not.toContain("Remove from the shelf");
+    Object.assign(rows.books.data as Record<string, unknown>, { only_on_librum_removed_at: null });
+    expect(await render("owner")).toContain("Not ticked by the author.");
+    Object.assign(rows.books.data as Record<string, unknown>, { pd_work_id: "55555555-5555-4555-8555-555555555555" });
+    expect(await render("owner")).not.toContain(">Only on Librum<");
   });
 
   it("gates on requireStaff('reports.view') and reads nothing when denied", async () => {

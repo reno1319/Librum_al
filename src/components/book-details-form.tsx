@@ -79,6 +79,8 @@ export type DetailsFormValues = {
   rightsBasis: RightsBasis | "";
   originalAuthor: string;
   originalTitle: string;
+  // LR1 patch 2 (lr1-1 c): the "only on Librum" tick.
+  onlyOnLibrum: boolean;
 };
 
 export type EditorPenName = { id: string; name: string; is_default: boolean };
@@ -144,6 +146,8 @@ export function BookDetailsForm({
   series: initialSeries,
   pdFrozen = false,
   markMissing = [],
+  onlyOnLibrumOffered = true,
+  onlyOnLibrumRemoved = false,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   initial: DetailsFormValues;
@@ -168,6 +172,12 @@ export function BookDetailsForm({
   // list -- the fields still empty for the send start out red, with the
   // first one focused.
   markMissing?: DetailsField[];
+  // LR1 patch 2: a public-domain edition is never offered the tick (a
+  // free classic never qualifies, lr1-1 c).
+  onlyOnLibrumOffered?: boolean;
+  // lr2-1 a: staff took the tick off; it shows unticked and greyed, with
+  // no note (Renato 19:37Z), and is not sent.
+  onlyOnLibrumRemoved?: boolean;
 }) {
   const [errors, setErrors] = useState<Partial<Record<DetailsField, string>>>(() =>
     Object.fromEntries(markMissing.map((field) => [field, MISSING_FOR_SEND_MESSAGE])),
@@ -482,6 +492,22 @@ export function BookDetailsForm({
           <FieldError id="details-originalTitle-error" message={err("originalTitle")} />
         </label>
       </Section>
+
+      {onlyOnLibrumOffered && !pdFrozen && (
+        <Section title="Vetëm në Librum" lead="Libri shfaqet në raftin “Libra që i gjeni vetëm në Librum” në Librari.">
+          <label className={`${CHOICE_LABEL_CLASSES} ${onlyOnLibrumRemoved ? "cursor-not-allowed text-muted" : ""}`}>
+            <input
+              type="checkbox"
+              name={onlyOnLibrumRemoved ? undefined : "onlyOnLibrum"}
+              value="yes"
+              defaultChecked={onlyOnLibrumRemoved ? false : initial.onlyOnLibrum}
+              disabled={onlyOnLibrumRemoved}
+              className={CHOICE_INPUT_CLASSES}
+            />
+            Ky libër shitet ekskluzivisht në Librum
+          </label>
+        </Section>
+      )}
 
       <Section title="Lexuesit" lead="Ndihmon prindërit dhe lexuesit të gjejnë librin e duhur.">
         <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">

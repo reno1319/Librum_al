@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { GENRES } from "@/lib/genres";
-import { categoryButtons, NON_FICTION_GENRES, starFills, storeCardAction, summarizeRatings } from "./libraria-store";
+import {
+  categoryButtons,
+  NON_FICTION_GENRES,
+  parseCategoryButtonSlots,
+  starFills,
+  storeCardAction,
+  summarizeRatings,
+} from "./libraria-store";
 
 describe("LR1 Libraria store rules", () => {
   it("category buttons: the first four categories with books, in A–Zh order, unknown ones ignored", () => {
@@ -49,5 +56,37 @@ describe("LR1 Libraria store rules", () => {
     expect(storeCardAction({ status: "published", price_all: 199 }, true, true, true)).toBe("view");
     expect(storeCardAction({ status: "published", price_all: 0 }, true, false, true)).toBe("view");
     expect(storeCardAction({ status: "published", price_all: 199 }, false, false, true)).toBe("login");
+  });
+});
+
+// LR1 patch 2: staff's category buttons and the admin form's slots.
+describe("categoryButtons with staff's list", () => {
+  it("staff's list wins, in its order, with no book needed (lr2-4 b)", () => {
+    expect(categoryButtons(["Horror"], ["Poezi", "Romancë"])).toEqual(["Poezi", "Romancë"]);
+  });
+  it("skips unknown names and repeats, and keeps at most 6", () => {
+    expect(
+      categoryButtons([], ["Nope", "Poezi", "Poezi", "Histori", "Horror", "Fantazi", "Filozofi", "Shkencë", "Romancë"]),
+    ).toEqual(["Poezi", "Histori", "Horror", "Fantazi", "Filozofi", "Shkencë"]);
+  });
+  it("an empty (or all-unknown) list falls back to the A–Zh rule (lr2-5 b)", () => {
+    expect(categoryButtons(["Romancë", "Horror"], [])).toEqual(["Horror", "Romancë"]);
+    expect(categoryButtons(["Romancë"], ["Nope"])).toEqual(["Romancë"]);
+  });
+});
+
+describe("parseCategoryButtonSlots", () => {
+  it("keeps the order and closes up empty slots", () => {
+    expect(parseCategoryButtonSlots(["", "Poezi", null, " Histori ", "", ""])).toEqual({ ok: true, categories: ["Poezi", "Histori"] });
+  });
+  it("all empty is an empty list", () => {
+    expect(parseCategoryButtonSlots(["", "", "", "", "", ""])).toEqual({ ok: true, categories: [] });
+  });
+  it("refuses a repeat and an unknown category", () => {
+    expect(parseCategoryButtonSlots(["Poezi", "Poezi"])).toEqual({ ok: false, reason: "repeat" });
+    expect(parseCategoryButtonSlots(["Nope"])).toEqual({ ok: false, reason: "unknown" });
+  });
+  it("reads only the first 6 slots", () => {
+    expect(parseCategoryButtonSlots(["Poezi", "", "", "", "", "", "Histori"])).toEqual({ ok: true, categories: ["Poezi"] });
   });
 });
