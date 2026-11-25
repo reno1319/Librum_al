@@ -550,12 +550,12 @@ function Card({ book, ctx }: { book: BookWithAuthor; ctx: CardContext }) {
 // buttons stay one row that scrolls sideways and the box opens over
 // the page.
 const PILL =
-  "focus-ring inline-flex min-h-11 items-center rounded-full border border-[#c9bfa9] bg-[#fffdf8] px-4 text-[0.9375rem] whitespace-nowrap text-foreground transition-colors hover:bg-surface-hover";
+  "focus-ring inline-flex min-h-11 items-center rounded-full bg-[#ecebe8] px-5 text-[0.9375rem] whitespace-nowrap text-foreground transition-colors hover:bg-[#e0ded8]";
 
 function CategoryButtons({ genres }: { genres: string[] }) {
   return (
     <div className="-mx-4 mt-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:relative sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-      <Link href="/librari" aria-current="page" className={`${PILL} border-primary! bg-primary! text-primary-foreground!`}>
+      <Link href="/librari" aria-current="page" className={`${PILL} bg-primary! text-primary-foreground!`}>
         Të gjitha kategoritë
       </Link>
       {genres.map((g) => (
@@ -565,12 +565,9 @@ function CategoryButtons({ genres }: { genres: string[] }) {
       ))}
       <DismissableDetails className="group" closeOnLinkClick>
         <summary
-          className={`${PILL} cursor-pointer list-none gap-1.5 border-primary! font-semibold text-primary! [&::-webkit-details-marker]:hidden`}
+          className="focus-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-sm px-3 text-[0.9375rem] font-semibold whitespace-nowrap text-foreground underline decoration-2 underline-offset-4 [&::-webkit-details-marker]:hidden"
         >
           Më shumë kategori
-          <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 transition-transform group-open:rotate-180 motion-reduce:transition-none">
-            <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          </svg>
         </summary>
         <div
           role="group"
