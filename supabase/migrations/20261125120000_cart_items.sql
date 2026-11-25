@@ -100,7 +100,7 @@ grant update (gift_email, gift_note) on table public.cart_items to authenticated
 create policy "Readers see their own cart"
   on public.cart_items for select
   to authenticated
-  using (reader_id = auth.uid());
+  using (auth.uid() = reader_id);
 
 create policy "Readers add to their own cart"
   on public.cart_items for insert
