@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff";
-import { getLibrumChoiceBook } from "@/lib/librum-choice";
 import { escapeIlikePattern, parseLibrumChoiceSearch } from "@/lib/librum-choice-logic";
 import { resolveStaffByline } from "@/lib/book-byline";
 import { Alert } from "@/components/ui/alert";
@@ -13,24 +12,19 @@ import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
 import { getHomeSlotsForStaff } from "@/lib/home-picks";
 import { HOME_SLOTS, HOME_SLOT_LABELS, qualifiesForHomeFan, type HomeSlot, type HomeSlotRow } from "@/lib/home-picks-logic";
-import {
-  pickLibrumChoiceFromForm,
-  removeHomeSlotFromForm,
-  removeLibrumChoiceFromForm,
-  setHomeSlotFromForm,
-} from "./actions";
+import { removeHomeSlotFromForm, setHomeSlotFromForm } from "./actions";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 
 export const metadata: Metadata = {
   title: "Featured picks",
 };
 
-// F5 (C1, Renato 10:17Z Q1 = a): staff (catalog.feature: owner and admin)
-// pick the one book the Bookstore shows as "Librum's choice" and the
-// homepage puts first on its hero shelf. Only books that CAN be picked
-// are listed: published and priced (the Bookstore lists only priced
-// books). Reads use the request client (published books are public);
-// the pick and the removal go through the gated actions.
+// F5 (C1): staff (catalog.feature: owner and admin) search published,
+// priced books here. LR1 patch 3 (Renato 2026-11-25, lr3-6 a, lr3-6b a):
+// the "Librum's choice" pick is gone with the Libraria strip it fed (the
+// Libraria banner replaced it), so the page keeps only the home page
+// cover slots. Reads use the request client (published books are
+// public); changes go through the gated actions.
 //
 // HOME-PICKS-1 (Renato 2026-10-25): renamed "Featured picks". The same
 // page also fills the three home page cover slots (slot 1 is the middle,
@@ -128,12 +122,7 @@ export default async function AdminLibrumChoicePage({
   const q = parseLibrumChoiceSearch(rawQ);
   const supabase = await createClient();
 
-  const [pick, list, home] = await Promise.all([
-    getLibrumChoiceBook(),
-    fetchPickableBooks(supabase, q),
-    getHomeSlotsForStaff(),
-  ]);
-  const pickAuthor = pick ? resolveStaffByline(pick) : null;
+  const [list, home] = await Promise.all([fetchPickableBooks(supabase, q), getHomeSlotsForStaff()]);
   const homeSlots = home.ok ? home.slots : [];
   const slotOfBook = new Map(homeSlots.map((s) => [s.book_id, s.slot]));
   const slotBooks = await fetchSlotBooks(
@@ -186,36 +175,6 @@ export default async function AdminLibrumChoicePage({
         )}
       </section>
 
-      <section className="mt-10" aria-labelledby="librum-choice-current">
-        {/* F5 r2 (Renato 11:17Z "1. a", audit A3): a visible label, in
-            the same small style as the search box's label below.
-            HOME-PICKS-1: it names the Bookstore, now that the page has
-            two kinds of pick. */}
-        <h2 id="librum-choice-current" className="mb-1 text-sm font-medium">
-          Librum&apos;s choice on the Bookstore: current pick
-        </h2>
-        {pick ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-surface p-4 shadow-sm">
-            <div className="flex min-w-0 items-center gap-4">
-              <Thumbnail url={coverUrlFor(supabase, pick.cover_path)} title={pick.title} author={pickAuthor} />
-              <div className="min-w-0">
-                <p className="font-medium break-words">{pick.title}</p>
-                {pickAuthor && <p className="text-sm text-muted">{pickAuthor}</p>}
-              </div>
-            </div>
-            <form action={removeLibrumChoiceFromForm}>
-              <button type="submit" className={ACTION_BUTTON}>
-                Remove
-              </button>
-            </form>
-          </div>
-        ) : (
-          <p className="rounded-card border border-border bg-surface p-4 text-sm text-muted">
-            Nothing picked. The Bookstore shows the newest book as New on Librum.
-          </p>
-        )}
-      </section>
-
       <form action="/admin/librum-choice" method="get" role="search" className="mt-8">
         <label htmlFor="librum-choice-q" className="block text-sm font-medium">
           Search published books
@@ -246,7 +205,6 @@ export default async function AdminLibrumChoicePage({
           <ul className="mt-6 flex flex-col gap-3">
             {list.books.map((book) => {
               const author = resolveStaffByline(book);
-              const isPicked = pick?.id === book.id;
               const homeSlot = slotOfBook.get(book.id) ?? null;
               return (
                 <li
@@ -265,21 +223,6 @@ export default async function AdminLibrumChoicePage({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    {isPicked ? (
-                      // F5 r2 (audit A2): the site's dark green, not Tailwind green-700.
-                      <span className="text-sm font-semibold text-primary">Picked</span>
-                    ) : (
-                      <form action={pickLibrumChoiceFromForm}>
-                        <input type="hidden" name="bookId" value={book.id} />
-                        <button
-                          type="submit"
-                          className={ACTION_BUTTON}
-                          aria-label={`Pick ${book.title} as Librum's choice`}
-                        >
-                          Pick
-                        </button>
-                      </form>
-                    )}
                     {/* The list is already published and priced: a cover is all a slot still needs. */}
                     {!homeSlot && book.cover_path && (
                       <HomeSlotPickForm bookId={book.id} title={book.title} />

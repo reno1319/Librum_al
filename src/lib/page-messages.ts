@@ -8,6 +8,24 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
+  "That slide no longer exists.",
+  "Choose a book.",
+  "Write the one-line description.",
+  "Keep the description on one line.",
+  "The description can be at most 120 characters.",
+  "Keep the tag on one line.",
+  "The tag can be at most 24 characters.",
+  "Enter the days as dates.",
+  "The last day can’t be before the first day.",
+  "Choose a picture.",
+  "Each picture must be a JPG or PNG under 5 MB.",
+  "Couldn’t read that picture. Please choose another.",
+  "At most 6 slides can show on the same day. Change the days or delete a slide.",
+  "That book is not on Libraria now.",
+  "Couldn’t save the slide. Please try again.",
+  "Couldn’t delete the slide. Please try again.",
+  "Couldn’t move the slide. Please try again.",
   // LR1 patch 2 (2026-11-25): the admin book page's Only on Librum box
   // and the admin Libraria page.
   "This book isn’t ticked “only on Librum” any more.",
@@ -256,7 +274,6 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "That article can't be published right now -- it may already be published.",
   "That article can't be unpublished right now -- it may already be a draft.",
   "That article could not be found.",
-  "That book can't be picked.",
   "That book can't go on the home page.",
   "That book is already in slot 1.",
   "That book is already in slot 2.",
@@ -415,6 +432,10 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
+  "Slide saved.",
+  "Slide deleted.",
+  "Slide moved.",
   // GIFTS (2026-11-25, item 32 batch 2).
   "Dhurata u dërgua përsëri.",
   "Dhurata u dërgua te emaili i ri.",

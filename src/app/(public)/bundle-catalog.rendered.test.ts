@@ -168,6 +168,8 @@ function makeClient(tables: Record<string, Row[]>, userId: string | null, log: Q
       if ((table === "cart_items" || table === "purchases") && !(table in tables)) return tableQuery(table, [], log);
       // LR1 patch 2: Libraria reads staff's category buttons; none here.
       if (table === "libraria_category_buttons" && !(table in tables)) return tableQuery(table, [], log);
+      // LR1 patch 3: no banner slides here.
+      if (table === "public_libraria_banner_slides" && !(table in tables)) return tableQuery(table, [], log);
       if (!(table in tables)) throw new Error(`stub: unexpected table ${table}`);
       const rows = OWN_ROW_TABLES.has(table)
         ? tables[table].filter((r) => !!userId && r.author_id === userId)

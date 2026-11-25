@@ -138,7 +138,8 @@ describe("FIX1 X14: the cover placeholder", () => {
       "src/components/library-book-card.tsx",
       "src/components/author-book-row.tsx",
       "src/app/(public)/libra/[id]/page.tsx",
-      "src/app/(public)/librari/page.tsx",
+      // LR1 patch 3: the Libraria no-cover block is now the banner's.
+      "src/components/libraria-banner.tsx",
       "src/app/(public)/autore/[id]/page.tsx",
     ]) {
       const source = read(file);
