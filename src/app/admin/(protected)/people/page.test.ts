@@ -407,6 +407,35 @@ describe("/admin/people/[id]", () => {
     });
   });
 
+  // B18 (D13 3a, r18-1 a, Renato's short text 11-25): the staff rule for
+  // a leaked copy, above Suspend, for people.manage holders only.
+  describe("the leaked-copy rule (B18)", () => {
+    it("shows the three steps above the Suspend panel", async () => {
+      rpcResult = () => ({ data: [person()], error: null });
+      const html = await renderPerson(ANA);
+      expect(html).toContain('id="person-leak-rule"');
+      expect(html).toContain("Leaked copy?");
+      expect(html).toContain("<li>Check Purchases below first.</li>");
+      expect(html).toContain("<li>First time: get it taken down and warn them. Don&#x27;t suspend.</li>");
+      expect(html).toContain("<li>Suspend on a repeat, or if they sold or uploaded it on purpose.</li>");
+      // Step 1 points at the Purchases box, which is on the same page.
+      expect(html).toContain("Purchases</h2>");
+      expect(html.indexOf('id="person-leak-rule"')).toBeLessThan(html.indexOf('id="person-suspension"'));
+    });
+
+    it("is hidden on a staff row, on the viewer's own row, and from people.view-only roles", async () => {
+      rpcResult = () => ({ data: [person({ is_staff: true })], error: null });
+      expect(await renderPerson(ANA)).not.toContain('id="person-leak-rule"');
+
+      rpcResult = () => ({ data: [person()], error: null });
+      mockRequireStaff.mockImplementation(() => Promise.resolve({ userId: ANA, role: "owner" }));
+      expect(await renderPerson(ANA)).not.toContain('id="person-leak-rule"');
+
+      mockRequireStaff.mockImplementation(() => Promise.resolve({ userId: "staff-1", role: "support" }));
+      expect(await renderPerson(ANA)).not.toContain('id="person-leak-rule"');
+    });
+  });
+
   describe("the Purchases box (DOWNLOADS-1)", () => {
     function stateRow(overrides: Record<string, unknown> = {}) {
       return {

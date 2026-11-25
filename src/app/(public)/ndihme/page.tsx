@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ROYALTY_PAID_PRICE_SENTENCE, ROYALTY_RULE_SENTENCE } from "@/lib/royalty";
 import { MINIMUM_PAID_CATALOG_PRICE_ALL } from "@/lib/catalog-price";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
-import { REPLY_PROMISE } from "@/lib/contact";
+import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import type { Metadata } from "next";
 
@@ -130,6 +130,11 @@ const FAQ_GROUPS: { id: string; heading: string; faqs: Faq[] }[] = [
       {
         q: "Gjeta një libër që nuk duhet të jetë në Librum. Çfarë të bëj?",
         a: "Shtypni \"Raportoni këtë libër\" pranë fundit të faqes së tij dhe na tregoni arsyen. E shqyrtojmë çdo raportim.",
+      },
+      // B18 (D13 4a): an author finds their book shared outside Librum.
+      {
+        q: "Gjeta librin tim të shpërndarë në internet. Çfarë të bëj?",
+        a: `Na shkruani te ${SUPPORT_EMAIL} me titullin e librit dhe lidhjen ku e gjetët. Ju ndihmojmë ta hiqni kopjen dhe kontrollojmë kush e ka shkarkuar.`,
       },
     ],
   },
