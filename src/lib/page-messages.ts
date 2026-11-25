@@ -20,6 +20,12 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "Ky libër është tashmë në shportë si dhuratë për këtë email.",
   "Dhurata nuk u ndryshua. Provoni përsëri.",
   "Shporta nuk u hap. Provoni përsëri pas pak.",
+  // GIFTS (2026-11-25, item 32 batch 2): the Library's sent gifts and the gift link page.
+  "Kjo dhuratë është dërguar 3 herë. Mund ta ndryshoni emailin.",
+  "Mund ta dërgoni përsëri nesër.",
+  "Kjo dhuratë është marrë tashmë.",
+  "Dhurata nuk u dërgua. Provoni përsëri.",
+  "Këtë dhuratë e dërguat ju. Linku është për personin që e merr.",
   // BUILD 3 Payment & tax (2026-11-23).
   "Zgjidhni ku paguani tatimet mbi të ardhurat.",
   "Zgjidhni shtetin ku paguani tatimet.",
@@ -403,6 +409,10 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // GIFTS (2026-11-25, item 32 batch 2).
+  "Dhurata u dërgua përsëri.",
+  "Dhurata u dërgua te emaili i ri.",
+  "Dhurata u shtua në Bibliotekën tuaj.",
   // BUILD 3 Payment & tax (2026-11-23).
   "Të dhënat tatimore u ruajtën.",
   // Blog categories, patch B (2026-11-19).

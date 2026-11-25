@@ -541,6 +541,7 @@ insert into pg_temp.allow values
   ('purchases', 'reader_id', 'own', 'readers read own purchases'),
   ('wishlist_items', 'reader_id', 'own', 'own wishlist'),
   ('cart_items', 'reader_id', 'own', 'own cart (item 32)'),
+  ('gifts', 'buyer_id', 'own', 'own sent gifts (item 32 batch 2)'),
   ('blog_post_reactions', 'user_id', 'own', 'own blog reactions (BR1)'),
   ('author_tax_details', 'author_id', 'own', 'own Payment & tax details (build 3)'),
   ('preorder_notify_requests', 'user_id', 'own', 'own pre-order notices (BD16 P1)'),
