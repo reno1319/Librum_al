@@ -8,6 +8,12 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 2 (2026-11-25): the admin book page's Only on Librum box
+  // and the admin Libraria page.
+  "This book isn’t ticked “only on Librum” any more.",
+  "Couldn’t remove it from the shelf. Please try again.",
+  "Choose each category only once.",
+  "Couldn’t save the category buttons. Please try again.",
   // CART (2026-11-25, item 32): the book page, after Shto në shportë / Dhuroje.
   "Ky libër nuk mund të shtohet në shportë.",
   "Nuk mund ta blini ose ta dhuroni librin tuaj.",
@@ -488,6 +494,10 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Final file approved. The book stays a pre-order and comes out by itself on its day.",
   "Final file approved. Its day had passed, so the book is live now.",
   "Changes approved. Readers see the new version of the pre-order.",
+  // LR1 patch 2: the admin book page's Only on Librum box and the admin
+  // Libraria page.
+  "Removed from the “only on Librum” shelf.",
+  "Category buttons saved.",
   // K6 classic authors (admin).
   "Classic author link saved.",
   "Classic author saved.",

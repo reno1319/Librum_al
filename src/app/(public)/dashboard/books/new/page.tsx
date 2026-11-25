@@ -65,6 +65,7 @@ export default async function NewBookPage({
     rightsBasis: "",
     originalAuthor: "",
     originalTitle: "",
+    onlyOnLibrum: false,
   };
 
   return (

@@ -67,6 +67,10 @@ export type AdminNavItem = {
 // in Daily, gated by reports.resolve -- the same permission
 // /admin/reader-reviews and its actions require (owner, admin,
 // moderator: Q3a).
+//
+// LR1 patch 2: Libraria (the category buttons) added after Featured
+// picks, gated by catalog.feature -- the same permission /admin/libraria
+// and its action require.
 export type AdminNavGroup = {
   label: string;
   items: readonly AdminNavItem[];
@@ -88,6 +92,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     items: [
       { href: "/admin/books", label: "Books", permission: "reports.view" },
       { href: "/admin/librum-choice", label: "Featured picks", permission: "catalog.feature" },
+      { href: "/admin/libraria", label: "Libraria", permission: "catalog.feature" },
       { href: "/admin/blog", label: "Blog", permission: "blog.view" },
     ],
   },

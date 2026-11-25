@@ -72,8 +72,11 @@ function tableStub(rows: Row[]) {
     in: (col: string, values: unknown[]) => ((result = result.filter((r) => values.includes(r[col]))), builder),
     overlaps: (col: string, values: unknown[]) =>
       ((result = result.filter((r) => ((r[col] as unknown[]) ?? []).some((v) => values.includes(v)))), builder),
-    order: (col: string) =>
-      ((result = [...result].sort((a, b) => String(b[col]).localeCompare(String(a[col])))), builder),
+    order: (col: string, opts?: { ascending?: boolean }) =>
+      ((result = [...result].sort((a, b) =>
+        opts?.ascending ? String(a[col]).localeCompare(String(b[col])) : String(b[col]).localeCompare(String(a[col])),
+      )),
+      builder),
     limit: (n: number) => ((result = result.slice(0, n)), builder),
     returns: () => builder,
     maybeSingle: () => Promise.resolve({ data: result[0] ?? null, error: null }),
@@ -120,6 +123,8 @@ let cartRows: Row[] = [];
 let purchaseRows: Row[] = [];
 let authorBookRows: Row[] = [];
 let ownedIds: string[] = [];
+let categoryRows: Row[] = [];
+let failCategoryRead = false;
 
 describe("BookstorePage: LR1 shop front", () => {
   beforeEach(() => {
@@ -133,12 +138,15 @@ describe("BookstorePage: LR1 shop front", () => {
     purchaseRows = [];
     authorBookRows = [];
     ownedIds = [];
+    categoryRows = [];
+    failCategoryRead = false;
     rpcCalls = [];
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
       auth: { getUser: () => Promise.resolve({ data: { user: signedInUser } }) },
       from: (table: string) => {
         if (table === "public_books" && failBookList) return failing();
+        if (table === "libraria_category_buttons") return failCategoryRead ? failing() : tableStub(categoryRows);
         return tableStub(
           table === "public_books"
             ? bookRows
@@ -214,6 +222,41 @@ describe("BookstorePage: LR1 shop front", () => {
     );
     expect(buttons).toEqual(["Biografi & kujtime", "Filozofi", "Histori", "Horror"]);
     expect(shelf).toContain("Më shumë kategori");
+  });
+
+  // LR1 patch 2 (lb5 a, lr2-3 a, lr2-4 b, lr2-5 b).
+  const buttonsOf = (html: string) => {
+    const shelf = section(html, "Më të rinjtë në Librum");
+    return [...shelf.slice(0, shelf.indexOf("<details")).matchAll(/href="\/librari\?genre=([^"]*)"/g)].map((m) =>
+      decodeURIComponent(m[1].replace(/\+/g, " ")).replace(/&amp;/g, "&"),
+    );
+  };
+
+  it("category buttons: staff's list in their order, up to 6, each shown even with no books", async () => {
+    categoryRows = [
+      { position: 3, category: "Poezi" },
+      { position: 1, category: "Romancë" },
+      { position: 2, category: "Histori" },
+    ];
+    expect(buttonsOf(await render())).toEqual(["Romancë", "Histori", "Poezi"]);
+  });
+
+  it("category buttons: none saved, or the read fails, falls back to the first four with books, A–Zh", async () => {
+    expect(buttonsOf(await render())).toEqual(["Filozofi", "Histori", "Letërsi artistike"]);
+    failCategoryRead = true;
+    categoryRows = [{ position: 1, category: "Romancë" }];
+    expect(buttonsOf(await render())).toEqual(["Filozofi", "Histori", "Letërsi artistike"]);
+  });
+
+  it("Libra që i gjeni vetëm në Librum: the newest five ticked books after Më të rinjtë, hidden without any", async () => {
+    expect(await render()).not.toContain("Libra që i gjeni vetëm në Librum");
+    bookRows = BOOKS.map((b) =>
+      ["book-01", "book-03", "book-05", "book-06", "book-07", "book-09"].includes(String(b.id)) ? { ...b, only_on_librum: true } : b,
+    );
+    const html = await render();
+    expect(titles(section(html, "Libra që i gjeni vetëm në Librum"))).toEqual(["Book 09", "Book 07", "Book 06", "Book 05", "Book 03"]);
+    expect(html.indexOf("Më të rinjtë në Librum")).toBeLessThan(html.indexOf("Libra që i gjeni vetëm në Librum"));
+    expect(html.indexOf("Libra që i gjeni vetëm në Librum")).toBeLessThan(html.indexOf("Libra jo-artistikë"));
   });
 
   it("the Më shumë kategori box lists every category as a plain link to its results, with a close button", async () => {

@@ -23,7 +23,7 @@ describe("ADMIN_NAV_GROUPS", () => {
   it("lists the existing pages in the agreed groups and order", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => ({ label: g.label, items: g.items.map((i) => i.label) }))).toEqual([
       { label: "Daily", items: ["Today", "Reader reviews", "Book reports", "Feedback", "Refund requests"] },
-      { label: "Catalog", items: ["Books", "Featured picks", "Blog"] },
+      { label: "Catalog", items: ["Books", "Featured picks", "Libraria", "Blog"] },
       { label: "Money", items: ["Finance"] },
       { label: "Team", items: ["People", "Staff", "Audit log"] },
     ]);
@@ -61,6 +61,7 @@ describe("ADMIN_NAV_GROUPS", () => {
       "/admin/finance": "finance.view",
       "/admin/blog": "blog.view",
       "/admin/librum-choice": "catalog.feature",
+      "/admin/libraria": "catalog.feature",
     };
     expect(ADMIN_NAV_ITEMS.map((i) => i.href).sort()).toEqual(Object.keys(expected).sort());
     for (const item of ADMIN_NAV_ITEMS) {
@@ -73,7 +74,7 @@ describe("resolveVisibleAdminNavGroups", () => {
   it("owner sees every group and page", () => {
     expect(groupsFor("owner")).toEqual([
       { label: "Daily", hrefs: ["/admin", "/admin/reader-reviews", "/admin/reports", "/admin/feedback", "/admin/refunds"] },
-      { label: "Catalog", hrefs: ["/admin/books", "/admin/librum-choice", "/admin/blog"] },
+      { label: "Catalog", hrefs: ["/admin/books", "/admin/librum-choice", "/admin/libraria", "/admin/blog"] },
       { label: "Money", hrefs: ["/admin/finance"] },
       { label: "Team", hrefs: ["/admin/people", "/admin/staff", "/admin/audit"] },
     ]);
@@ -129,6 +130,7 @@ describe("resolveVisibleAdminNavItems", () => {
       "/admin/audit",
       "/admin/finance",
       "/admin/librum-choice",
+      "/admin/libraria",
     ]) {
       expect(hrefs).not.toContain(unrelated);
     }

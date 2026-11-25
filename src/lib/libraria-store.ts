@@ -6,14 +6,42 @@ import { GENRES, type Genre } from "@/lib/genres";
 import { isPreorder } from "@/lib/preorder-reader";
 import { resolveCatalogPriceState } from "@/lib/catalog-price";
 
-// Decision 2: until staff choose and order them (patch 2), the buttons
-// under "Më të rinjtë në Librum" are the first four categories that
-// have a listed book, in A–Zh order (the order GENRES is kept in).
+// The buttons under "Më të rinjtë në Librum" (LR1 patch 2): the
+// categories staff chose in admin, in their order, up to
+// MAX_CATEGORY_BUTTONS (lr2-3 a) -- each one shown even while it has no
+// listed book (lr2-4 b). Until staff save a list (none, or the read
+// failed), the first four categories that have a listed book, in A–Zh
+// order (the order GENRES is kept in), as in patch 1 (lr2-5 b).
 export const CATEGORY_BUTTON_COUNT = 4;
+export const MAX_CATEGORY_BUTTONS = 6;
 
-export function categoryButtons(genresWithBooks: Iterable<string>): Genre[] {
+export function categoryButtons(genresWithBooks: Iterable<string>, staffChosen: readonly string[] = []): Genre[] {
+  const known = new Set<string>(GENRES);
+  const chosen: Genre[] = [];
+  for (const g of staffChosen) {
+    if (known.has(g) && !chosen.includes(g as Genre)) chosen.push(g as Genre);
+  }
+  if (chosen.length > 0) return chosen.slice(0, MAX_CATEGORY_BUTTONS);
   const present = new Set(genresWithBooks);
   return GENRES.filter((g) => present.has(g)).slice(0, CATEGORY_BUTTON_COUNT);
+}
+
+// The admin form's six slots, read into the ordered list staff save:
+// empty slots are skipped (the order closes up), and a category chosen
+// twice or not a category is refused.
+export type CategoryButtonsParse = { ok: true; categories: Genre[] } | { ok: false; reason: "repeat" | "unknown" };
+
+export function parseCategoryButtonSlots(slots: readonly unknown[]): CategoryButtonsParse {
+  const known = new Set<string>(GENRES);
+  const out: Genre[] = [];
+  for (const raw of slots.slice(0, MAX_CATEGORY_BUTTONS)) {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value) continue;
+    if (!known.has(value)) return { ok: false, reason: "unknown" };
+    if (out.includes(value as Genre)) return { ok: false, reason: "repeat" };
+    out.push(value as Genre);
+  }
+  return { ok: true, categories: out };
 }
 
 // Decision 3: "Libra jo-artistikë" holds books in any of these

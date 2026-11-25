@@ -94,6 +94,8 @@ export type BookDetails = {
   rightsBasis: RightsBasis | null;
   originalAuthor: string | null;
   originalTitle: string | null;
+  // LR1 patch 2 (lr1-1 c): the "only on Librum" tick.
+  onlyOnLibrum: boolean;
 };
 
 export type DetailsResult =
@@ -164,6 +166,7 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
   if (!description.ok) errors.description = description.message;
 
   const isAdult = str(input.get("isAdult")) === "yes";
+  const onlyOnLibrum = str(input.get("onlyOnLibrum")) === "yes";
 
   const ageRaw = str(input.get("readingAge")).trim();
   let readingAgeMin: number | null = null;
@@ -269,6 +272,7 @@ export function parseBookDetails(input: DetailsInput): DetailsResult {
       rightsBasis,
       originalAuthor,
       originalTitle,
+      onlyOnLibrum,
     },
   };
 }
