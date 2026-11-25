@@ -28,6 +28,7 @@ const NOT_COUNTED_FOLDERS = [
   "reset-password",
   // CART (item 32): a signed-in reader's own cart.
   "shporta",
+  "dhurata",
   "signup",
   "wishlist",
 ];

@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 307 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 320 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -50,7 +50,10 @@
 --   three cart_items rows (authenticated DELETE and SELECT; nothing for
 --   anon or service_role) and four column rows (authenticated INSERT of
 --   book_id, reader_id, gift_email, gift_note, and UPDATE of the two gift
---   columns) (migration 20261125130000). A relation with no
+--   columns) (migration 20261125130000), plus the gifts' three rows, no
+--   table-wide privilege for any role, and ten column rows
+--   (authenticated SELECT of every column but token_hash, claimed_by and
+--   purchase_id) (migration 20261125140000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -84,6 +87,16 @@ insert into grant_contract_expected (kind, line) values
 ('col','cart_items.gift_email | authenticated | INSERT,UPDATE'),
 ('col','cart_items.gift_note | authenticated | INSERT,UPDATE'),
 ('col','cart_items.reader_id | authenticated | INSERT'),
+('col','gifts.book_id | authenticated | SELECT'),
+('col','gifts.buyer_id | authenticated | SELECT'),
+('col','gifts.claimed_at | authenticated | SELECT'),
+('col','gifts.created_at | authenticated | SELECT'),
+('col','gifts.id | authenticated | SELECT'),
+('col','gifts.last_sent_at | authenticated | SELECT'),
+('col','gifts.note | authenticated | SELECT'),
+('col','gifts.recipient_email | authenticated | SELECT'),
+('col','gifts.send_count | authenticated | SELECT'),
+('col','gifts.status | authenticated | SELECT'),
 ('col','blog_posts.author_name | anon | SELECT'),
 ('col','blog_posts.author_name | authenticated | SELECT'),
 ('col','blog_posts.category | anon | SELECT'),
@@ -207,6 +220,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r cart_items | anon | -'),
 ('rel','r cart_items | authenticated | DELETE,SELECT'),
 ('rel','r cart_items | service_role | -'),
+('rel','r gifts | anon | -'),
+('rel','r gifts | authenticated | -'),
+('rel','r gifts | service_role | -'),
 ('rel','r blog_post_reactions | anon | -'),
 ('rel','r blog_post_reactions | authenticated | SELECT'),
 ('rel','r blog_post_reactions | service_role | -'),
@@ -418,8 +434,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 307 then
-    raise exception 'FAIL: part1: the snapshot must hold 307 rows, holds %', v_expected;
+  if v_expected <> 320 then
+    raise exception 'FAIL: part1: the snapshot must hold 320 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

@@ -52,6 +52,32 @@ export async function sendEmail(
   }
 }
 
+// GIFTS r2 (audit S1): like sendEmail, but says whether Resend took the
+// email. false when there is no key, Resend refused it, or the call threw.
+// Callers that change state only after a send (the gift links) use this.
+export async function sendEmailChecked(to: string, subject: string, html: string): Promise<boolean> {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn(`RESEND_API_KEY not set — skipping email "${subject}"`);
+    return false;
+  }
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const { error } = await resend.emails.send({ from: FROM, to, subject, html });
+    if (error) {
+      console.error("Failed to send email: Resend refused it", {
+        subject,
+        name: error.name ?? null,
+        statusCode: error.statusCode ?? null,
+      });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("Failed to send email:", error);
+    return false;
+  }
+}
+
 // ALBANIAN-12 (PC2): Resend's batch endpoint takes up to 100 emails per
 // call, and the account allows about 2 calls a second, so one email per
 // follower in parallel would be refused past the first few. Batches go

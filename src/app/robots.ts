@@ -45,6 +45,7 @@ const DISALLOWED_PREFIXES = [
   "/library",
   "/wishlist",
   "/shporta",
+  "/dhurata",
   "/following",
   "/login",
   "/signup",

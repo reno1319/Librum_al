@@ -13,6 +13,8 @@ import { resolveBookByline, resolveOriginalAuthor } from "@/lib/book-byline";
 import { buyerDownloadNote, readMyDownloadStates } from "@/lib/book-downloads";
 import type { Metadata } from "next";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { sentGiftRow, type SentGift } from "@/lib/gifts";
+import { resendGift } from "../dhurata/actions";
 
 export const metadata: Metadata = {
   title: "Biblioteka ime",
@@ -102,6 +104,21 @@ export default async function LibraryPage({
     supabase.from("books").select("id").eq("author_id", user.id),
   ]);
 
+  // GIFTS (item 32 batch 2, b2q2 a): the gifts this reader sent, newest
+  // first, with the book titles (own rows only, by the row rules). A
+  // failed read just shows no section.
+  const { data: giftRows } = await supabase
+    .from("gifts")
+    .select("id, book_id, recipient_email, status, send_count, last_sent_at, claimed_at, created_at")
+    .order("created_at", { ascending: false })
+    .returns<SentGift[]>();
+  const sentGifts = giftRows ?? [];
+  const giftBookIds = [...new Set(sentGifts.map((g) => g.book_id))];
+  const { data: giftBooks } = giftBookIds.length
+    ? await supabase.from("public_books").select("id, title").in("id", giftBookIds).returns<{ id: string; title: string }[]>()
+    : { data: [] as { id: string; title: string }[] };
+  const giftTitle = new Map((giftBooks ?? []).map((b) => [b.id, b.title] as const));
+
   // The Library grid: every currently-owned book, as a flat list --
   // never grouped by bundle/transaction (that grouping lives entirely
   // at /account/purchases now). A refunded or lost-disputed purchase's
@@ -173,6 +190,47 @@ export default async function LibraryPage({
           })}
         </ul>
         </>
+      )}
+      {sentGifts.length > 0 && (
+        <section id="dhuratat" className="mt-14 scroll-mt-24 border-t border-border pt-8" aria-labelledby="dhuratat-title">
+          <h2 id="dhuratat-title" className="font-serif text-xl md:text-2xl">
+            Dhuratat që keni dërguar
+          </h2>
+          <ul className="mt-4 divide-y divide-border border-y border-border text-sm">
+            {sentGifts.map((gift) => {
+              const row = sentGiftRow(gift);
+              return (
+                <li key={gift.id} className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="font-medium break-words">
+                      {giftTitle.get(gift.book_id) ?? "Libër"} → {gift.recipient_email}
+                    </p>
+                    <p className="text-muted">{row.line}</p>
+                  </div>
+                  {(row.resend || row.changeEmail || row.sendElsewhere) && (
+                    <div className="flex flex-wrap gap-x-4">
+                      {row.resend && (
+                        <form action={resendGift.bind(null, gift.id)}>
+                          <button type="submit" className="focus-ring min-h-11 text-primary underline underline-offset-2">
+                            Dërgoje përsëri
+                          </button>
+                        </form>
+                      )}
+                      {(row.changeEmail || row.sendElsewhere) && (
+                        <Link
+                          href={`/library/dhurata/${gift.id}`}
+                          className="focus-ring inline-flex min-h-11 items-center text-primary underline underline-offset-2"
+                        >
+                          {row.sendElsewhere ? "Dërgoje te dikush tjetër" : "Ndrysho emailin"}
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
     </main>
   );
