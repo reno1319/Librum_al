@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactElement } from "react";
@@ -139,7 +140,12 @@ describe("AdminLibrariaPage", () => {
     expect(html).toContain("No slides yet: Libraria shows no banner.");
     expect(html).toContain("Add a slide");
     expect(html).not.toContain('name="slideId"');
-    expect(html).toMatch(/<input[^>]*required=""[^>]*name="picture"/);
+    expect(html).toMatch(/<input[^>]*data-slide-picture="wide"[^>]*required=""/);
+    // Two-pictures fix: the pictures never travel inside the form (no
+    // name); the form carries only their waiting-file names.
+    expect(html).not.toMatch(/<input[^>]*type="file"[^>]*name=/);
+    expect(html).toContain('<input type="hidden" name="pictureStoragePath"/>');
+    expect(html).toContain('<input type="hidden" name="phonePictureStoragePath"/>');
     // Published and pre-order books only, with a price.
     expect(bookFilters).toContainEqual(["in", "status", ["published", "preorder"]]);
     expect(bookFilters).toContainEqual(["not", "price_all", "is", null]);
@@ -170,8 +176,18 @@ describe("AdminLibrariaPage", () => {
     expect(html).toContain(`name="slideId" value="${SLIDE_1}"`);
     expect(html).toContain('value="Description 1."');
     expect(html).toContain('name="removePhonePicture"');
-    expect(html).not.toMatch(/<input[^>]*required=""[^>]*name="picture"/);
+    expect(html).toMatch(/<input[^>]*data-slide-picture="wide"/);
+    expect(html).not.toMatch(/<input[^>]*data-slide-picture="wide"[^>]*required=""/);
+    expect(html).toContain(`<option value="${BOOK_A}" selected="">`);
     expect(await render({ edit: SLIDE_2 })).toContain("Add a slide");
+  });
+
+  it("draws a fresh slide form and pick form for each one opened (Edit kept the old book, 2026-11-26)", () => {
+    // Edit opens without a reload, and a book list ignores a changed
+    // starting value; a new key per slide or pick draws a fresh form.
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    expect(source).toContain('<SlideForm key={editing?.id ?? "new"}');
+    expect(source).toContain('<PickForm key={editingPick?.id ?? "new"}');
   });
 
   it("shows only its own messages", async () => {
