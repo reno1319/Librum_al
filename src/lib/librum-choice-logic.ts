@@ -16,3 +16,22 @@ export function parseLibrumChoiceSearch(raw: unknown): string {
 export function escapeIlikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
+
+// Featured picks book list (Renato 2026-11-26, ff3 a): 10 books a page,
+// ?page=N. Only plain whole numbers count; anything else is page 1.
+export const LIBRUM_CHOICE_PAGE_SIZE = 10;
+
+export function parseLibrumChoicePage(raw: unknown): number {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = typeof value === "string" && /^\d{1,6}$/.test(value) ? Number.parseInt(value, 10) : 1;
+  return parsed >= 1 ? parsed : 1;
+}
+
+// The pager's links: the search is kept, page 1 has no ?page.
+export function librumChoicePageHref(q: string, page: number): string {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return query ? `/admin/librum-choice?${query}` : "/admin/librum-choice";
+}
