@@ -33,6 +33,7 @@ import type { Metadata } from "next";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { DetailsCloseButton } from "@/components/details-close-button";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
+import { ShelfSlider, SHELF_ITEM_CLASSES } from "@/components/shelf-slider";
 
 export const metadata: Metadata = {
   title: "Libraria",
@@ -345,35 +346,69 @@ async function fetchBannerSlides(supabase: SupabaseClient): Promise<BannerSlide[
   });
 }
 
-// Books per shelf (5 across on a computer, as in the sketch).
-const SHELF_SIZE = 5;
+// A shelf row (Renato 11-26, Kobo-style): 5 across on a computer, the
+// arrows slide it twice, so 3 pages hold 14 books and the "Shiko të
+// gjithë listën" tile. A shelf with more books than the row holds
+// gets the tile, which opens the shelf's own list (sl-1 a).
+const SHELF_ROW_BOOKS = 14;
 
-// The newest listed books, in any of `genres` when given -- the same
-// listed-and-priced scoping as the results. Fail-soft: an error gives
-// null, and the caller decides what that hides.
-async function fetchShelf(
-  supabase: SupabaseClient,
-  genres?: readonly string[],
-  { onlyOnLibrum = false }: { onlyOnLibrum?: boolean } = {},
-): Promise<BookWithAuthor[] | null> {
+// The shelves, by their list's ?rafti= key (sl-1 a).
+const SHELVES: Record<string, { title: string; genres?: readonly string[]; onlyOnLibrum?: boolean }> = {
+  "te-rinjte": { title: "Më të rinjtë në Librum" },
+  "vetem-ne-librum": { title: "Libra që i gjeni vetëm në Librum", onlyOnLibrum: true },
+  "jo-artistike": { title: "Libra jo-artistikë", genres: NON_FICTION_GENRES },
+};
+type ShelfKey = "te-rinjte" | "vetem-ne-librum" | "jo-artistike";
+
+function shelfKeyFor(raw: string | undefined): ShelfKey | undefined {
+  return raw && Object.hasOwn(SHELVES, raw) ? (raw as ShelfKey) : undefined;
+}
+
+// The newest listed books of a shelf -- the same listed-and-priced
+// scoping as the results.
+function shelfQuery(supabase: SupabaseClient, key: ShelfKey, { count = false }: { count?: boolean } = {}) {
+  const shelf = SHELVES[key];
   let query = supabase
     .from("public_books")
-    .select("*, pen:public_pen_names(id, name)")
+    .select("*, pen:public_pen_names(id, name)", count ? { count: "exact" } : undefined)
     .in("status", LISTED_BOOK_STATUSES)
     .not("price_all", "is", null);
-  if (genres) query = query.overlaps("categories", [...genres]);
+  if (shelf.genres) query = query.overlaps("categories", [...shelf.genres]);
   // LR1 patch 2: the view's only_on_librum is already false on a free
   // classic (a public-domain edition, lr1-1 c).
-  if (onlyOnLibrum) query = query.eq("only_on_librum", true);
-  const { data, error } = await query
-    .order("created_at", { ascending: false })
-    .limit(SHELF_SIZE)
+  if (shelf.onlyOnLibrum) query = query.eq("only_on_librum", true);
+  return query.order("created_at", { ascending: false });
+}
+
+// A shelf row: one more book than the row holds, so the page knows
+// whether to show the tile. Fail-soft: an error gives null, and the
+// caller decides what that hides.
+async function fetchShelf(supabase: SupabaseClient, key: ShelfKey): Promise<BookWithAuthor[] | null> {
+  const { data, error } = await shelfQuery(supabase, key)
+    .limit(SHELF_ROW_BOOKS + 1)
     .returns<BookWithAuthor[]>();
   if (error) {
     console.error("Libraria: failed to load a shelf:", error);
     return null;
   }
   return data ?? [];
+}
+
+// A shelf's own list (sl-1 a): its newest books, capped like the
+// results, with the full count for the count line.
+async function fetchShelfList(
+  supabase: SupabaseClient,
+  key: ShelfKey,
+): Promise<{ books: BookWithAuthor[]; error: boolean; totalMatched: number }> {
+  const { data, error, count } = await shelfQuery(supabase, key, { count: true })
+    .limit(SEARCH_RESULT_LIMIT)
+    .returns<BookWithAuthor[]>();
+  if (error) {
+    console.error("Libraria: failed to load a shelf list:", error);
+    return { books: [], error: true, totalMatched: 0 };
+  }
+  const books = data ?? [];
+  return { books, error: false, totalMatched: count ?? books.length };
 }
 
 // Which categories have a listed book (for the category buttons).
@@ -433,6 +468,7 @@ export default async function BookstorePage({
     sort?: string;
     minPrice?: string;
     maxPrice?: string;
+    rafti?: string;
   }>;
 }) {
   // ALL-CUTOVER APP-A: schema-sensitive public discovery page (V3 §3) --
@@ -446,7 +482,9 @@ export default async function BookstorePage({
   // Only the words and the category count now (lr1-6 c).
   const { q, genre } = parseBookstoreQuery(rawQuery);
   const words = q?.trim() || undefined;
-  const isResults = Boolean(words || genre);
+  // A shelf's own list (sl-1 a); a search or category wins over it.
+  const shelfKey = words || genre ? undefined : shelfKeyFor(rawQuery.rafti);
+  const isResults = Boolean(words || genre || shelfKey);
 
   const {
     data: { user },
@@ -456,22 +494,28 @@ export default async function BookstorePage({
     : [new Set<string>(), new Set<string>()];
 
   if (isResults) {
-    const { books, error, totalMatched } = await fetchSearchResults(supabase, { q: words, genre });
+    const { books, error, totalMatched } = shelfKey
+      ? await fetchShelfList(supabase, shelfKey)
+      : await fetchSearchResults(supabase, { q: words, genre });
     const ratings = await fetchRatings(supabase, books.map((b) => b.id));
     const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
     return (
       <main className="flex-1 bg-surface">
         <div className="page-container pt-5 pb-10 sm:pt-6 md:pb-12">
-          <ResultsView words={words} genre={genre} books={books} error={error} totalMatched={totalMatched} ctx={ctx} />
+          <ResultsView
+            words={words}
+            genre={genre}
+            shelfTitle={shelfKey && SHELVES[shelfKey].title}
+            books={books} error={error} totalMatched={totalMatched} ctx={ctx} />
         </div>
       </main>
     );
   }
 
   const [newest, onlyOnLibrum, nonFiction, bundles, slides, genresWithBooks, staffCategories, picks] = await Promise.all([
-    fetchShelf(supabase),
-    fetchShelf(supabase, undefined, { onlyOnLibrum: true }),
-    fetchShelf(supabase, NON_FICTION_GENRES),
+    fetchShelf(supabase, "te-rinjte"),
+    fetchShelf(supabase, "vetem-ne-librum"),
+    fetchShelf(supabase, "jo-artistike"),
     fetchPublishedBundles(supabase),
     fetchBannerSlides(supabase),
     fetchGenresWithBooks(supabase),
@@ -510,7 +554,7 @@ export default async function BookstorePage({
             }
           />
         ) : (
-          <Shelf title="Më të rinjtë në Librum" books={newest} ctx={ctx} first={slides.length === 0}>
+          <Shelf shelfKey="te-rinjte" books={newest} ctx={ctx} first={slides.length === 0}>
             <CategoryButtons genres={categoryButtons(genresWithBooks, staffCategories)} />
           </Shelf>
         )}
@@ -518,14 +562,14 @@ export default async function BookstorePage({
         {/* LR1 patch 2 (lr1-1 c): the books their authors ticked, newest
             first; hidden while there are none. */}
         {onlyOnLibrum && onlyOnLibrum.length > 0 && (
-          <Shelf title="Libra që i gjeni vetëm në Librum" books={onlyOnLibrum} ctx={ctx} />
+          <Shelf shelfKey="vetem-ne-librum" books={onlyOnLibrum} ctx={ctx} />
         )}
 
         {/* LR1 patch 4: the newest pick whose book Libraria lists
             (lr4-1 a, lr4-3 a); none = no section. */}
         {pick && <ReadingPickSection pick={pick} hasPast={picks.length > 1} ctx={ctx} />}
 
-        {nonFiction && nonFiction.length > 0 && <Shelf title="Libra jo-artistikë" books={nonFiction} ctx={ctx} />}
+        {nonFiction && nonFiction.length > 0 && <Shelf shelfKey="jo-artistike" books={nonFiction} ctx={ctx} />}
 
         {bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
 
@@ -572,32 +616,50 @@ function ReadingPickSection({ pick, hasPast, ctx }: { pick: ReadingPick; hasPast
 }
 
 // A shelf: a serif title, anything given (the category buttons), then
-// one row of cards -- 5 across from lg, a row that scrolls sideways on
-// phones. No "›" link (decision 4: there is no full list).
+// one row of cards that slides a page at a time (ShelfSlider): 14 books
+// at most, then the "Shiko të gjithë listën" tile when the shelf has
+// more (sl-1 a). Phones swipe the row.
 function Shelf({
-  title,
+  shelfKey,
   books,
   ctx,
   first = false,
   children,
 }: {
-  title: string;
+  shelfKey: ShelfKey;
   books: BookWithAuthor[];
   ctx: CardContext;
   first?: boolean;
   children?: React.ReactNode;
 }) {
+  const { title } = SHELVES[shelfKey];
+  const hasMore = books.length > SHELF_ROW_BOOKS;
   return (
     <section className={`${first ? "mt-4" : "mt-10 sm:mt-12"} border-b border-border pb-9`}>
       <h2 className={SECTION_HEADING}>{title}</h2>
       {children}
-      <ul className="relative -mx-4 mt-5 flex gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-4 lg:grid-cols-5">
-        {books.map((book) => (
-          <li key={book.id} className="w-[42%] shrink-0 sm:w-auto">
-            <Card book={book} ctx={ctx} />
+      <ShelfSlider label={title}>
+        {books.slice(0, SHELF_ROW_BOOKS).map((book) => (
+          <li key={book.id} className={SHELF_ITEM_CLASSES}>
+            <div className="w-full">
+              <Card book={book} ctx={ctx} />
+            </div>
           </li>
         ))}
-      </ul>
+        {hasMore && (
+          <li className={SHELF_ITEM_CLASSES}>
+            <Link
+              href={`/librari?rafti=${shelfKey}`}
+              className="focus-ring group flex min-h-48 w-full items-center justify-center gap-1.5 rounded-[3px] bg-transparent px-4 text-center text-[0.9375rem] font-semibold text-foreground transition-colors hover:bg-[#f3f1ec]"
+            >
+              <span className="underline decoration-2 underline-offset-4">Shiko të gjithë listën</span>
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0">
+                <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Link>
+          </li>
+        )}
+      </ShelfSlider>
     </section>
   );
 }
@@ -674,6 +736,7 @@ function CategoryButtons({ genres }: { genres: string[] }) {
 function ResultsView({
   words,
   genre,
+  shelfTitle,
   books,
   error,
   totalMatched,
@@ -681,13 +744,16 @@ function ResultsView({
 }: {
   words: string | undefined;
   genre: string | undefined;
+  shelfTitle?: string;
   books: BookWithAuthor[];
   error: boolean;
   totalMatched: number;
   ctx: CardContext;
 }) {
-  const title = genre ?? `“${words}”`;
+  const title = shelfTitle ?? genre ?? `“${words}”`;
   const chips: { label: string; href: string }[] = [];
+  // A shelf's list: one chip back to Libraria, like a category's.
+  if (shelfTitle) chips.push({ label: shelfTitle, href: "/librari" });
   if (genre) chips.push({ label: genre, href: buildBookstoreHref({}, { q: words }) });
   if (words) chips.push({ label: `“${words}”`, href: buildBookstoreHref({}, { genre }) });
 
