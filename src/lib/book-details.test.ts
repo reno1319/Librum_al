@@ -36,6 +36,20 @@ function errorsOf(values: Record<string, string | string[]>) {
 }
 
 describe("parseBookDetails", () => {
+  // LR1 patch 2: the only-on-Librum tick.
+  it("onlyOnLibrum is true only for the tick's value", () => {
+    const parse = (v?: string) => {
+      const fd = new FormData();
+      fd.set("title", "T");
+      if (v !== undefined) fd.set("onlyOnLibrum", v);
+      const r = parseBookDetails(fd);
+      return r.ok ? r.details.onlyOnLibrum : null;
+    };
+    expect(parse("yes")).toBe(true);
+    expect(parse()).toBe(false);
+    expect(parse("on")).toBe(false);
+  });
+
   it("a title alone is a valid draft, with the defaults", () => {
     const result = parseBookDetails(form({ title: "  Dimri   në Valbonë " }));
     expect(result).toEqual({
@@ -58,6 +72,7 @@ describe("parseBookDetails", () => {
         rightsBasis: null,
         originalAuthor: null,
         originalTitle: null,
+        onlyOnLibrum: false,
       },
     });
   });

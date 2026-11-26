@@ -25,6 +25,7 @@ import {
   MISSING_FOR_SEND_MESSAGE,
 } from "@/lib/book-editor-copy";
 import type { AiAnswer } from "@/lib/book-ai-disclosure";
+import { earlierFileLine, type EarlierBookFile } from "@/lib/book-file-versions";
 
 // BD15 P3: the new editor's Content tab (PLAN-BD15-r1 §2.4; mockup
 // "Përmbajtja"). A server component: the manuscript and cover pickers
@@ -41,6 +42,9 @@ import type { AiAnswer } from "@/lib/book-ai-disclosure";
 
 // D1 (mockup v5): the editor's shared section look and action bar
 // (book-editor-ui.tsx). "← Të dhënat" saves first, then goes back.
+
+const EARLIER_FILES_HEADING = "Skedarët e mëparshëm";
+const EARLIER_FILES_HELP = "Skedarët që lexuesit kanë marrë më parë. Lexuesit marrin gjithmonë skedarin aktual.";
 
 export type ContentFormBook = {
   id: string;
@@ -63,11 +67,15 @@ export function BookContentForm({
   aiUnreadable,
   live = false,
   markMissing = [],
+  earlierFiles = [],
 }: {
   action: (formData: FormData) => void | Promise<void>;
   // Upload notes 2 (Enkelejd 11-06): opened from the Pricing tab's to-do
   // list -- the boxes of what is still missing for the send are red.
   markMissing?: string[];
+  // FV1 (fv2 a): the files buyers got before the current one, newest
+  // first; the block shows only when there is at least one.
+  earlierFiles?: readonly EarlierBookFile[];
   // BD15 P5b-2: a live book -- a new manuscript or ballinë waits for
   // Librum's review; the save button says so.
   live?: boolean;
@@ -91,6 +99,28 @@ export function BookContentForm({
         help="DOCX ose EPUB, deri në 50 MB. Skedarin Word e kthejmë ne në libër elektronik dhe ju tregojmë çfarë duhet parë. Një skedar i ri zëvendëson të mëparshmin."
       >
         <p className="text-sm font-semibold">{book.hasManuscript ? "Dorëshkrimi aktual: skedar EPUB" : "Nuk ka dorëshkrim ende"}</p>
+        {earlierFiles.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            <p className="text-sm font-semibold">{EARLIER_FILES_HEADING}</p>
+            <p className="text-sm text-muted">{EARLIER_FILES_HELP}</p>
+            <ul className="flex flex-col divide-y divide-border rounded-card border border-border bg-surface text-sm">
+              {earlierFiles.map((file) => (
+                <li key={file.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <span>{earlierFileLine(file, "sq")}</span>
+                  {/* A plain link: the route checks the session and that this is the author's own book.
+                      download: the page stays, so the unsaved-changes guard does not ask. */}
+                  <a
+                    href={`/api/books/${book.id}/versions/${file.id}`}
+                    download
+                    className="focus-ring inline-flex min-h-11 items-center font-semibold text-primary underline underline-offset-2"
+                  >
+                    Shkarko
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <ManuscriptField
           bookTitle={book.title}
           bookLanguage={book.language ?? undefined}

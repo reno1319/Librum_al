@@ -20,6 +20,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient()
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({ from: () => ({ insert: async () => ({ data: null }) }) }),
 }));
+vi.mock("../../shporta/actions", () => ({ addToCart: vi.fn(), saveGift: vi.fn(), removeFromCart: vi.fn(), pressPay: vi.fn() }));
 vi.mock("./actions", () => ({
   buyBook: vi.fn(), getFreeBook: vi.fn(), submitReview: vi.fn(),
   addToWishlist: vi.fn(), removeFromWishlist: vi.fn(),
@@ -47,7 +48,10 @@ const HELD_QUOTE = [{
   discount_code_id: null, expires_at: "2026-09-15T10:30:00Z",
   provider_window_ends_at: "2026-09-15T10:30:00Z", quote_state: "unresolved_conflict",
 }];
-const NOTICE = "Ky libër nuk mund të blihet ende.";
+// CART (item 32, c1 a): while checkout is closed the cart's buttons
+// replace the old notice, and this one line says card payment opens
+// later. Pressing Pay at the cart's last step charges nothing.
+const NOTICE = "Pagesa me kartë hapet së shpejti.";
 
 function queryStub(listResult: unknown, rowResult?: unknown) {
   let single = false;
@@ -146,7 +150,11 @@ const CLOSED: Array<[string, () => void]> = [
 /** Every paid checkout initiation or resume surface, asserted one by one. */
 function expectNoPaidCheckoutSurface(html: string) {
   expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Blej librin</);
-  expect(html).not.toContain(`/login?next=/libra/${BOOK_U_ID}`);
+  // CART (item 32): a signed-out visitor's sign-in links lead only to
+  // the cart's two buttons.
+  for (const m of html.matchAll(/href="\/login\?next=\/libra\/[^"]+"[^>]*>([^<]*)</g)) {
+    expect(["Shto në shportë", "Dhuroje"]).toContain(m[1]);
+  }
   expect(html).not.toContain('name="code"');
   expect(html).not.toContain("Kodi promocional");
   expect(html).not.toContain("Blej librin");

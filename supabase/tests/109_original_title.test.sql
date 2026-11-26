@@ -143,8 +143,9 @@ end $$;
 select pg_temp.assert(
   (select a.attname from pg_catalog.pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) in ('original_title', 'lbn')
-  -- LBN (migration 20261124190000) appends lbn right after it.
+    order by a.attnum desc limit 1) in ('original_title', 'lbn', 'only_on_librum')
+  -- LBN (migration 20261124190000) appends lbn right after it, and LR1
+  -- patch 2 (migration 20261125150000) only_on_librum after that.
   and (select coalesce(max(a.attnum) filter (where a.attname = 'lbn'),
                        max(a.attnum) filter (where a.attname = 'original_title') + 1)
          from pg_catalog.pg_attribute a

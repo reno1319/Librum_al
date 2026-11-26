@@ -195,6 +195,9 @@ describe("SiteHeader feedback button (source)", () => {
     const { fileURLToPath } = await import("node:url");
     const source = readFileSync(fileURLToPath(new URL("./site-header.tsx", import.meta.url)), "utf8");
     expect(source).toContain("{user && !recoveryActive && <FeedbackButton />}");
-    expect(source.match(/<FeedbackButton/g)).toHaveLength(1);
+    // LR1: once in today's header and once in Libraria's own, both
+    // behind the same condition.
+    expect(source.match(/<FeedbackButton/g)).toHaveLength(2);
+    expect(source.match(/\{user && !recoveryActive && <FeedbackButton \/>\}/g)).toHaveLength(2);
   });
 });

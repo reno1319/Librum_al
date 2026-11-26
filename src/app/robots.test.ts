@@ -21,6 +21,8 @@ describe("robots", () => {
       "/auth/",
       "/library",
       "/wishlist",
+      "/shporta",
+      "/dhurata",
       "/following",
       "/login",
       "/signup",

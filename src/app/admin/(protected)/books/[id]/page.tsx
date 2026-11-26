@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/staff";
+import { earlierFileLine, readEarlierBookFiles } from "@/lib/book-file-versions";
 import { roleHasPermission } from "@/lib/staff-permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolvePublicAuthorName } from "@/lib/author-name";
@@ -35,6 +36,7 @@ import { PD_ALREADY_HAVE_NOTE, PD_PREPARED_BY } from "@/lib/pd-editions";
 import { UnpublishForm } from "./unpublish-form";
 import { SendBackForm } from "./send-back-form";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
+import { removeOnlyOnLibrum } from "./only-on-librum-actions";
 import { BOOK_FILE_WORDS_TABLE, pageEstimateFromWords } from "@/lib/page-estimate";
 import { descriptionPlainText } from "@/lib/book-description";
 import { preorderFinalFileState, preorderFileDueDate, tiranaToday } from "@/lib/preorders";
@@ -103,6 +105,10 @@ export const dynamic = "force-dynamic";
 // date move and the waiting readers' count.
 type AdminBook = {
   id: string;
+  // LR1 patch 2 (migration 20261125150000): the author's "only on
+  // Librum" tick, and when staff took it off (lr2-1 a).
+  only_on_librum: boolean;
+  only_on_librum_removed_at: string | null;
   title: string;
   status: string;
   price_all: number | null;
@@ -207,6 +213,7 @@ export default async function AdminBookPage({
   const { role } = await requireStaff("reports.view");
   const canResolve = roleHasPermission(role, "reports.resolve");
   const canReview = roleHasPermission(role, "books.review");
+  const canFeature = roleHasPermission(role, "catalog.feature");
 
   const { id } = await params;
   const { report: reportParam, error: rawError, success: rawSuccess } = await searchParams;
@@ -217,7 +224,7 @@ export default async function AdminBookPage({
   const admin = createAdminClient();
   const { data: book } = await admin
     .from("books")
-    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, original_title, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, lbn, release_date, preorder_count, preorder_slip_used")
+    .select("id, title, status, price_all, published_at, cover_path, file_path, author_id, pen_name_id, pen:pen_names!books_pen_name_id_fkey(name), original_author, original_title, description, is_adult, pd_work_id, pd_editor_credit, book_type, categories, genre, reading_age_min, edition_number, edition, series_id, series_position, keywords, publisher, isbn, lbn, release_date, preorder_count, preorder_slip_used, only_on_librum, only_on_librum_removed_at")
     .eq("id", id)
     .maybeSingle<AdminBook>();
   if (!book) notFound();
@@ -284,6 +291,9 @@ export default async function AdminBookPage({
       .order("created_at", { ascending: true })
       .returns<{ name: string; role: string }[]>(),
   ]);
+  // FV1 (fv2 a): the files buyers got before the current one. null =
+  // couldn't be read (the card says so); an empty list shows no card.
+  const earlierFiles = await readEarlierBookFiles(admin, { id: book.id, authorId: book.author_id });
   // Upload notes D: the word count of the book's CURRENT file, if any.
   const wordsResult = book.file_path
     ? await admin
@@ -656,6 +666,40 @@ export default async function AdminBookPage({
           </dl>
         </section>
 
+        {/* LR1 patch 2 (lr1-1 c, lr2-1 a): the author's "only on Librum"
+            tick. Staff with catalog.feature take it off; the author can't
+            tick it again. Never on a public-domain edition (a free classic
+            never qualifies). */}
+        {!book.pd_work_id && (
+          <section aria-labelledby="book-only-on-librum" className={SECTION_CLASSES}>
+            <h2 id="book-only-on-librum" className={SECTION_HEADING_CLASSES}>
+              Only on Librum
+            </h2>
+            {book.only_on_librum ? (
+              <div className="flex flex-col gap-3 text-[0.9375rem]">
+                <p>The author ticked “Ky libër shitet ekskluzivisht në Librum”. While live, it shows on the Libraria shelf “Libra që i gjeni vetëm në Librum”.</p>
+                {canFeature && (
+                  <form action={removeOnlyOnLibrum.bind(null, book.id)} className="flex flex-col gap-1.5">
+                    <button
+                      type="submit"
+                      className="focus-ring inline-flex min-h-11 w-fit items-center justify-center rounded-full border border-primary bg-surface px-[1.125rem] text-[0.9375rem] font-semibold text-primary hover:bg-surface-hover"
+                    >
+                      Remove from the shelf
+                    </button>
+                    <p className="text-[0.8125rem] text-muted">The author can’t tick it again. Saved in the Audit log.</p>
+                  </form>
+                )}
+              </div>
+            ) : book.only_on_librum_removed_at ? (
+              <p className="text-[0.9375rem]">
+                Removed by staff on {formatTodayDate(book.only_on_librum_removed_at)}. The author can’t tick it again.
+              </p>
+            ) : (
+              <p className="text-[0.9375rem] text-muted">Not ticked by the author.</p>
+            )}
+          </section>
+        )}
+
         {/* Upload notes D (Renato 11-07, Q2 a): count a file stored before
             the page estimate existed. Shown to reviewers, for a book with a file. */}
         {book.file_path && (
@@ -679,6 +723,36 @@ export default async function AdminBookPage({
                   {wordsResult.data ? "Count pages again" : "Count pages"}
                 </button>
               </form>
+            )}
+          </section>
+        )}
+
+        {(earlierFiles === null || earlierFiles.length > 0) && (
+          <section aria-labelledby="book-earlier-files" className={SECTION_CLASSES}>
+            <h2 id="book-earlier-files" className={SECTION_HEADING_CLASSES}>
+              Earlier book files
+            </h2>
+            {earlierFiles === null ? (
+              <p className="text-sm text-red-700">Couldn’t load the earlier files.</p>
+            ) : (
+              <>
+                <p className="text-sm text-muted">Files buyers got before the current one. Buyers always get the current file.</p>
+                <ul className="mt-3 flex flex-col divide-y divide-border rounded-[3px] border border-border text-sm">
+                  {earlierFiles.map((file) => (
+                    <li key={file.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <span>{earlierFileLine(file, "en")}</span>
+                      {canReview && (
+                        <a
+                          href={`/admin/books/${book.id}/versions/${file.id}`}
+                          className="focus-ring inline-flex min-h-11 items-center font-semibold text-primary underline underline-offset-2"
+                        >
+                          Download
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </section>
         )}

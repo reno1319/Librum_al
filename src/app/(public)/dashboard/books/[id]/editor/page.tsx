@@ -26,6 +26,7 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
 import { BookContentForm } from "@/components/book-content-form";
+import { readEarlierBookFiles } from "@/lib/book-file-versions";
 import { readAiDisclosure } from "@/lib/book-ai-disclosure";
 import { ebookCoverNotice } from "@/lib/ebook-cover-notice";
 import { Alert } from "@/components/ui/alert";
@@ -98,6 +99,9 @@ type EditorBook = {
   publisher: string | null;
   // BD15 P7: set by staff when it is a public-domain work's edition.
   pd_work_id: string | null;
+  // LR1 patch 2 (migration 20261125150000).
+  only_on_librum?: boolean;
+  only_on_librum_removed_at?: string | null;
   // BD16 P2: read only once the pre-order columns exist (P1 migration).
   release_date?: string | null;
   preorder_count?: number;
@@ -165,7 +169,7 @@ export default async function BookEditorPage({
   const { data: book } = await supabase
     .from("books")
     .select(
-      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, original_title, status, published_at, file_path, cover_path, price_all, isbn, lbn, publisher, pd_work_id" +
+      "id, author_id, title, subtitle, language, series_id, series_position, edition_number, pen_name_id, description, is_adult, reading_age_min, book_type, categories, keywords, original_author, original_title, status, published_at, file_path, cover_path, price_all, isbn, lbn, publisher, pd_work_id, only_on_librum, only_on_librum_removed_at" +
         (preorderFeature ? ", release_date, preorder_count, preorder_slip_used, preorder_listed_at" : ""),
     )
     .eq("id", id)
@@ -333,6 +337,11 @@ export default async function BookEditorPage({
   // pen name, also after a cancel (books_lock_after_first_publish).
   const locked = book.published_at !== null || (book.preorder_listed_at ?? null) !== null;
   const penNameList = penNames ?? [];
+  // FV1 (fv2 a): the book's earlier live files, read by the trusted
+  // writer now that the book is proven the caller's own. Content tab
+  // only; an unreadable list shows nothing.
+  const earlierFiles =
+    tab === "content" ? ((await readEarlierBookFiles(createCatalogWriteClient(), { id: book.id, authorId: user.id })) ?? []) : [];
   const lockedPenName = penNameList.find((p) => p.id === book.pen_name_id)?.name ?? null;
 
   const detailsMissingItems = missingDetailItems({
@@ -419,6 +428,7 @@ export default async function BookEditorPage({
     rightsBasis: rightsBasis ?? "",
     originalAuthor: working.originalAuthor ?? "",
     originalTitle: book.original_title ?? "",
+    onlyOnLibrum: book.only_on_librum === true,
   };
 
   return (
@@ -480,6 +490,8 @@ export default async function BookEditorPage({
           series={series ?? []}
           pdFrozen={isPickedPdEdition(book)}
           markMissing={showMissing ? detailsMissingItems.map((m) => m.field) : []}
+          onlyOnLibrumOffered={book.pd_work_id === null}
+          onlyOnLibrumRemoved={book.only_on_librum_removed_at != null}
         />
       ) : tab === "content" ? (
         <>
@@ -505,6 +517,7 @@ export default async function BookEditorPage({
             authorName={penNameList.find((p) => p.id === book.pen_name_id)?.name ?? ""}
             aiAnswer={ai.ok ? ai.answer : null}
             aiUnreadable={!ai.ok}
+            earlierFiles={earlierFiles}
             markMissing={showMissing ? contentMissing : []}
           />
         </>

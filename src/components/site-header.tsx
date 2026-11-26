@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/(public)/auth/actions";
 import { isRecoverySessionActive } from "@/lib/recovery-session";
-import { IconPerson } from "@/components/icons";
+import { IconBag, IconHeart, IconPerson } from "@/components/icons";
 import { NavLinks, type NavItem } from "@/components/nav-links";
 import { MobileNav } from "@/components/mobile-nav";
 import { FeedbackButton } from "@/components/feedback-button";
@@ -11,6 +11,7 @@ import { accountFirstName } from "@/lib/account-first-name";
 import { LibrumLogo } from "@/components/librum-logo";
 import { StaffBar } from "@/components/staff-bar";
 import { roleHasPermission } from "@/lib/staff-permissions";
+import { cartCountLabel } from "@/lib/cart";
 import type { StaffRole } from "@/lib/types";
 
 // LAUNCH-1 P2-5: the render-state decision, extracted as a pure function
@@ -121,7 +122,12 @@ const QUIET_LINK_ON_DARK_CLASSES =
 const BRASS_BUTTON_CLASSES =
   "focus-ring inline-flex items-center rounded-full bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
 
-export async function SiteHeader() {
+// LR1 (Renato 11-25, sketch pictures r4, lb7 b): Libraria's own header.
+// "store" is chosen by src/app/(public)/layout.tsx for /librari only;
+// every other page keeps "default", byte-for-byte today's header.
+export type SiteHeaderVariant = "default" | "store";
+
+export async function SiteHeader({ variant = "default" }: { variant?: SiteHeaderVariant } = {}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -156,6 +162,18 @@ export async function SiteHeader() {
   const cookieStore = await cookies();
   const recoveryActive = isRecoverySessionActive(cookieStore);
 
+  // CART (item 32, c2 a): how many rows the signed-in reader's cart has.
+  // Only the reader's own rows come back (row rules); an error shows the
+  // cart with no number.
+  let cartCount = 0;
+  if (user && !recoveryActive) {
+    const { count } = await supabase
+      .from("cart_items")
+      .select("id", { count: "exact", head: true })
+      .eq("reader_id", user.id);
+    cartCount = count ?? 0;
+  }
+
   const nav = buildSiteHeaderNav({
     user: user ? { id: user.id, email: user.email } : null,
     displayName,
@@ -163,14 +181,33 @@ export async function SiteHeader() {
     recoveryActive,
   });
 
+  const staffBar = staffRole && !recoveryActive && (
+    <StaffBar
+      canWritePosts={roleHasPermission(staffRole, "blog.manage")}
+      canViewBooks={roleHasPermission(staffRole, "reports.view")}
+    />
+  );
+
+  if (variant === "store") {
+    return (
+      <header className="relative bg-primary text-primary-foreground">
+        {staffBar}
+        <StoreHeaderRow
+          signedIn={!!user}
+          recoveryActive={recoveryActive}
+          headerName={nav.headerName}
+          accountHref={nav.accountHref}
+          accountLabel={nav.accountLabel}
+          cartCount={cartCount}
+        />
+        {user && !recoveryActive && <FeedbackButton />}
+      </header>
+    );
+  }
+
   return (
     <header className="relative bg-primary text-primary-foreground">
-      {staffRole && !recoveryActive && (
-        <StaffBar
-          canWritePosts={roleHasPermission(staffRole, "blog.manage")}
-          canViewBooks={roleHasPermission(staffRole, "reports.view")}
-        />
-      )}
+      {staffBar}
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
           tighter gaps there; the roomier gaps return at xl. */}
       {/* HEADER NAME: one row at every width now (below lg it only ever
@@ -244,6 +281,28 @@ export async function SiteHeader() {
               an ellipsis at about 12 letters, and shrinks further rather
               than wrap the bar on a narrow phone. The accessible name
               starts with the visible text. */}
+          {/* CART (item 32): the bag, signed-in readers only (c2 a), from
+              1024px up. On phones the cart is a line in the menu (p1 c),
+              so the greeting keeps its room. */}
+          {user && !recoveryActive && (
+            <Link
+              href="/shporta"
+              aria-label={cartCount > 0 ? `Shporta, ${cartCountLabel(cartCount)}` : "Shporta"}
+              className="focus-ring relative hidden size-11 shrink-0 items-center justify-center rounded-sm text-primary-foreground lg:flex"
+            >
+              <span aria-hidden="true">
+                <IconBag className="size-5" />
+              </span>
+              {cartCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1 right-0.5 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-accent px-1 text-[0.6875rem] font-bold text-accent-foreground"
+                >
+                  {cartCount > 99 ? "99+" : cartCount}
+                </span>
+              )}
+            </Link>
+          )}
           {nav.showAccountLink &&
             (nav.headerName ? (
               <Link
@@ -279,6 +338,7 @@ export async function SiteHeader() {
             loggedIn={!!user}
             accountHref={nav.accountHref}
             logoutAction={logout}
+            cartCount={user && !recoveryActive ? cartCount : null}
             recoveryActive={recoveryActive}
           />
         </div>
@@ -286,5 +346,136 @@ export async function SiteHeader() {
       {/* K4 feedback b a: signed-in people only, never mid password reset. */}
       {user && !recoveryActive && <FeedbackButton />}
     </header>
+  );
+}
+
+// LR1: the shop header row. Logo, the search (it sends ?q= to Libraria),
+// "Lista ime" (the wishlist) and "Shporta" (the cart) as labelled icons,
+// then the account: signed out, "Krijo llogari" with "Keni llogari?
+// Hyni" under it; signed in, the same greeting link as every other page,
+// and "Dil". No menu links and no menu button (lb7 b); the footer still
+// links every page. Signed-out taps on the two icons go through log in
+// first. On phones the search drops to its own full-width row.
+const STORE_ICON_LINK =
+  "focus-ring flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-sm px-1 text-[0.6875rem] text-primary-foreground sm:text-[0.8125rem]";
+
+function StoreHeaderRow({
+  signedIn,
+  recoveryActive,
+  headerName,
+  accountHref,
+  accountLabel,
+  cartCount,
+}: {
+  signedIn: boolean;
+  recoveryActive: boolean;
+  headerName: string | null;
+  accountHref: string;
+  accountLabel: string;
+  cartCount: number;
+}) {
+  const showIcons = !recoveryActive;
+  return (
+    <div className="page-container flex flex-wrap items-center gap-x-4 gap-y-3 py-3 sm:gap-x-6 md:flex-nowrap">
+      <Link href="/" className="focus-ring -my-[9px] block shrink-0 rounded-sm py-[9px] text-primary-foreground">
+        <LibrumLogo className="block h-6 w-auto" />
+      </Link>
+
+      <form
+        action="/librari"
+        method="get"
+        role="search"
+        className="relative order-last flex w-full md:order-none md:max-w-[32.5rem] md:flex-1"
+      >
+        <label htmlFor="store-header-q" className="sr-only">
+          Kërko në Librum
+        </label>
+        {/* 16px text so iPhone Safari does not zoom in. */}
+        <input
+          id="store-header-q"
+          type="search"
+          name="q"
+          placeholder="Kërko në Librum"
+          className="focus-ring h-11 w-full min-w-0 rounded-full border-0 bg-[#f7f3ea] pr-12 pl-5 text-base text-foreground"
+        />
+        <button
+          type="submit"
+          aria-label="Kërko"
+          className="focus-ring absolute top-0 right-0 flex size-11 items-center justify-center rounded-full text-primary"
+        >
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4">
+            <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" strokeWidth="2" />
+            <path d="M13 13l4.5 4.5" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </button>
+      </form>
+
+      <div className="ml-auto flex items-center gap-2 sm:gap-4">
+        {showIcons && (
+          <>
+            <Link href={signedIn ? "/wishlist" : "/login?next=/wishlist"} className={STORE_ICON_LINK}>
+              <IconHeart className="size-6" />
+              <span>Lista ime</span>
+            </Link>
+            <Link
+              href={signedIn ? "/shporta" : "/login?next=/shporta"}
+              aria-label={cartCount > 0 ? `Shporta, ${cartCountLabel(cartCount)}` : undefined}
+              className={`${STORE_ICON_LINK} relative`}
+            >
+              <IconBag className="size-6" />
+              <span>Shporta</span>
+              {cartCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 right-0 flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-accent px-1 text-[0.6875rem] font-bold text-accent-foreground"
+                >
+                  {cartCount > 99 ? "99+" : cartCount}
+                </span>
+              )}
+            </Link>
+          </>
+        )}
+
+        {!signedIn ? (
+          <div className="flex flex-col items-center gap-1">
+            <Link href="/signup" className={`${BRASS_BUTTON_CLASSES} px-3! py-1.5! text-sm sm:px-4! sm:py-2! sm:text-base`}>
+              Krijo llogari
+            </Link>
+            <span className="text-[0.6875rem] text-primary-foreground/90 sm:text-xs">
+              Keni llogari?{" "}
+              <Link href="/login" className={QUIET_LINK_ON_DARK_CLASSES}>
+                Hyni
+              </Link>
+            </span>
+          </div>
+        ) : (
+          <div className="flex min-w-0 items-center gap-3">
+            {recoveryActive && <span className="hidden text-primary-foreground/80 sm:inline">Rikthimi i fjalëkalimit</span>}
+            {!recoveryActive && (
+              <Link
+                href={accountHref}
+                aria-label={headerName ? `Përshëndetje, ${headerName}, ${accountLabel}` : accountLabel}
+                className="focus-ring flex min-h-11 min-w-0 items-center gap-2 rounded-sm px-1.5 text-base font-medium text-primary-foreground"
+              >
+                {headerName && (
+                  <span className="hidden min-w-0 items-baseline sm:flex">
+                    <span className="shrink-0 whitespace-pre">Përshëndetje, </span>
+                    <span className="max-w-[12ch] min-w-0 truncate">{headerName}</span>
+                  </span>
+                )}
+                <span aria-hidden="true" className="shrink-0">
+                  <IconPerson className="size-5" />
+                </span>
+              </Link>
+            )}
+            <form action={logout} className={recoveryActive ? "block" : "hidden lg:block"}>
+              <button type="submit" className={QUIET_LINK_ON_DARK_CLASSES}>
+                Dil
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

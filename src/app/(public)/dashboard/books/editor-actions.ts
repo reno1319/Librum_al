@@ -77,6 +77,9 @@ type ExistingBook = {
   original_author: string | null;
   // BD15 P7: set when it is a public-domain work's edition.
   pd_work_id: string | null;
+  // LR1 patch 2 (lr2-1 a): set when staff took the "only on Librum"
+  // tick off; the author cannot tick it again then.
+  only_on_librum_removed_at: string | null;
   // BD16 P2: set once a pre-order was ever listed (read only where the
   // column exists); the title and pen name stay locked from then (D4).
   preorder_listed_at?: string | null;
@@ -97,7 +100,7 @@ async function readOwnBook(supabase: SessionClient, userId: string, bookId: stri
   const { data, error } = await supabase
     .from("books")
     .select(
-      "id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author, pd_work_id" +
+      "id, author_id, status, published_at, title, pen_name_id, file_path, cover_path, description, is_adult, original_author, pd_work_id, only_on_librum_removed_at" +
         ((await getPreorderSchemaFeature()) ? ", preorder_listed_at" : ""),
     )
     .eq("id", bookId)
@@ -105,6 +108,15 @@ async function readOwnBook(supabase: SessionClient, userId: string, bookId: stri
     .maybeSingle<ExistingBook>();
   if (error || !data || data.id !== bookId || data.author_id !== userId) return null;
   return data;
+}
+
+// LR1 patch 2: the "only on Librum" tick, written at once on a draft or
+// a live book (lr2-2 a). Not written once staff took it off (lr2-1 a),
+// nor on a public-domain edition (a free classic never qualifies, and
+// the editor does not offer it there).
+function onlyOnLibrumWrite(existing: ExistingBook | null, details: BookDetails): { only_on_librum?: boolean } {
+  if (existing && (existing.only_on_librum_removed_at != null || existing.pd_work_id != null)) return {};
+  return { only_on_librum: details.onlyOnLibrum };
 }
 
 async function ownsPenName(supabase: SessionClient, userId: string, penNameId: string): Promise<boolean> {
@@ -238,6 +250,8 @@ async function saveLiveBookDetails(
     keywords: details.keywords.join(", "),
     // X19 (x19s1 b): the original title changes at once, like these.
     original_title: details.originalTitle,
+    // LR1 patch 2 (lr2-2 a): the tick changes at once too.
+    ...onlyOnLibrumWrite(existing, details),
   };
   // BD15 P7 (Q1 a; audit r1 N2): a picked edition's details are frozen.
   // A save that changes none of them skips this write (an older book's
@@ -530,6 +544,7 @@ export async function saveBookDetails(bookId: string | null, formData: FormData)
     keywords: details.keywords.join(", "),
     original_author: details.originalAuthor,
     original_title: details.originalTitle,
+    ...onlyOnLibrumWrite(existing, details),
   };
 
   // The row is written with the trusted catalog writer; every identifying value is the server's own (the

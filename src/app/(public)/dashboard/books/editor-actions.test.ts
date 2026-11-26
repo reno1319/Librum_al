@@ -508,6 +508,44 @@ describe("saveBookDetails: contributors and rights", () => {
   });
 });
 
+// LR1 patch 2: the "only on Librum" tick (lr1-1 c, lr2-1 a, lr2-2 a).
+describe("saveBookDetails: the only-on-Librum tick", () => {
+  it("a new book and a draft write the tick as sent (ticked or not)", async () => {
+    tables.books = [];
+    await redirectOf(saveBookDetails(null, form({ title: "T", onlyOnLibrum: "yes" })));
+    expect(catalogWrites.find((w) => w.op === "insert")!.payload).toMatchObject({ only_on_librum: true });
+    seed();
+    catalogWrites.length = 0;
+    await redirectOf(saveBookDetails(BOOK, form({ title: "T" })));
+    expect(catalogWrites[0].payload).toMatchObject({ only_on_librum: false });
+  });
+
+  it("a live book: the tick is written onto the live row at once, nothing waits for review", async () => {
+    seedLive();
+    await redirectOf(saveBookDetails(BOOK, liveForm({ onlyOnLibrum: "yes" })));
+    const update = catalogWrites.find((w) => w.op === "update")!;
+    expect(update.payload).toMatchObject({ only_on_librum: true });
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("once staff took it off, a save never writes it, even ticked", async () => {
+    seed({ only_on_librum_removed_at: "2026-11-24T10:00:00Z" });
+    await redirectOf(saveBookDetails(BOOK, form({ title: "T", onlyOnLibrum: "yes" })));
+    expect(catalogWrites[0].payload).not.toHaveProperty("only_on_librum");
+    seedLive();
+    Object.assign(tables.books[0], { only_on_librum_removed_at: "2026-11-24T10:00:00Z" });
+    catalogWrites.length = 0;
+    await redirectOf(saveBookDetails(BOOK, liveForm({ onlyOnLibrum: "yes", subtitle: "Nën" })));
+    expect(catalogWrites.find((w) => w.op === "update")!.payload).not.toHaveProperty("only_on_librum");
+  });
+
+  it("a public-domain edition never writes it", async () => {
+    seed({ pd_work_id: "55555555-5555-4555-8555-555555555555" });
+    await redirectOf(saveBookDetails(BOOK, form({ title: "T", onlyOnLibrum: "yes" })));
+    for (const w of catalogWrites) expect(w.payload).not.toHaveProperty("only_on_librum");
+  });
+});
+
 describe("createSeriesFromEditor", () => {
   it("creates the series under the caller's chosen pen name and returns it", async () => {
     const result = await createSeriesFromEditor("  Kronikat ", PEN_2);

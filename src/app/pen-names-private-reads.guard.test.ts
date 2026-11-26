@@ -87,11 +87,21 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   // (always the authenticated user's own id, or the review's author on
   // the staff side).
   "lib/book-reviews.ts": ["books"],
+  // CART (item 32, g4 a): whether the reader is the book's author, so
+  // they can't add or gift their own book.
+  "app/(public)/shporta/actions.ts": ["books"],
+  // LR1 lr1-12 a: the signed-in author's own book ids (ids only), so
+  // their own cards on Libraria show "Shiko librin", not "Shto". LR1
+  // patch 4 moved this read, unchanged, out of librari/page.tsx so the
+  // "Më shumë" page shares it.
+  "lib/libraria-picks-read.ts": ["books"],
 };
 // A helper that takes the author id as a parameter names it so.
 const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {
   "lib/book-reviews.ts": /\.eq\("author_id",\s*params\.authorId\)/,
   "lib/account-deletion.ts": /\.eq\("author_id",\s*userId\)/,
+  "app/(public)/shporta/actions.ts": /\.eq\("author_id",\s*userId\)/,
+  "lib/libraria-picks-read.ts": /\.eq\("author_id",\s*userId\)/,
 };
 
 describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base tables", () => {
@@ -144,6 +154,9 @@ describe("PEN-NAMES-2 static guard: staff pages (MF2, MF3)", () => {
     // ADMIN-3-REVIEW (H): the staff file link checks the book's current
     // file against the pending snapshot, after requireStaff("books.review").
     "app/admin/(protected)/books/[id]/file/route.ts",
+    // FV1 (fv2 a): the staff download of an earlier file reads the book's
+    // author id (no pen name), after requireStaff("books.review").
+    "app/admin/(protected)/books/[id]/versions/[versionId]/route.ts",
     // PEOPLE-1 (10a): a person's page lists their books, after
     // requireStaff("people.view").
     "app/admin/(protected)/people/[id]/page.tsx",

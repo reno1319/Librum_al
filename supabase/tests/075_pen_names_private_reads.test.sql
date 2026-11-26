@@ -276,9 +276,10 @@ begin
   -- migration 20261107120000: book_type appended after it; Upload notes
   -- D, migration 20261107140000: word_count appended after that; X19,
   -- migration 20261121180000: original_title appended after that; LBN,
-  -- migration 20261124190000: lbn appended after that)
+  -- migration 20261124190000: lbn appended after that; LR1 patch 2,
+  -- migration 20261125150000: only_on_librum appended after that)
   perform pg_temp.assert(pg_temp.cols('public.public_books') =
-    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author,categories,is_adult,reading_age_min,edition_number,pd_work_id,pd_editor_credit,release_date,book_type,word_count,original_title,lbn',
+    'id,title,subtitle,description,preview_text,keywords,isbn,language,publisher,edition,original_publication_date,genre,series_id,series_position,price_cents,cover_path,status,published_at,created_at,updated_at,price_all,librum_choice_at,pen_name_id,original_author,categories,is_adult,reading_age_min,edition_number,pd_work_id,pd_editor_credit,release_date,book_type,word_count,original_title,lbn,only_on_librum',
     'part1: public_books columns (no author_id, file_path, pen_name)');
   perform pg_temp.assert(pg_temp.cols('public.public_series') = 'id,title,pen_name_id,created_at', 'part1: public_series columns');
   perform pg_temp.assert(pg_temp.cols('public.public_bundles') =
@@ -540,6 +541,8 @@ insert into pg_temp.allow values
   ('reviews', 'reader_id', 'own', 'readers read own reviews (upsert)'),
   ('purchases', 'reader_id', 'own', 'readers read own purchases'),
   ('wishlist_items', 'reader_id', 'own', 'own wishlist'),
+  ('cart_items', 'reader_id', 'own', 'own cart (item 32)'),
+  ('gifts', 'buyer_id', 'own', 'own sent gifts (item 32 batch 2)'),
   ('blog_post_reactions', 'user_id', 'own', 'own blog reactions (BR1)'),
   ('author_tax_details', 'author_id', 'own', 'own Payment & tax details (build 3)'),
   ('preorder_notify_requests', 'user_id', 'own', 'own pre-order notices (BD16 P1)'),

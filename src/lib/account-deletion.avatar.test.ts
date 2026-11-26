@@ -5,6 +5,13 @@ import {
   UNSAFE_AVATAR_PATHS_FOR_USER,
 } from "@/lib/avatar-path-test-fixtures";
 
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
+
 // AVATAR-STORAGE-PATH-AUTH-1 (Patch 9): deleteAccount hands a stored
 // avatar_path to service-role Storage removal ONLY when it is exactly the
 // deleting user's own canonical avatar key. Every other value produces

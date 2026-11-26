@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
+const { bookFileVersionsDoubleState, resetBookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+
 // BD15 P5a (P4 audit, render test for the editor redirect), P5b-3a: the
 // old edit page is retired, so the editor takes every book of the
 // author's -- a plain draft, a live book, a book in review (read-only),
@@ -139,9 +147,26 @@ beforeEach(() => {
   pendingRead = { ok: true, pending: null, createdAt: null };
   maintenance = false;
   penNameRows = [];
+  resetBookFileVersionsDouble();
 });
 
 describe("editor page: which books it takes", () => {
+  // FV1 (fv2 a): the earlier files are read for the Content tab only.
+  it("FV1: the Content tab lists the book's earlier files; other tabs don't read them", async () => {
+    book.status = "published";
+    book.description = "Live description";
+    bookFileVersionsDoubleState.earlier = [
+      { id: "77777777-7777-4777-8777-777777777771", liveFrom: "2026-10-05T10:00:00Z", replacedAt: "2026-11-02T10:00:00Z", sizeBytes: 1258291 },
+    ];
+    const html = await render("content");
+    expect(html).toContain(">Skedarët e mëparshëm<");
+    expect(html).toContain("skedar EPUB · në shitje 5 tetor 2026 – 2 nëntor 2026 · 1,2 MB");
+    expect(bookFileVersionsDoubleState.calls).toEqual([{ fn: "readEarlierBookFiles", bookIds: [BOOK_ID] }]);
+    bookFileVersionsDoubleState.calls = [];
+    expect(await render("details")).not.toContain("Skedarët e mëparshëm");
+    expect(bookFileVersionsDoubleState.calls).toEqual([]);
+  });
+
   it("a plain draft renders the editor", async () => {
     const html = await render();
     expect(html).toContain("Libri im");

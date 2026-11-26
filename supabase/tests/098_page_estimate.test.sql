@@ -153,9 +153,10 @@ select pg_temp.assert(
 select pg_temp.assert(
   (select a.attname from pg_attribute a
     where a.attrelid = 'public.public_books'::regclass and a.attnum > 0 and not a.attisdropped
-    order by a.attnum desc limit 1) in ('word_count', 'original_title', 'lbn')
+    order by a.attnum desc limit 1) in ('word_count', 'original_title', 'lbn', 'only_on_librum')
   -- X19 (migration 20261121180000) appends original_title right after it,
-  -- and LBN (migration 20261124190000) lbn after that.
+  -- LBN (migration 20261124190000) lbn after that, and LR1 patch 2
+  -- (migration 20261125150000) only_on_librum after that.
   and (select coalesce(max(a.attnum) filter (where a.attname = 'original_title'),
                        max(a.attnum) filter (where a.attname = 'word_count') + 1)
          from pg_attribute a

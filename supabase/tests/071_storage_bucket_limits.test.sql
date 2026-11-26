@@ -42,12 +42,18 @@ begin
         if b.public or b.file_size_limit <> 52428800 or b.allowed_mime_types <> manuscripts then
           raise exception 'FAIL: bucket % is %, %, %', b.id, b.public, b.file_size_limit, b.allowed_mime_types;
         end if;
+      -- LR1 patch 3 (20261125200000_libraria_banner_slides.sql): the
+      -- banner slide pictures, always stored as a shrunk JPEG.
+      when 'libraria' then
+        if not b.public or b.file_size_limit <> 5242880 or b.allowed_mime_types <> array['image/jpeg'] then
+          raise exception 'FAIL: bucket % is %, %, %', b.id, b.public, b.file_size_limit, b.allowed_mime_types;
+        end if;
       else
         raise exception 'FAIL: unexpected bucket %', b.id;
     end case;
   end loop;
-  if seen <> 4 then
-    raise exception 'FAIL: expected 4 buckets, found %', seen;
+  if seen <> 5 then
+    raise exception 'FAIL: expected 5 buckets, found %', seen;
   end if;
 end $$;
 

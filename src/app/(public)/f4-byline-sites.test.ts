@@ -19,11 +19,15 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   [
     "app/(public)/librari/page.tsx",
     [
-      // FeaturedBook (its "by" line and no-cover placeholder) and both card shelves.
-      "const authorName = resolveBookByline(book);",
+      // LR1 patch 3: the banner slides (the old feature strip is gone) and the card.
+      "author: resolveBookByline(book),",
       "authorName={resolveBookByline(book)}",
+      // LR1 patch 4: the "Çfarë po lexojmë" box.
+      "authorName: resolveBookByline(book),",
     ],
   ],
+  // LR1 patch 4: every pick on the "Më shumë" page.
+  ["app/(public)/librari/cfare-po-lexojme/page.tsx", ["authorName: resolveBookByline(pick.book),"]],
   ["app/(public)/library/page.tsx", ["authorName={resolveBookByline(book)}", "penNameId={resolveOriginalAuthor(book) ? null : (book.pen?.id ?? null)}"]],
   ["app/(public)/wishlist/page.tsx", ["authorName={resolveBookByline(book)}"]],
   // HOME-PICKS-1: the newest list and the fan's picks share toCover.
@@ -34,7 +38,9 @@ const BYLINE_SITES: [file: string, expected: string[]][] = [
   ],
   ["app/api/books/[id]/sample/route.ts", ["author: resolveBookByline(book),"]],
   // BD3 patch 4 r2 (audit r1, M1/L6): staff see both names.
-  ["app/admin/(protected)/librum-choice/page.tsx", ["resolveStaffByline(pick)", "resolveStaffByline(book)"]],
+  // LR1 patch 3 (lr3-6b a): the Librum's choice pick is gone; the home page slots stay.
+  ["app/admin/(protected)/librum-choice/page.tsx", ["resolveStaffByline(book)"]],
+  ["app/admin/(protected)/libraria/page.tsx", ["const author = resolveStaffByline(b);"]],
 ];
 
 describe("F4 / PEN-NAMES-1: book bylines", () => {
@@ -45,6 +51,9 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 
   // P2 (design B): the ornate shelf (the old fourth site) is gone; the
   // feature strip, the grid and the free shelf remain.
+  // LR1: three sites now -- the banner slides (patch 3; the feature strip
+  // before), the "Çfarë po lexojmë" box (patch 4) and the one card every
+  // shelf and the results use.
   it("the bookstore resolves every book name through the byline (three sites), the bundle line through the bundle's pen name", () => {
     const source = readSrc("app/(public)/librari/page.tsx");
     expect(source.match(/resolveBookByline\(book\)/g)).toHaveLength(3);
@@ -57,9 +66,9 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
       "app/(public)/page.tsx",
       "app/api/books/[id]/sample/route.ts",
       "app/(public)/librari/page.tsx",
+      "lib/libraria-picks-read.ts",
       "app/(public)/library/page.tsx",
       "app/(public)/wishlist/page.tsx",
-      "lib/librum-choice.ts",
       "app/admin/(protected)/librum-choice/page.tsx",
     ]) {
       const source = readSrc(file);
@@ -131,7 +140,10 @@ describe("BD3 patch 4: the original author", () => {
   });
 
   it("featured book and library cards do not link an original author to the uploader's page", () => {
-    expect(readSrc("app/(public)/librari/page.tsx")).toContain("{authorName && book.pen && !resolveOriginalAuthor(book) && (");
+    // LR1 patch 3: the banner names the author as plain text, never a link.
+    const banner = readSrc("components/libraria-banner.tsx");
+    expect(banner).toContain("nga {slide.author}");
+    expect(banner).not.toContain("/autore/");
     expect(readSrc("components/book-card.tsx")).toContain("book.pen_name_id && !resolveOriginalAuthor(book)");
   });
 

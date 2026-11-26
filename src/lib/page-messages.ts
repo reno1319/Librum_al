@@ -8,6 +8,62 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 4 (2026-11-26): the admin Libraria page's reading picks.
+  // ("Choose a book." and "That book is not on Libraria now." are below.)
+  "That pick no longer exists.",
+  "Keep the badge on one line.",
+  "The badge can be at most 24 characters.",
+  "Write the note.",
+  "Keep the note as one paragraph.",
+  "The note can be at most 400 characters.",
+  "Write the quote.",
+  "Keep the quote as one paragraph.",
+  "The quote can be at most 240 characters.",
+  "Choose whether the quote is from the book or from the author.",
+  "Couldn’t save the pick. Please try again.",
+  "Couldn’t delete the pick. Please try again.",
+  // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
+  "That slide no longer exists.",
+  "Choose a book.",
+  "Write the one-line description.",
+  "Keep the description on one line.",
+  "The description can be at most 120 characters.",
+  "Keep the tag on one line.",
+  "The tag can be at most 24 characters.",
+  "Enter the days as dates.",
+  "The last day can’t be before the first day.",
+  "Choose a picture.",
+  "Each picture must be a JPG or PNG under 5 MB.",
+  "Couldn’t read that picture. Please choose another.",
+  "At most 6 slides can show on the same day. Change the days or delete a slide.",
+  "That book is not on Libraria now.",
+  "Couldn’t save the slide. Please try again.",
+  "Couldn’t delete the slide. Please try again.",
+  "Couldn’t move the slide. Please try again.",
+  // LR1 patch 2 (2026-11-25): the admin book page's Only on Librum box
+  // and the admin Libraria page.
+  "This book isn’t ticked “only on Librum” any more.",
+  "Couldn’t remove it from the shelf. Please try again.",
+  "Choose each category only once.",
+  "Couldn’t save the category buttons. Please try again.",
+  // CART (2026-11-25, item 32): the book page, after Shto në shportë / Dhuroje.
+  "Ky libër nuk mund të shtohet në shportë.",
+  "Nuk mund ta blini ose ta dhuroni librin tuaj.",
+  "Këtë libër e keni tashmë në Bibliotekë.",
+  "Shporta mban deri në 50 libra.",
+  "Nuk u shtua në shportë. Provoni përsëri.",
+  // CART: the gift form and the cart page.
+  "Shkruani një email të saktë për personin që e merr.",
+  "Shënimi mund të ketë deri në 300 shkronja.",
+  "Ky libër është tashmë në shportë si dhuratë për këtë email.",
+  "Dhurata nuk u ndryshua. Provoni përsëri.",
+  "Shporta nuk u hap. Provoni përsëri pas pak.",
+  // GIFTS (2026-11-25, item 32 batch 2): the Library's sent gifts and the gift link page.
+  "Kjo dhuratë është dërguar 3 herë. Mund ta ndryshoni emailin.",
+  "Mund ta dërgoni përsëri nesër.",
+  "Kjo dhuratë është marrë tashmë.",
+  "Dhurata nuk u dërgua. Provoni përsëri.",
+  "Këtë dhuratë e dërguat ju. Linku është për personin që e merr.",
   // BUILD 3 Payment & tax (2026-11-23).
   "Zgjidhni ku paguani tatimet mbi të ardhurat.",
   "Zgjidhni shtetin ku paguani tatimet.",
@@ -232,7 +288,6 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   "That article can't be published right now -- it may already be published.",
   "That article can't be unpublished right now -- it may already be a draft.",
   "That article could not be found.",
-  "That book can't be picked.",
   "That book can't go on the home page.",
   "That book is already in slot 1.",
   "That book is already in slot 2.",
@@ -391,6 +446,18 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 4 (2026-11-26): the admin Libraria page's reading picks.
+  "Pick published.",
+  "Pick saved.",
+  "Pick deleted.",
+  // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
+  "Slide saved.",
+  "Slide deleted.",
+  "Slide moved.",
+  // GIFTS (2026-11-25, item 32 batch 2).
+  "Dhurata u dërgua përsëri.",
+  "Dhurata u dërgua te emaili i ri.",
+  "Dhurata u shtua në Bibliotekën tuaj.",
   // BUILD 3 Payment & tax (2026-11-23).
   "Të dhënat tatimore u ruajtën.",
   // Blog categories, patch B (2026-11-19).
@@ -466,6 +533,10 @@ export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
   "Final file approved. The book stays a pre-order and comes out by itself on its day.",
   "Final file approved. Its day had passed, so the book is live now.",
   "Changes approved. Readers see the new version of the pre-order.",
+  // LR1 patch 2: the admin book page's Only on Librum box and the admin
+  // Libraria page.
+  "Removed from the “only on Librum” shelf.",
+  "Category buttons saved.",
   // K6 classic authors (admin).
   "Classic author link saved.",
   "Classic author saved.",

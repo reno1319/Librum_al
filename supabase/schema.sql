@@ -23305,3 +23305,1376 @@ as
   where public.book_is_publicly_listed(b)
      or b.author_id = auth.uid()
      or public.user_owns_book(b.id);
+
+
+-- ============================================================
+-- FV1 file versions (migration 20261125120000_book_file_versions.sql):
+-- book_file_versions, the books_track_file_versions trigger and the
+-- backfill of published books' current files. Same statements and
+-- reasoning as the migration.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The table.
+-- ------------------------------------------------------------
+create table public.book_file_versions (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references public.books(id) on delete cascade,
+  file_path text not null constraint book_file_versions_file_path_check check (file_path <> ''),
+  live_from timestamptz not null default now(),
+  replaced_at timestamptz,
+  constraint book_file_versions_book_file_key unique (book_id, file_path),
+  constraint book_file_versions_dates_check check (replaced_at is null or replaced_at >= live_from)
+);
+
+alter table public.book_file_versions enable row level security;
+
+-- Read with the service key only (the editor after its own ownership
+-- check, the staff page, the two download routes, retention and
+-- deletion). Written only by the trigger below.
+revoke all on public.book_file_versions from public, anon, authenticated, service_role;
+grant select on public.book_file_versions to service_role;
+
+comment on table public.book_file_versions is
+  'FV1: every file that was once a book''s live file, with when it went live and when it was replaced. Written only by books_track_file_versions().';
+
+-- ------------------------------------------------------------
+-- 2. The trigger.
+-- ------------------------------------------------------------
+create function public.books_track_file_versions()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and old.file_path is not null
+     and old.file_path is distinct from new.file_path then
+    update public.book_file_versions
+       set replaced_at = pg_catalog.now()
+     where book_id = new.id
+       and file_path = old.file_path
+       and replaced_at is null;
+  end if;
+  if new.status = 'published' and new.file_path is not null and new.file_path <> '' then
+    insert into public.book_file_versions (book_id, file_path)
+    values (new.id, new.file_path)
+    on conflict on constraint book_file_versions_book_file_key do nothing;
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function public.books_track_file_versions() from public, anon, authenticated, service_role;
+
+create trigger books_track_file_versions
+  after insert or update of status, file_path on public.books
+  for each row execute function public.books_track_file_versions();
+
+-- ------------------------------------------------------------
+-- 3. Backfill (audit r1 N1, r2 N1-r2).
+--    a. Every published book: its current file, still live.
+--    b. Every book once on sale and now taken off sale (draft with
+--       published_at): the file its buyers are served, which is its
+--       latest approved file (as the download route picks it: latest
+--       decision, then latest send). Closed now when the book's current
+--       file is another one -- taking a book off sale swaps in its
+--       waiting change (books_take_pending_changes_offline), and a draft
+--       may have changed its file since. A file never approved is never
+--       recorded.
+-- ------------------------------------------------------------
+insert into public.book_file_versions (book_id, file_path, live_from)
+select b.id, b.file_path, least(coalesce(b.published_at, pg_catalog.now()), pg_catalog.now())
+  from public.books b
+ where b.status = 'published'
+   and b.file_path is not null
+   and b.file_path <> ''
+on conflict on constraint book_file_versions_book_file_key do nothing;
+
+insert into public.book_file_versions (book_id, file_path, live_from, replaced_at)
+select b.id, a.file_path,
+       least(b.published_at, pg_catalog.now()),
+       case when a.file_path = b.file_path then null else pg_catalog.now() end
+  from public.books b
+  cross join lateral (select r.file_path
+                        from public.book_reviews r
+                       where r.book_id = b.id
+                         and r.status = 'approved'
+                         and r.file_path is not null
+                         and r.file_path <> ''
+                       order by r.decided_at desc nulls last, r.submitted_at desc, r.id desc
+                       limit 1) a
+ where b.status = 'draft'
+   and b.published_at is not null
+on conflict on constraint book_file_versions_book_file_key do nothing;
+
+-- CART (migration 20261125130000_cart_items.sql)
+create table public.cart_items (
+  id uuid primary key default gen_random_uuid(),
+  reader_id uuid not null references public.profiles(id) on delete cascade,
+  book_id uuid not null references public.books(id) on delete cascade,
+  gift_email text,
+  gift_note text,
+  created_at timestamptz not null default now(),
+  constraint cart_items_gift_email_check check (
+    gift_email is null
+    or (char_length(gift_email) between 3 and 254
+        and gift_email = lower(gift_email)
+        and gift_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')
+  ),
+  constraint cart_items_gift_note_check check (
+    gift_note is null or (gift_email is not null and char_length(gift_note) between 1 and 300)
+  )
+);
+
+create unique index cart_items_one_own_copy
+  on public.cart_items (reader_id, book_id) where gift_email is null;
+create unique index cart_items_one_gift_per_email
+  on public.cart_items (reader_id, book_id, gift_email) where gift_email is not null;
+
+comment on table public.cart_items is
+  'CART (item 32): a signed-in reader''s saved cart. gift_email set = a gift for that person. See migration 20261125120000_cart_items.sql.';
+
+create or replace function public.cart_book_allowed(target_book_id uuid, for_self boolean)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.books b
+    where b.id = target_book_id
+      and b.status = 'published'
+      and b.price_all is not null
+      and b.price_all > 0
+      and b.author_id is distinct from auth.uid()
+  )
+  and not (for_self and public.user_owns_book(target_book_id));
+$$;
+
+revoke all on function public.cart_book_allowed(uuid, boolean) from public, anon, authenticated, service_role;
+grant execute on function public.cart_book_allowed(uuid, boolean) to authenticated;
+
+create or replace function public.cart_items_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if (select count(*) from public.cart_items c where c.reader_id = new.reader_id) >= 50 then
+    raise exception 'cart_items: at most 50 books in a cart' using errcode = 'LB529';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.cart_items_limit() from public, anon, authenticated, service_role;
+
+create trigger cart_items_limit
+  before insert on public.cart_items
+  for each row
+  execute function public.cart_items_limit();
+
+alter table public.cart_items enable row level security;
+
+revoke all on table public.cart_items from public, anon, authenticated, service_role;
+grant select, delete on table public.cart_items to authenticated;
+grant insert (book_id, reader_id, gift_email, gift_note) on table public.cart_items to authenticated;
+grant update (gift_email, gift_note) on table public.cart_items to authenticated;
+
+create policy "Readers see their own cart"
+  on public.cart_items for select
+  to authenticated
+  using (auth.uid() = reader_id);
+
+create policy "Readers add to their own cart"
+  on public.cart_items for insert
+  to authenticated
+  with check (reader_id = auth.uid() and public.cart_book_allowed(book_id, gift_email is null));
+
+-- Only the gift fields can change (column grants above); a gift stays a
+-- gift (the email can be fixed, not removed).
+create policy "Readers edit their own gifts"
+  on public.cart_items for update
+  to authenticated
+  using (reader_id = auth.uid() and gift_email is not null)
+  with check (reader_id = auth.uid() and gift_email is not null);
+
+create policy "Readers remove from their own cart"
+  on public.cart_items for delete
+  to authenticated
+  using (reader_id = auth.uid());
+
+
+-- GIFTS (migration 20261125140000_cart_gifts.sql)
+-- GIFTS (Renato 2026-11-25, item 32 batch 2: g1 a, g2 a, g3 a, g4 a,
+-- b2q1 a, b2q2 a, b2q3 a, b2q4 a, b2q5 a; pictures b2 r1 ok): a gift a
+-- reader bought for someone else, and the secret link that gives it to
+-- them.
+--
+-- Card payment is not open yet (b2q5 a: "build it now, money part
+-- later"). NOTHING here creates a gift: the POK cart checkout will add
+-- the row once the order is paid (one row per gift line of the cart) and
+-- send the first email. Until then the table stays empty on every
+-- database.
+--
+-- WHAT CHANGES:
+--   1. public.gifts: the buyer, the book, the friend's email and note,
+--      the HASH of the secret link token (never the token), the state
+--      (waiting / claimed / recipient_owns), how many emails went out and
+--      when, and who claimed it. Row level security on. The buyer reads
+--      their own rows, and only the columns listed in the grant below
+--      (never the token hash or who claimed it). Nobody but the
+--      functions below writes.
+--   2. public.gift_preview(token): what the link page shows (book, the
+--      buyer's first name, the note, the state). Signed-out visitors may
+--      call it (g1 a: the friend may not have an account yet).
+--   3. public.claim_gift(token): the signed-in reader who opens the link
+--      first gets the book (b2q4 a). If they already own it, the gift is
+--      marked recipient_owns and stays open so the buyer can send it to
+--      someone else (g3 a). The buyer can't claim their own gift.
+--      Ownership is a purchases row for the friend, amount 0, session id
+--      'gift_<gift id>' (the money sits with the buyer's paid order).
+--   4. public.gift_resend(gift) and public.gift_change_email(gift, email):
+--      the buyer's two buttons in the Library (g2 a, b2q3 a). Each checks
+--      the rules and makes a NEW link, but only as PENDING: the live link,
+--      the address and the count do not change yet. The app sends the
+--      email with the pending link, then:
+--        - sent: public.gift_confirm_send(gift, token) makes the pending
+--          link the live one (the old one stops working) and counts the
+--          email;
+--        - not sent: public.gift_cancel_send(gift, token) drops the
+--          pending link. Nothing was used up and the old link still works
+--          (audit S1).
+--      At most 3 emails per address, at most one a day. A DIFFERENT
+--      address starts a new count (b2q3 a); the same address again keeps
+--      counting (audit F2). Only one send can be pending at a time (a
+--      minute), so parallel clicks can't send many emails.
+--
+-- Errors: LB530 the gift is not this reader's or does not exist, LB531
+-- three emails already sent to this address, LB532 an email already went
+-- out today, LB533 the gift was already claimed, LB534 the email is not
+-- valid, LB535 another send is still pending, LB536 the pending link is
+-- not this one (it was replaced or cancelled).
+--
+-- ROLLBACK: drop the ten functions (gift_token_hash, gift_new_token,
+-- gift_buyer_first_name, gift_preview, claim_gift, gift_for_send,
+-- gift_resend, gift_change_email, gift_confirm_send, gift_cancel_send),
+-- then drop table public.gifts. The purchases rows of claimed gifts STAY
+-- (they are the friends' books).
+
+create table public.gifts (
+  id uuid primary key default gen_random_uuid(),
+  buyer_id uuid references public.profiles(id) on delete set null,
+  book_id uuid not null references public.books(id) on delete restrict,
+  recipient_email text not null,
+  note text,
+  token_hash text not null,
+  status text not null default 'waiting',
+  send_count integer not null default 0,
+  last_sent_at timestamptz,
+  claimed_by uuid references public.profiles(id) on delete set null,
+  claimed_at timestamptz,
+  purchase_id uuid references public.purchases(id) on delete set null,
+  pending_token_hash text,
+  pending_email text,
+  pending_at timestamptz,
+  created_at timestamptz not null default now(),
+  constraint gifts_recipient_email_check check (
+    char_length(recipient_email) between 3 and 254
+    and recipient_email = lower(recipient_email)
+    and recipient_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+  ),
+  constraint gifts_note_check check (note is null or char_length(note) between 1 and 300),
+  constraint gifts_token_hash_check check (token_hash ~ '^[0-9a-f]{64}$'),
+  constraint gifts_token_hash_key unique (token_hash),
+  constraint gifts_status_check check (status in ('waiting', 'claimed', 'recipient_owns')),
+  constraint gifts_send_count_check check (send_count between 0 and 3),
+  constraint gifts_claimed_check check (
+    (status = 'claimed') = (claimed_at is not null)
+  ),
+  constraint gifts_pending_check check (
+    (pending_token_hash is null and pending_email is null and pending_at is null)
+    or (pending_token_hash ~ '^[0-9a-f]{64}$' and pending_email is not null and pending_at is not null)
+  )
+);
+
+create index gifts_buyer_id_idx on public.gifts (buyer_id);
+
+comment on table public.gifts is
+  'GIFTS (item 32 batch 2): a bought gift and its secret link (only the sha256 of the token is stored). Rows come from the POK cart checkout. See migration 20261125140000_cart_gifts.sql.';
+
+alter table public.gifts enable row level security;
+
+revoke all on table public.gifts from public, anon, authenticated, service_role;
+grant select (id, buyer_id, book_id, recipient_email, note, status, send_count, last_sent_at, claimed_at, created_at)
+  on table public.gifts to authenticated;
+
+create policy "Buyers see their own gifts"
+  on public.gifts for select
+  to authenticated
+  using (auth.uid() = buyer_id);
+
+-- A token from a link, as stored: sha256 hex.
+create or replace function public.gift_token_hash(p_token text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select encode(sha256(convert_to(coalesce(p_token, ''), 'UTF8')), 'hex');
+$$;
+
+revoke all on function public.gift_token_hash(text) from public, anon, authenticated, service_role;
+
+-- A fresh link token: two random UUIDs without dashes, 64 hex characters.
+create or replace function public.gift_new_token()
+returns text
+language sql
+volatile
+set search_path = ''
+as $$
+  select replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+$$;
+
+revoke all on function public.gift_new_token() from public, anon, authenticated, service_role;
+
+-- The buyer's first name as the friend sees it (b2q1 a).
+create or replace function public.gift_buyer_first_name(p_buyer_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    (select nullif(split_part(btrim(p.display_name), ' ', 1), '') from public.profiles p where p.id = p_buyer_id),
+    'Një lexues'
+  );
+$$;
+
+revoke all on function public.gift_buyer_first_name(uuid) from public, anon, authenticated, service_role;
+
+create or replace function public.gift_preview(p_token text)
+returns table (book_id uuid, buyer_name text, note text, status text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select g.book_id, public.gift_buyer_first_name(g.buyer_id), g.note, g.status
+    from public.gifts g
+   where p_token is not null
+     and char_length(p_token) = 64
+     and g.token_hash = public.gift_token_hash(p_token);
+$$;
+
+revoke all on function public.gift_preview(text) from public, anon, authenticated, service_role;
+grant execute on function public.gift_preview(text) to anon, authenticated;
+
+create or replace function public.claim_gift(p_token text)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_gift public.gifts%rowtype;
+  v_pid uuid;
+begin
+  if v_uid is null then
+    return 'signed_out';
+  end if;
+  if p_token is null or char_length(p_token) <> 64 then
+    return 'invalid';
+  end if;
+
+  select * into v_gift
+    from public.gifts g
+   where g.token_hash = public.gift_token_hash(p_token)
+   for update;
+
+  if not found then
+    return 'invalid';
+  end if;
+  if v_gift.status = 'claimed' then
+    return 'used';
+  end if;
+  if v_gift.buyer_id = v_uid then
+    return 'own_gift';
+  end if;
+  if public.user_owns_book(v_gift.book_id) then
+    update public.gifts set status = 'recipient_owns' where id = v_gift.id;
+    return 'owned';
+  end if;
+
+  insert into public.purchases (book_id, reader_id, amount_cents, stripe_checkout_session_id, stripe_payment_intent_id, refunded_at)
+  values (v_gift.book_id, v_uid, 0, 'gift_' || v_gift.id::text, null, null)
+  on conflict (book_id, reader_id) do update set
+    amount_cents = excluded.amount_cents,
+    stripe_checkout_session_id = excluded.stripe_checkout_session_id,
+    stripe_payment_intent_id = null,
+    refunded_at = null
+  returning id into v_pid;
+
+  update public.gifts
+     set status = 'claimed', claimed_by = v_uid, claimed_at = now(), purchase_id = v_pid
+   where id = v_gift.id;
+
+  return 'claimed';
+end;
+$$;
+
+revoke all on function public.claim_gift(text) from public, anon, authenticated, service_role;
+grant execute on function public.claim_gift(text) to authenticated;
+
+-- The buyer's own gift, locked, with the once-a-day rule checked and no
+-- other send pending (a pending send older than a minute is abandoned).
+create or replace function public.gift_for_send(p_gift_id uuid)
+returns public.gifts
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_gift public.gifts%rowtype;
+begin
+  select * into v_gift from public.gifts g where g.id = p_gift_id for update;
+  if not found or v_gift.buyer_id is distinct from auth.uid() or auth.uid() is null then
+    raise exception 'gifts: not your gift' using errcode = 'LB530';
+  end if;
+  if v_gift.status = 'claimed' then
+    raise exception 'gifts: already claimed' using errcode = 'LB533';
+  end if;
+  if v_gift.last_sent_at is not null and v_gift.last_sent_at > now() - interval '1 day' then
+    raise exception 'gifts: one email a day' using errcode = 'LB532';
+  end if;
+  if v_gift.pending_at is not null and v_gift.pending_at > now() - interval '1 minute' then
+    raise exception 'gifts: a send is pending' using errcode = 'LB535';
+  end if;
+  return v_gift;
+end;
+$$;
+
+revoke all on function public.gift_for_send(uuid) from public, anon, authenticated, service_role;
+
+create or replace function public.gift_resend(p_gift_id uuid)
+returns table (recipient_email text, token text, book_id uuid, buyer_name text, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_gift public.gifts%rowtype := public.gift_for_send(p_gift_id);
+  v_token text := public.gift_new_token();
+begin
+  if v_gift.status <> 'waiting' then
+    raise exception 'gifts: already claimed' using errcode = 'LB533';
+  end if;
+  if v_gift.send_count >= 3 then
+    raise exception 'gifts: three emails already sent' using errcode = 'LB531';
+  end if;
+  update public.gifts g
+     set pending_token_hash = public.gift_token_hash(v_token), pending_email = g.recipient_email, pending_at = now()
+   where g.id = v_gift.id;
+  return query select v_gift.recipient_email, v_token, v_gift.book_id, public.gift_buyer_first_name(v_gift.buyer_id), v_gift.note;
+end;
+$$;
+
+revoke all on function public.gift_resend(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.gift_resend(uuid) to authenticated;
+
+create or replace function public.gift_change_email(p_gift_id uuid, p_email text)
+returns table (recipient_email text, token text, book_id uuid, buyer_name text, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_email text := lower(btrim(coalesce(p_email, '')));
+  v_gift public.gifts%rowtype;
+  v_token text;
+begin
+  if not (char_length(v_email) between 3 and 254 and v_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$') then
+    raise exception 'gifts: email not valid' using errcode = 'LB534';
+  end if;
+  v_gift := public.gift_for_send(p_gift_id);
+  -- The same address again is not a new count (audit F2).
+  if v_email = v_gift.recipient_email and v_gift.send_count >= 3 then
+    raise exception 'gifts: three emails already sent' using errcode = 'LB531';
+  end if;
+  v_token := public.gift_new_token();
+  update public.gifts g
+     set pending_token_hash = public.gift_token_hash(v_token), pending_email = v_email, pending_at = now()
+   where g.id = v_gift.id;
+  return query select v_email, v_token, v_gift.book_id, public.gift_buyer_first_name(v_gift.buyer_id), v_gift.note;
+end;
+$$;
+
+revoke all on function public.gift_change_email(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.gift_change_email(uuid, text) to authenticated;
+
+-- The email with the pending link went out: it becomes the live link,
+-- the old one stops working, and the email counts. A different address
+-- starts a new count of 1; the same address counts on (audit F2).
+create or replace function public.gift_confirm_send(p_gift_id uuid, p_token text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_gift public.gifts%rowtype;
+begin
+  select * into v_gift from public.gifts g where g.id = p_gift_id for update;
+  if not found or v_gift.buyer_id is distinct from auth.uid() or auth.uid() is null then
+    raise exception 'gifts: not your gift' using errcode = 'LB530';
+  end if;
+  if v_gift.status = 'claimed' then
+    raise exception 'gifts: already claimed' using errcode = 'LB533';
+  end if;
+  if v_gift.pending_token_hash is null or v_gift.pending_token_hash <> public.gift_token_hash(p_token) then
+    raise exception 'gifts: not the pending link' using errcode = 'LB536';
+  end if;
+  update public.gifts g
+     set token_hash = g.pending_token_hash,
+         recipient_email = g.pending_email,
+         status = 'waiting',
+         send_count = case when g.pending_email = g.recipient_email then least(g.send_count + 1, 3) else 1 end,
+         last_sent_at = now(),
+         pending_token_hash = null, pending_email = null, pending_at = null
+   where g.id = v_gift.id;
+end;
+$$;
+
+revoke all on function public.gift_confirm_send(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.gift_confirm_send(uuid, text) to authenticated;
+
+-- The email did not go out: drop the pending link. Nothing is used up
+-- and the live link keeps working (audit S1).
+create or replace function public.gift_cancel_send(p_gift_id uuid, p_token text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.gifts g
+     set pending_token_hash = null, pending_email = null, pending_at = null
+   where g.id = p_gift_id
+     and g.buyer_id = auth.uid()
+     and g.pending_token_hash = public.gift_token_hash(p_token);
+end;
+$$;
+
+revoke all on function public.gift_cancel_send(uuid, text) from public, anon, authenticated, service_role;
+grant execute on function public.gift_cancel_send(uuid, text) to authenticated;
+
+
+-- ============================================================
+-- LR1 patch 2 (migration 20261125150000_libraria_only_on_librum.sql):
+-- the only-on-Librum tick, public_books.only_on_librum, the Libraria
+-- category buttons and their two staff functions. Same statements and
+-- reasoning as the migration.
+-- ============================================================
+-- ------------------------------------------------------------
+-- 1. The tick.
+-- ------------------------------------------------------------
+alter table public.books
+  add column only_on_librum boolean not null default false,
+  add column only_on_librum_removed_at timestamptz,
+  add constraint books_only_on_librum_removed_check
+    check (not (only_on_librum and only_on_librum_removed_at is not null));
+
+-- ------------------------------------------------------------
+-- 2. public_books: same columns, one appended.
+-- ------------------------------------------------------------
+create or replace view public.public_books
+  with (security_barrier)
+as
+  select b.id, b.title, b.subtitle, b.description, b.preview_text, b.keywords,
+         b.isbn, b.language, b.publisher, b.edition, b.original_publication_date,
+         b.genre, b.series_id, b.series_position, b.price_cents, b.cover_path,
+         b.status, b.published_at, b.created_at, b.updated_at, b.price_all,
+         b.librum_choice_at,
+         -- BD15 P7: null on a public-domain edition without an editor
+         -- mention, for every reader (its author too).
+         b.public_pen_name_id as pen_name_id,
+         b.original_author,
+         b.categories, b.is_adult, b.reading_age_min, b.edition_number,
+         b.pd_work_id, b.pd_editor_credit,
+         -- BD16 P1 (migration 20261106120000): appended last.
+         b.release_date,
+         -- Upload notes C (migration 20261107120000): appended last.
+         b.book_type,
+         -- Upload notes D (migration 20261107140000): appended last.
+         (select w.word_count
+            from public.book_file_words w
+           where w.book_id = b.id and w.file_path = b.file_path) as word_count,
+         -- X19 (migration 20261121180000): appended last.
+         b.original_title,
+         -- LBN (migration 20261124190000): appended last.
+         b.lbn,
+         -- LR1 patch 2 (migration 20261125150000): appended last. A free
+         -- classic (a public-domain edition) never qualifies.
+         (b.only_on_librum and b.pd_work_id is null) as only_on_librum
+  from public.books b
+  where public.book_is_publicly_listed(b)
+     or b.author_id = auth.uid()
+     or public.user_owns_book(b.id);
+
+-- ------------------------------------------------------------
+-- 3. The category buttons.
+-- ------------------------------------------------------------
+create table public.libraria_category_buttons (
+  position smallint primary key
+    constraint libraria_category_buttons_position_check check (position between 1 and 6),
+  category text not null
+    constraint libraria_category_buttons_category_key unique
+    constraint libraria_category_buttons_category_check
+    check (category = any (array[
+      'Biografi & kujtime', 'Biznes & ekonomi', 'Drama & teatër',
+      'Fantashkencë', 'Fantazi', 'Filozofi', 'Histori', 'Horror',
+      'Letërsi artistike', 'Për fëmijë', 'Për të rinj', 'Poezi',
+      'Policor & triler', 'Psikologji', 'Publicistikë & ese', 'Romancë',
+      'Shkencë', 'Zhvillim personal'
+    ]::text[]))
+);
+
+alter table public.libraria_category_buttons enable row level security;
+
+revoke all on public.libraria_category_buttons from public, anon, authenticated, service_role;
+grant select on public.libraria_category_buttons to anon, authenticated, service_role;
+
+create policy libraria_category_buttons_read
+  on public.libraria_category_buttons
+  for select
+  to anon, authenticated, service_role
+  using (true);
+
+comment on table public.libraria_category_buttons is
+  'LR1 patch 2: the category buttons under "Më të rinjtë në Librum", in order. Written only by staff_set_libraria_category_buttons().';
+
+-- ------------------------------------------------------------
+-- 4. The two staff functions.
+-- ------------------------------------------------------------
+-- Staff take a book's tick off (lr2-1 a). Returns false, changing
+-- nothing, when there is no such book or it is not ticked.
+create function public.staff_remove_only_on_librum(p_book_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  update public.books
+     set only_on_librum = false,
+         only_on_librum_removed_at = pg_catalog.now()
+   where id = p_book_id
+     and only_on_librum;
+
+  if not found then
+    return false;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'book.only_on_librum_removed', 'books', p_book_id, '{}'::jsonb);
+  return true;
+end;
+$$;
+
+revoke all on function public.staff_remove_only_on_librum(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.staff_remove_only_on_librum(uuid) to authenticated;
+
+-- Staff save the whole row of buttons at once, in order (lb5 a). An
+-- empty list removes them all (the page then shows the A–Zh fallback,
+-- lr2-5 b). More than 6, a repeat or an unknown category is refused
+-- with nothing changed.
+create function public.staff_set_libraria_category_buttons(p_categories text[])
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_before text[];
+  v_list text[] := coalesce(p_categories, array[]::text[]);
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  if pg_catalog.cardinality(v_list) > 6 then
+    raise exception 'At most 6 category buttons.'
+      using errcode = 'LB537';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_category_buttons'));
+
+  select coalesce(pg_catalog.array_agg(c.category order by c.position), array[]::text[])
+    into v_before
+    from public.libraria_category_buttons c;
+
+  delete from public.libraria_category_buttons where true;
+
+  -- The table's own checks refuse a repeat or an unknown category, and
+  -- the whole call rolls back.
+  insert into public.libraria_category_buttons (position, category)
+  select t.ord::smallint, t.category
+    from pg_catalog.unnest(v_list) with ordinality as t(category, ord);
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.category_buttons_set', 'libraria_category_buttons', null,
+          pg_catalog.jsonb_build_object('before', pg_catalog.to_jsonb(v_before),
+                                        'after', pg_catalog.to_jsonb(v_list)));
+end;
+$$;
+
+revoke all on function public.staff_set_libraria_category_buttons(text[]) from public, anon, authenticated, service_role;
+grant execute on function public.staff_set_libraria_category_buttons(text[]) to authenticated;
+
+-- LR1 PATCH 3 (Renato 2026-11-25: lr1-2, lr1-2c a, lr3-1 a, lr3-2 b,
+-- lr3-2b a, lr3-3 a, lr3-4 b, lr3-5 a, lr3-7 a, lr3-8 a, lr3-9 b): the
+-- banner slides at the top of Libraria.
+--
+-- WHAT CHANGES:
+--   1. public.libraria_banner_slides: one row per slide, in the order
+--      staff gave them. A slide is a picture staff upload (image_path,
+--      plus an optional taller phone picture, lr3-9 b), a book staff
+--      pick (its title, cover and link come from the book, lr3-1 a,
+--      lr1-2c a), a one-line description (at most 120 characters), an
+--      optional tag staff type (at most 24 characters, lr3-2 b, lr3-2b
+--      a) and an optional first and last day, Tirana time (lr3-4 b).
+--      Staff with catalog.feature read every row; nobody writes it
+--      directly.
+--   2. public.public_libraria_banner_slides: what Libraria shows. Only
+--      slides whose book Libraria lists now (published or pre-order,
+--      priced, lr3-8 a; a book that stops being listed hides its slide,
+--      which comes back with the book, lr3-5 a) and whose days include
+--      today in Tirana, in order. Everyone may read it.
+--   3. staff_save_libraria_banner_slide(), staff_delete_libraria_banner_slide()
+--      and staff_move_libraria_banner_slide(): catalog.feature (owner
+--      and admin), checked inside, each audited. Saving refuses a book
+--      Libraria does not list (LB539) and any day on which more than 6
+--      slides would show (LB538, lr3-7 a). Deleting closes up the order.
+--   4. Storage bucket "libraria": public pictures, written only by the
+--      app's service role after the staff check (no storage policies).
+--
+-- No existing row changes.
+
+-- ------------------------------------------------------------
+-- 1. The slides.
+-- ------------------------------------------------------------
+create table public.libraria_banner_slides (
+  id uuid primary key default gen_random_uuid(),
+  position smallint not null
+    constraint libraria_banner_slides_position_check check (position >= 1),
+  book_id uuid not null references public.books (id) on delete cascade,
+  description text not null
+    constraint libraria_banner_slides_description_check
+    check (description = pg_catalog.btrim(description)
+           and pg_catalog.char_length(description) between 1 and 120
+           and description !~ '[\r\n]'),
+  tag text
+    constraint libraria_banner_slides_tag_check
+    check (tag is null
+           or (tag = pg_catalog.btrim(tag)
+               and pg_catalog.char_length(tag) between 1 and 24
+               and tag !~ '[\r\n]')),
+  image_path text not null
+    constraint libraria_banner_slides_image_path_check
+    check (image_path ~ '^slides/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'),
+  phone_image_path text
+    constraint libraria_banner_slides_phone_image_path_check
+    check (phone_image_path is null
+           or phone_image_path ~ '^slides/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'),
+  starts_on date,
+  ends_on date,
+  created_at timestamptz not null default pg_catalog.now(),
+  updated_at timestamptz not null default pg_catalog.now(),
+  constraint libraria_banner_slides_days_check
+    check (starts_on is null or ends_on is null or ends_on >= starts_on),
+  constraint libraria_banner_slides_position_key unique (position)
+    deferrable initially immediate
+);
+
+create index libraria_banner_slides_book_id_idx on public.libraria_banner_slides (book_id);
+
+alter table public.libraria_banner_slides enable row level security;
+
+revoke all on public.libraria_banner_slides from public, anon, authenticated, service_role;
+grant select on public.libraria_banner_slides to authenticated, service_role;
+
+create policy libraria_banner_slides_staff_read
+  on public.libraria_banner_slides
+  for select
+  to authenticated
+  using (public.staff_has_permission('catalog.feature'));
+
+create policy libraria_banner_slides_service_read
+  on public.libraria_banner_slides
+  for select
+  to service_role
+  using (true);
+
+comment on table public.libraria_banner_slides is
+  'LR1 patch 3: the Libraria banner slides, in order. Written only by the staff_*_libraria_banner_slide() functions.';
+
+-- ------------------------------------------------------------
+-- 2. What Libraria shows: listed book, today (Tirana) inside the days.
+-- ------------------------------------------------------------
+create view public.public_libraria_banner_slides
+  with (security_barrier)
+as
+  select s.id, s.position, s.book_id, s.description, s.tag,
+         s.image_path, s.phone_image_path
+  from public.libraria_banner_slides s
+  join public.books b on b.id = s.book_id
+  where public.book_is_publicly_listed(b)
+    and b.price_all is not null
+    and (s.starts_on is null
+         or s.starts_on <= (pg_catalog.now() at time zone 'Europe/Tirane')::date)
+    and (s.ends_on is null
+         or s.ends_on >= (pg_catalog.now() at time zone 'Europe/Tirane')::date);
+
+revoke all on public.public_libraria_banner_slides from public, anon, authenticated, service_role;
+grant select on public.public_libraria_banner_slides to anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. Staff functions.
+-- ------------------------------------------------------------
+
+-- The most slides that would show on any one day from today on, with
+-- the given row's days in place of its stored ones (p_id null = a new
+-- slide). Slides that already ended don't count. The busiest day is
+-- always today or some slide's first day, so only those are checked.
+create function public.libraria_banner_busiest_day_count(
+  p_id uuid,
+  p_starts_on date,
+  p_ends_on date
+)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with today as (
+    select (pg_catalog.now() at time zone 'Europe/Tirane')::date as d
+  ),
+  w as (
+    select coalesce(s.starts_on, '-infinity'::date) as s,
+           coalesce(s.ends_on, 'infinity'::date) as e
+      from public.libraria_banner_slides s
+     where p_id is null or s.id <> p_id
+    union all
+    select coalesce(p_starts_on, '-infinity'::date),
+           coalesce(p_ends_on, 'infinity'::date)
+  ),
+  live as (
+    select w.s, w.e from w, today where w.e >= today.d
+  ),
+  points as (
+    select greatest(live.s, today.d) as p from live, today
+  )
+  select coalesce(max((select count(*) from live where live.s <= points.p and live.e >= points.p)), 0)::integer
+    from points
+$$;
+
+revoke all on function public.libraria_banner_busiest_day_count(uuid, date, date) from public, anon, authenticated, service_role;
+
+create function public.staff_save_libraria_banner_slide(
+  p_id uuid,
+  p_book_id uuid,
+  p_description text,
+  p_tag text,
+  p_image_path text,
+  p_phone_image_path text,
+  p_starts_on date,
+  p_ends_on date
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_id uuid;
+  v_tag text := nullif(pg_catalog.btrim(coalesce(p_tag, '')), '');
+  v_description text := pg_catalog.btrim(coalesce(p_description, ''));
+  v_before jsonb;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_banner_slides'));
+
+  if not exists (
+    select 1 from public.books b
+     where b.id = p_book_id
+       and public.book_is_publicly_listed(b)
+       and b.price_all is not null
+  ) then
+    raise exception 'That book is not on Libraria now.'
+      using errcode = 'LB539';
+  end if;
+
+  if p_id is not null then
+    select pg_catalog.to_jsonb(s.*) into v_before
+      from public.libraria_banner_slides s
+     where s.id = p_id
+       for update;
+    if v_before is null then
+      return null;
+    end if;
+  end if;
+
+  if public.libraria_banner_busiest_day_count(p_id, p_starts_on, p_ends_on) > 6 then
+    raise exception 'At most 6 slides can show on the same day.'
+      using errcode = 'LB538';
+  end if;
+
+  if p_id is null then
+    insert into public.libraria_banner_slides
+      (position, book_id, description, tag, image_path, phone_image_path, starts_on, ends_on)
+    values (
+      (select coalesce(max(s.position), 0) + 1 from public.libraria_banner_slides s),
+      p_book_id, v_description, v_tag, p_image_path, p_phone_image_path, p_starts_on, p_ends_on
+    )
+    returning id into v_id;
+  else
+    update public.libraria_banner_slides
+       set book_id = p_book_id,
+           description = v_description,
+           tag = v_tag,
+           image_path = p_image_path,
+           phone_image_path = p_phone_image_path,
+           starts_on = p_starts_on,
+           ends_on = p_ends_on,
+           updated_at = pg_catalog.now()
+     where id = p_id
+    returning id into v_id;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.banner_slide_saved', 'libraria_banner_slides', v_id,
+          pg_catalog.jsonb_build_object(
+            'before', v_before,
+            'after', (select pg_catalog.to_jsonb(s.*) from public.libraria_banner_slides s where s.id = v_id)));
+  return v_id;
+end;
+$$;
+
+revoke all on function public.staff_save_libraria_banner_slide(uuid, uuid, text, text, text, text, date, date) from public, anon, authenticated, service_role;
+grant execute on function public.staff_save_libraria_banner_slide(uuid, uuid, text, text, text, text, date, date) to authenticated;
+
+create function public.staff_delete_libraria_banner_slide(p_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_before jsonb;
+  v_position smallint;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_banner_slides'));
+
+  delete from public.libraria_banner_slides s
+   where s.id = p_id
+  returning pg_catalog.to_jsonb(s.*), s.position into v_before, v_position;
+
+  if v_before is null then
+    return false;
+  end if;
+
+  -- Close up the order (one row at a time, lowest first, so the unique
+  -- position never clashes).
+  update public.libraria_banner_slides s
+     set position = s.position - 1
+   where s.position > v_position;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.banner_slide_deleted', 'libraria_banner_slides', p_id,
+          pg_catalog.jsonb_build_object('before', v_before));
+  return true;
+end;
+$$;
+
+revoke all on function public.staff_delete_libraria_banner_slide(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.staff_delete_libraria_banner_slide(uuid) to authenticated;
+
+create function public.staff_move_libraria_banner_slide(p_id uuid, p_up boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_position smallint;
+  v_other_id uuid;
+  v_other_position smallint;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_banner_slides'));
+
+  select s.position into v_position from public.libraria_banner_slides s where s.id = p_id;
+  if v_position is null then
+    return false;
+  end if;
+
+  if coalesce(p_up, true) then
+    select s.id, s.position into v_other_id, v_other_position
+      from public.libraria_banner_slides s
+     where s.position < v_position
+     order by s.position desc
+     limit 1;
+  else
+    select s.id, s.position into v_other_id, v_other_position
+      from public.libraria_banner_slides s
+     where s.position > v_position
+     order by s.position asc
+     limit 1;
+  end if;
+
+  if v_other_id is null then
+    return false;
+  end if;
+
+  set constraints public.libraria_banner_slides_position_key deferred;
+  update public.libraria_banner_slides set position = v_other_position where id = p_id;
+  update public.libraria_banner_slides set position = v_position where id = v_other_id;
+  set constraints public.libraria_banner_slides_position_key immediate;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.banner_slide_moved', 'libraria_banner_slides', p_id,
+          pg_catalog.jsonb_build_object('from', v_position, 'to', v_other_position));
+  return true;
+end;
+$$;
+
+revoke all on function public.staff_move_libraria_banner_slide(uuid, boolean) from public, anon, authenticated, service_role;
+grant execute on function public.staff_move_libraria_banner_slide(uuid, boolean) to authenticated;
+
+-- ------------------------------------------------------------
+-- 4. The pictures: a public bucket, written only by the service role.
+-- ------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('libraria', 'libraria', true, 5242880, array['image/jpeg'])
+on conflict (id) do nothing;
+
+-- LR1 PATCH 4 (Renato 2026-11-25/26: lb2 a, lb3 a, lb6 a, lb8 a, lr4-1 a,
+-- lr4-2 a, lr4-3 a, lr4-4 a, lr4-5): "Çfarë po lexojmë" on Libraria.
+--
+-- WHAT CHANGES:
+--   1. public.libraria_reading_picks: one row per pick. A pick is a book
+--      staff choose, an optional badge (at most 24 characters; the admin
+--      form starts it as "Zgjedhja e Librum", lr4-4 a), the note staff
+--      write (why we read it, at most 400 characters, lb2 a), a quote
+--      (at most 240 characters) and whether the quote is from the book or
+--      from the author (lb8 a), and when it was published. Publishing
+--      happens when staff save a new pick (lr4-1 a); editing keeps the
+--      date. Staff with catalog.feature read every row; nobody writes it
+--      directly.
+--   2. public.public_libraria_reading_picks: what readers see. Only picks
+--      whose book Libraria lists now (published or pre-order, priced).
+--      The newest is the one on Libraria; all of them, newest first, are
+--      on the "Më shumë" page (lr4-2 a). A pick whose book stops being
+--      listed hides everywhere and comes back with the book, so Libraria
+--      shows the newest pick that is still on sale (lr4-3 a). Everyone
+--      may read it.
+--   3. staff_save_libraria_reading_pick() and
+--      staff_delete_libraria_reading_pick(): catalog.feature (owner and
+--      admin), checked inside, each audited. Saving refuses a book
+--      Libraria does not list (LB540).
+--
+--   4. public.staff_has_permission(): an admin now has catalog.feature
+--      in the database too (lr4-6 a). The website already gives it to
+--      owner and admin (src/lib/staff-permissions.ts), but until now the
+--      database knew it only for the owner, so an admin's saves on Admin
+--      › Libraria (category buttons, banner slides, picks) were refused.
+--      The function is otherwise unchanged (same body as migration
+--      20261119180000_blog_categories_manage, plus 'catalog.feature' in
+--      the admin list); create or replace keeps its grants.
+--
+-- No existing row changes. No storage change.
+
+-- ------------------------------------------------------------
+-- 1. The picks.
+-- ------------------------------------------------------------
+create table public.libraria_reading_picks (
+  id uuid primary key default gen_random_uuid(),
+  book_id uuid not null references public.books (id) on delete cascade,
+  badge text
+    constraint libraria_reading_picks_badge_check
+    check (badge is null
+           or (badge = pg_catalog.btrim(badge)
+               and pg_catalog.char_length(badge) between 1 and 24
+               and badge !~ '[\r\n]')),
+  note text not null
+    constraint libraria_reading_picks_note_check
+    check (note = pg_catalog.btrim(note)
+           and pg_catalog.char_length(note) between 1 and 400
+           and note !~ '[\r\n]'),
+  quote text not null
+    constraint libraria_reading_picks_quote_check
+    check (quote = pg_catalog.btrim(quote)
+           and pg_catalog.char_length(quote) between 1 and 240
+           and quote !~ '[\r\n]'),
+  quote_from text not null
+    constraint libraria_reading_picks_quote_from_check
+    check (quote_from in ('book', 'author')),
+  published_at timestamptz not null default pg_catalog.now(),
+  created_at timestamptz not null default pg_catalog.now(),
+  updated_at timestamptz not null default pg_catalog.now()
+);
+
+create index libraria_reading_picks_book_id_idx on public.libraria_reading_picks (book_id);
+create index libraria_reading_picks_published_at_idx on public.libraria_reading_picks (published_at desc);
+
+alter table public.libraria_reading_picks enable row level security;
+
+revoke all on public.libraria_reading_picks from public, anon, authenticated, service_role;
+grant select on public.libraria_reading_picks to authenticated, service_role;
+
+create policy libraria_reading_picks_staff_read
+  on public.libraria_reading_picks
+  for select
+  to authenticated
+  using (public.staff_has_permission('catalog.feature'));
+
+create policy libraria_reading_picks_service_read
+  on public.libraria_reading_picks
+  for select
+  to service_role
+  using (true);
+
+comment on table public.libraria_reading_picks is
+  'LR1 patch 4: the Libraria "Çfarë po lexojmë" picks. Written only by the staff_*_libraria_reading_pick() functions.';
+
+-- ------------------------------------------------------------
+-- 2. What readers see: picks whose book Libraria lists now.
+-- ------------------------------------------------------------
+create view public.public_libraria_reading_picks
+  with (security_barrier)
+as
+  select p.id, p.book_id, p.badge, p.note, p.quote, p.quote_from, p.published_at
+  from public.libraria_reading_picks p
+  join public.books b on b.id = p.book_id
+  where public.book_is_publicly_listed(b)
+    and b.price_all is not null;
+
+revoke all on public.public_libraria_reading_picks from public, anon, authenticated, service_role;
+grant select on public.public_libraria_reading_picks to anon, authenticated, service_role;
+
+-- ------------------------------------------------------------
+-- 3. Staff functions.
+-- ------------------------------------------------------------
+create function public.staff_save_libraria_reading_pick(
+  p_id uuid,
+  p_book_id uuid,
+  p_badge text,
+  p_note text,
+  p_quote text,
+  p_quote_from text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_id uuid;
+  v_badge text := nullif(pg_catalog.btrim(coalesce(p_badge, '')), '');
+  v_note text := pg_catalog.btrim(coalesce(p_note, ''));
+  v_quote text := pg_catalog.btrim(coalesce(p_quote, ''));
+  v_before jsonb;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_reading_picks'));
+
+  if not exists (
+    select 1 from public.books b
+     where b.id = p_book_id
+       and public.book_is_publicly_listed(b)
+       and b.price_all is not null
+  ) then
+    raise exception 'That book is not on Libraria now.'
+      using errcode = 'LB540';
+  end if;
+
+  if p_id is null then
+    -- A new pick is published now and becomes the one on Libraria
+    -- (lr4-1 a).
+    insert into public.libraria_reading_picks (book_id, badge, note, quote, quote_from)
+    values (p_book_id, v_badge, v_note, v_quote, p_quote_from)
+    returning id into v_id;
+  else
+    select pg_catalog.to_jsonb(p.*) into v_before
+      from public.libraria_reading_picks p
+     where p.id = p_id
+       for update;
+    if v_before is null then
+      return null;
+    end if;
+    -- Editing keeps the published date, so it does not change which
+    -- pick is the newest.
+    update public.libraria_reading_picks
+       set book_id = p_book_id,
+           badge = v_badge,
+           note = v_note,
+           quote = v_quote,
+           quote_from = p_quote_from,
+           updated_at = pg_catalog.now()
+     where id = p_id
+    returning id into v_id;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.reading_pick_saved', 'libraria_reading_picks', v_id,
+          pg_catalog.jsonb_build_object(
+            'before', v_before,
+            'after', (select pg_catalog.to_jsonb(p.*) from public.libraria_reading_picks p where p.id = v_id)));
+  return v_id;
+end;
+$$;
+
+revoke all on function public.staff_save_libraria_reading_pick(uuid, uuid, text, text, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.staff_save_libraria_reading_pick(uuid, uuid, text, text, text, text) to authenticated;
+
+create function public.staff_delete_libraria_reading_pick(p_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid;
+  v_before jsonb;
+begin
+  v_actor_id := auth.uid();
+  if v_actor_id is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not public.staff_has_permission('catalog.feature') then
+    raise exception 'not authorized';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('public.libraria_reading_picks'));
+
+  delete from public.libraria_reading_picks p
+   where p.id = p_id
+  returning pg_catalog.to_jsonb(p.*) into v_before;
+
+  if v_before is null then
+    return false;
+  end if;
+
+  insert into public.admin_audit_log (actor_id, action, target_type, target_id, metadata)
+  values (v_actor_id, 'libraria.reading_pick_deleted', 'libraria_reading_picks', p_id,
+          pg_catalog.jsonb_build_object('before', v_before));
+  return true;
+end;
+$$;
+
+revoke all on function public.staff_delete_libraria_reading_pick(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.staff_delete_libraria_reading_pick(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- 4. Admin gets catalog.feature in the database too (lr4-6 a).
+-- ------------------------------------------------------------
+create or replace function public.staff_has_permission(p_permission text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.staff_members sm
+    where sm.user_id = auth.uid()
+      and (
+        sm.role = 'owner'
+        or (
+          sm.role = 'admin'
+          and p_permission in (
+            'admin.access', 'reports.view', 'reports.resolve',
+            'refunds.view', 'refunds.resolve', 'staff.view', 'audit.view',
+            'finance.view', 'finance.payout_export', 'finance.payout_operate',
+            'blog.view', 'blog.manage', 'blog.categories', 'books.review',
+            'people.view', 'people.manage', 'catalog.feature'
+          )
+        )
+        or (
+          sm.role = 'editor'
+          and p_permission in ('admin.access', 'blog.view', 'blog.manage')
+        )
+        or (
+          sm.role = 'moderator'
+          and p_permission in ('admin.access', 'reports.view', 'reports.resolve')
+        )
+        or (
+          sm.role = 'support'
+          and p_permission in ('admin.access', 'refunds.view')
+        )
+      )
+  );
+$$;

@@ -104,6 +104,10 @@ export type Book = {
   // the book is created and never changed (src/lib/lbn.ts). Optional
   // only so older fixtures and narrow selects type-check.
   lbn?: string;
+  // LR1 patch 2 (migration 20261125150000): on public_books, the
+  // author's "only on Librum" tick, false on a public-domain edition (a
+  // free classic never qualifies). Optional like lbn.
+  only_on_librum?: boolean;
   genre: string | null;
   series_id: string | null;
   series_position: number | null;

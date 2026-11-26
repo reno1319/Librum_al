@@ -8,6 +8,14 @@ import {
   UNSAFE_MANUSCRIPT_PATHS,
 } from "@/lib/book-storage-path-test-fixtures";
 import { bookReviewsDoubleState, resetBookReviewsDouble } from "@/lib/book-reviews-test-double";
+import { bookFileVersionsDoubleState, resetBookFileVersionsDouble } from "@/lib/book-file-versions-test-double";
+
+// FV1: book_file_versions reads replaced by a settable double (default:
+// no file was ever replaced); see src/lib/book-file-versions-test-double.ts.
+vi.mock("@/lib/book-file-versions", async (importOriginal) => {
+  const { bookFileVersionsDouble } = await import("@/lib/book-file-versions-test-double");
+  return bookFileVersionsDouble(await importOriginal<object>());
+});
 
 // ACCOUNT-DELETION-BOOK-STORAGE-AUTH-1 (Patch 10): the REAL account
 // deletion hands a stored books.cover_path / books.file_path to
@@ -213,6 +221,7 @@ beforeEach(() => {
     avatars: new Set([`${USER_ID}/avatar.png`, ...VICTIM_OBJECTS.avatars]),
   };
   resetBookReviewsDouble();
+  resetBookFileVersionsDouble();
   pendingRows = [];
   pendingReadOk = true;
   pendingReadIds = [];
@@ -676,6 +685,32 @@ describe("review snapshots (ADMIN-3, N3/P5)", () => {
     setBooks([]);
     expect(await run()).toBe("deleted");
     expect(bookReviewsDoubleState.calls).toEqual([]);
+  });
+});
+
+// ============================================================
+// FV1 (fv5 a): the files that were once live go with the (unsold) books,
+// own keys only, and a failed read stops everything.
+describe("once-live files (FV1)", () => {
+  const OLD_LIVE = `${USER_ID}/${BOOK_ID}/3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f.epub`;
+
+  it("are removed with the book's own files, after deleteUser; another book's key is skipped", async () => {
+    objects.manuscripts.add(OLD_LIVE);
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    bookFileVersionsDoubleState.paths = { [BOOK_ID]: [OLD_LIVE, OWN_MANUSCRIPT, OWN_BOOK_2_MANUSCRIPT, VICTIM_MANUSCRIPT] };
+    expect(await run()).toBe("deleted");
+    expect(bookFileVersionsDoubleState.calls).toEqual([{ fn: "readFileVersionPaths", bookIds: [BOOK_ID] }]);
+    expect(removalsFor("manuscripts")).toEqual([{ via: "service", bucket: "manuscripts", paths: [OWN_MANUSCRIPT, OLD_LIVE] }]);
+    expect(objects.manuscripts.has(OLD_LIVE)).toBe(false);
+    expect(objects.manuscripts.has(OWN_BOOK_2_MANUSCRIPT)).toBe(true);
+  });
+
+  it("a failed read stops before deleteUser and before any removal", async () => {
+    setBooks([{ id: BOOK_ID, cover_path: OWN_COVER, file_path: OWN_MANUSCRIPT }]);
+    bookFileVersionsDoubleState.pathsOk = false;
+    expect(await run()).toBe(PREPARE_ERROR);
+    expect(events.some((e) => e.startsWith("deleteUser"))).toBe(false);
+    expect(storageCalls).toEqual([]);
   });
 });
 

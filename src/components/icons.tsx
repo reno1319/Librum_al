@@ -124,6 +124,15 @@ export function IconBag({ className, style }: IconProps) {
   );
 }
 
+// LR1 (Libraria header, "Lista ime"): an outlined heart.
+export function IconHeart({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M12 20s-7-4.4-9.2-8.6C1.3 8.4 3.1 5 6.4 5c2.3 0 4 1.4 5.6 3.4C13.6 6.4 15.3 5 17.6 5c3.3 0 5.1 3.4 3.6 6.4C19 15.6 12 20 12 20z" />
+    </svg>
+  );
+}
+
 export function IconGlobe({ className, style }: IconProps) {
   return (
     <svg {...base} className={className} style={style}>

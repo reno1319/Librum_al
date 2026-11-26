@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 297 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 335 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -45,7 +45,23 @@
 --   SELECT only), plus G4's three preorder_failure_alert_state rows, no
 --   privilege for any role (migration 20261124180000), plus LBN's three
 --   lbn_issued rows, no privilege for any role (migration
---   20261124190000). A relation with no
+--   20261124190000), plus FV1's three book_file_versions rows
+--   (migration 20261125120000; service_role SELECT only), plus the cart's
+--   three cart_items rows (authenticated DELETE and SELECT; nothing for
+--   anon or service_role) and four column rows (authenticated INSERT of
+--   book_id, reader_id, gift_email, gift_note, and UPDATE of the two gift
+--   columns) (migration 20261125130000), plus the gifts' three rows, no
+--   table-wide privilege for any role, and ten column rows
+--   (authenticated SELECT of every column but token_hash, claimed_by and
+--   purchase_id) (migration 20261125140000), plus LR1 patch 2's three
+--   libraria_category_buttons rows (SELECT for every role; migration
+--   20261125150000), plus LR1 patch 3's three libraria_banner_slides
+--   rows (authenticated and service_role SELECT; nothing for anon) and
+--   three public_libraria_banner_slides rows (SELECT for every role;
+--   migration 20261125200000), plus LR1 patch 4's three
+--   libraria_reading_picks rows (authenticated and service_role SELECT;
+--   nothing for anon) and three public_libraria_reading_picks rows
+--   (SELECT for every role; migration 20261126090000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -75,6 +91,20 @@ begin;
 create temp table grant_contract_expected (kind text not null, line text not null) on commit drop;
 
 insert into grant_contract_expected (kind, line) values
+('col','cart_items.book_id | authenticated | INSERT'),
+('col','cart_items.gift_email | authenticated | INSERT,UPDATE'),
+('col','cart_items.gift_note | authenticated | INSERT,UPDATE'),
+('col','cart_items.reader_id | authenticated | INSERT'),
+('col','gifts.book_id | authenticated | SELECT'),
+('col','gifts.buyer_id | authenticated | SELECT'),
+('col','gifts.claimed_at | authenticated | SELECT'),
+('col','gifts.created_at | authenticated | SELECT'),
+('col','gifts.id | authenticated | SELECT'),
+('col','gifts.last_sent_at | authenticated | SELECT'),
+('col','gifts.note | authenticated | SELECT'),
+('col','gifts.recipient_email | authenticated | SELECT'),
+('col','gifts.send_count | authenticated | SELECT'),
+('col','gifts.status | authenticated | SELECT'),
 ('col','blog_posts.author_name | anon | SELECT'),
 ('col','blog_posts.author_name | authenticated | SELECT'),
 ('col','blog_posts.category | anon | SELECT'),
@@ -192,6 +222,24 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r lbn_issued | anon | -'),
 ('rel','r lbn_issued | authenticated | -'),
 ('rel','r lbn_issued | service_role | -'),
+('rel','r book_file_versions | anon | -'),
+('rel','r book_file_versions | authenticated | -'),
+('rel','r book_file_versions | service_role | SELECT'),
+('rel','r cart_items | anon | -'),
+('rel','r cart_items | authenticated | DELETE,SELECT'),
+('rel','r cart_items | service_role | -'),
+('rel','r gifts | anon | -'),
+('rel','r gifts | authenticated | -'),
+('rel','r gifts | service_role | -'),
+('rel','r libraria_category_buttons | anon | SELECT'),
+('rel','r libraria_category_buttons | authenticated | SELECT'),
+('rel','r libraria_category_buttons | service_role | SELECT'),
+('rel','r libraria_banner_slides | anon | -'),
+('rel','r libraria_banner_slides | authenticated | SELECT'),
+('rel','r libraria_banner_slides | service_role | SELECT'),
+('rel','r libraria_reading_picks | anon | -'),
+('rel','r libraria_reading_picks | authenticated | SELECT'),
+('rel','r libraria_reading_picks | service_role | SELECT'),
 ('rel','r blog_post_reactions | anon | -'),
 ('rel','r blog_post_reactions | authenticated | SELECT'),
 ('rel','r blog_post_reactions | service_role | -'),
@@ -348,6 +396,12 @@ insert into grant_contract_expected (kind, line) values
 ('rel','v public_classic_authors | anon | SELECT'),
 ('rel','v public_classic_authors | authenticated | SELECT'),
 ('rel','v public_classic_authors | service_role | SELECT'),
+('rel','v public_libraria_banner_slides | anon | SELECT'),
+('rel','v public_libraria_banner_slides | authenticated | SELECT'),
+('rel','v public_libraria_banner_slides | service_role | SELECT'),
+('rel','v public_libraria_reading_picks | anon | SELECT'),
+('rel','v public_libraria_reading_picks | authenticated | SELECT'),
+('rel','v public_libraria_reading_picks | service_role | SELECT'),
 ('rel','v public_books | anon | SELECT'),
 ('rel','v public_books | authenticated | SELECT'),
 ('rel','v public_books | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -403,8 +457,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 297 then
-    raise exception 'FAIL: part1: the snapshot must hold 297 rows, holds %', v_expected;
+  if v_expected <> 335 then
+    raise exception 'FAIL: part1: the snapshot must hold 335 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

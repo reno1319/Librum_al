@@ -13,12 +13,12 @@ const count = (text: string, needle: string) => text.split(needle).length - 1;
 const IN_LISTED = '.in("status", LISTED_BOOK_STATUSES)';
 
 describe("pre-orders in public lists", () => {
-  // Patch C: plus the sidebar counts, which count what the grid lists.
-  it("Libraria lists them in the grid, in search and in the sidebar counts, not in the free shelf", () => {
+  // LR1: the results (plain and searched), every shelf and the category
+  // buttons' read. The free shelf is gone (lr1-7 a).
+  it("Libraria lists them in the results, in search, on the shelves and in the category read", () => {
     const src = read("src/app/(public)/librari/page.tsx");
-    expect(count(src, IN_LISTED)).toBe(3);
-    const free = src.slice(src.indexOf("async function fetchFreeBooks"));
-    expect(free.slice(0, free.indexOf("return data"))).toContain('.eq("status", "published")');
+    expect(count(src, IN_LISTED)).toBe(4);
+    expect(src).not.toContain("fetchFreeBooks");
   });
 
   it("the author page, the series page and the sitemap list them", () => {

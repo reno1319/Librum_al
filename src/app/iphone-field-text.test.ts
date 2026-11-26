@@ -72,17 +72,15 @@ describe("no viewport blocks pinch zoom (I1)", () => {
   });
 });
 
-describe("Bookstore filter row is 16px on phones (I1b; patch C: 16px at every width)", () => {
-  it("the Filtrat button, the sort select and the search box use text-base, never a bare text-sm", () => {
-    const page = readFileSync(join(__dirname, "(public)/librari/page.tsx"), "utf8");
-    const at = page.indexOf("const DROPDOWN_SUMMARY_CLASSES =");
-    const classes = page.slice(at, page.indexOf(";", at)).match(/"([^"]*)"/)![1].split(" ");
-    expect(classes).toContain("text-base");
-    expect(classes).not.toContain("text-sm");
-    for (const id of ['id={id}\n          name="sort"', 'id="bookstore-q"']) {
-      const el = page.slice(page.indexOf(id), page.indexOf("/>", page.indexOf(id)) + 2);
-      expect(el, id).toMatch(/className="[^"]*\btext-base\b/);
-      expect(el, id).not.toMatch(/className="[^"]*\btext-sm\b/);
-    }
+// LR1: Libraria's filter row and sort are gone (lr1-6 c); its search
+// now lives in Libraria's own header, still 16px so iPhone Safari does
+// not zoom in.
+describe("Libraria's header search is 16px on phones (I1b)", () => {
+  it("the shop header's search box uses text-base, never a bare text-sm", () => {
+    const header = readFileSync(join(__dirname, "../components/site-header.tsx"), "utf8");
+    const id = 'id="store-header-q"';
+    const el = header.slice(header.indexOf(id), header.indexOf("/>", header.indexOf(id)) + 2);
+    expect(el).toMatch(/className="[^"]*\btext-base\b/);
+    expect(el).not.toMatch(/className="[^"]*\btext-sm\b/);
   });
 });

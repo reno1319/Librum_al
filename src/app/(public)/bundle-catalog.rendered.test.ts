@@ -89,6 +89,18 @@ function tableQuery(table: string, rows: Row[], log: QueryLog[]) {
       result = result.slice(0, n);
       return builder;
     },
+    // LR1: Libraria reads the reader's own cart rows (is gift_email null)
+    // and its non-fiction shelf (categories overlap a list).
+    is(col: string, value: unknown) {
+      entry.filters.push(`is:${col}`);
+      result = result.filter((r) => (r[col] ?? null) === value);
+      return builder;
+    },
+    overlaps(col: string, values: unknown[]) {
+      entry.filters.push(`overlaps:${col}`);
+      result = result.filter((r) => Array.isArray(r[col]) && (r[col] as unknown[]).some((v) => values.includes(v)));
+      return builder;
+    },
     returns() {
       return builder;
     },
@@ -151,6 +163,15 @@ function makeClient(tables: Record<string, Row[]>, userId: string | null, log: Q
           });
         return tableQuery(table, rows, log);
       }
+      // LR1: Libraria reads the signed-in reader's cart and purchases
+      // (lr1-12 a); none here.
+      if ((table === "cart_items" || table === "purchases") && !(table in tables)) return tableQuery(table, [], log);
+      // LR1 patch 2: Libraria reads staff's category buttons; none here.
+      if (table === "libraria_category_buttons" && !(table in tables)) return tableQuery(table, [], log);
+      // LR1 patch 3: no banner slides here.
+      if (table === "public_libraria_banner_slides" && !(table in tables)) return tableQuery(table, [], log);
+      // LR1 patch 4: no "Çfarë po lexojmë" picks here.
+      if (table === "public_libraria_reading_picks" && !(table in tables)) return tableQuery(table, [], log);
       if (!(table in tables)) throw new Error(`stub: unexpected table ${table}`);
       const rows = OWN_ROW_TABLES.has(table)
         ? tables[table].filter((r) => !!userId && r.author_id === userId)
