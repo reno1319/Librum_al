@@ -10,6 +10,18 @@ import { formControlClasses } from "@/lib/form-styles";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { saveCategoryButtons } from "./actions";
 import { deleteBannerSlide, moveBannerSlide, saveBannerSlide } from "./banner-actions";
+import { deleteReadingPick, saveReadingPick } from "./pick-actions";
+import {
+  DEFAULT_PICK_BADGE,
+  MAX_PICK_BADGE,
+  MAX_PICK_NOTE,
+  MAX_PICK_QUOTE,
+  PICK_STATUS_LABELS,
+  pickMonthLabel,
+  pickStatuses,
+  type PickRow,
+  type PickStatus,
+} from "@/lib/libraria-picks";
 import { resolveStaffByline } from "@/lib/book-byline";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
@@ -58,15 +70,30 @@ const STATUS_CLASSES: Record<SlideStatus, string> = {
   book_not_live: "bg-[#f6dad6] text-[#8a2418]",
 };
 
+// LR1 patch 4 (lb2 a, lb6 a, lb8 a, lr4-1 a to lr4-4 a): the "Çfarë po
+// lexojmë" picks, between the banner and the category buttons. Staff
+// (catalog.feature) see every pick, newest first, with what it does now
+// (on Libraria, past, or hidden while its book is not on Libraria:
+// lr4-3 a), edit or delete it, and publish a new one, which becomes the
+// pick on Libraria (lr4-1 a). The badge starts as "Zgjedhja e Librum"
+// (lr4-4 a). Same book list as the slides.
+const PICKS_LOAD_ERROR = "Couldn’t load the reading picks. Please reload the page.";
+
+const PICK_STATUS_CLASSES: Record<PickStatus, string> = {
+  showing: "bg-[#dceedf] text-[#1d5a2e]",
+  past: "bg-[#e9e6dd] text-[#5c6660]",
+  book_not_live: "bg-[#f6dad6] text-[#8a2418]",
+};
+
 const SMALL_BUTTON = buttonClasses("outline", "md", "min-h-11 rounded-full px-4");
 
 export default async function AdminLibrariaPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; edit?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; edit?: string; pick?: string }>;
 }) {
   await requireStaff("catalog.feature");
-  const { error: rawError, success: rawSuccess, edit: rawEdit } = await searchParams;
+  const { error: rawError, success: rawSuccess, edit: rawEdit, pick: rawPick } = await searchParams;
   const error = pageErrorMessage(rawError);
   const success = pageSuccessMessage(rawSuccess);
 
@@ -79,7 +106,7 @@ export default async function AdminLibrariaPage({
   if (readError) console.error("Admin Libraria: failed to load the category buttons:", readError);
   const chosen = (data ?? []).map((r) => r.category);
 
-  const [slidesRead, booksRead] = await Promise.all([
+  const [slidesRead, booksRead, picksRead] = await Promise.all([
     supabase
       .from("libraria_banner_slides")
       .select("id, position, book_id, description, tag, image_path, phone_image_path, starts_on, ends_on")
@@ -93,13 +120,23 @@ export default async function AdminLibrariaPage({
       .order("title", { ascending: true })
       .limit(BOOK_LIST_LIMIT)
       .returns<PickableBook[]>(),
+    supabase
+      .from("libraria_reading_picks")
+      .select("id, book_id, badge, note, quote, quote_from, published_at")
+      .order("published_at", { ascending: false })
+      .order("id", { ascending: false })
+      .returns<PickRow[]>(),
   ]);
+  if (picksRead.error) console.error("Admin Libraria: failed to load the reading picks:", picksRead.error);
+  const picks = picksRead.data ?? [];
   if (slidesRead.error) console.error("Admin Libraria: failed to load the banner slides:", slidesRead.error);
   if (booksRead.error) console.error("Admin Libraria: failed to load the books:", booksRead.error);
   const slides = slidesRead.data ?? [];
   const books = booksRead.data ?? [];
   const bookById = new Map(books.map((b) => [b.id, b]));
   const today = tiranaToday();
+  const pickStatus = pickStatuses(picks, (id) => bookById.has(id));
+  const editingPick = typeof rawPick === "string" ? (picks.find((p) => p.id === rawPick) ?? null) : null;
   const editing = typeof rawEdit === "string" ? (slides.find((sl) => sl.id === rawEdit) ?? null) : null;
   const picture = (path: string) => supabase.storage.from("libraria").getPublicUrl(path).data.publicUrl;
   const cover = (path: string | null) => (path ? supabase.storage.from("covers").getPublicUrl(path).data.publicUrl : null);
@@ -215,6 +252,92 @@ export default async function AdminLibrariaPage({
             )}
 
             <SlideForm slide={editing} books={books} cover={cover} />
+          </>
+        )}
+      </section>
+
+      <section className="mt-10" aria-labelledby="reading-picks">
+        <h2 id="reading-picks" className="scroll-mt-6 font-serif text-xl font-semibold">
+          Çfarë po lexojmë
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          The box under “Libra që i gjeni vetëm në Librum”. The newest pick shows on Libraria; the others are on its
+          “Më shumë” page, newest first. A pick hides while its book is not on Libraria, and the newest pick that is
+          on Libraria shows instead. With no picks, there is no box.
+        </p>
+        {picksRead.error || booksRead.error ? (
+          <Alert variant="error" className="mt-3">
+            {PICKS_LOAD_ERROR}
+          </Alert>
+        ) : (
+          <>
+            {picks.length === 0 ? (
+              <p className="mt-3 rounded-card border border-border bg-surface p-4 text-sm text-muted">
+                No picks yet: Libraria shows no “Çfarë po lexojmë” box.
+              </p>
+            ) : (
+              <ol className="mt-3 flex flex-col gap-3">
+                {picks.map((pick) => {
+                  const book = bookById.get(pick.book_id) ?? null;
+                  const status = pickStatus.get(pick.id) ?? "past";
+                  const bookCover = book ? cover(book.cover_path) : null;
+                  return (
+                    <li
+                      key={pick.id}
+                      className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4 shadow-sm sm:flex-row sm:items-center"
+                    >
+                      {book &&
+                        (bookCover ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={bookCover}
+                            alt=""
+                            loading="lazy"
+                            className="aspect-[5/8] w-12 shrink-0 rounded-[2px] object-contain object-bottom"
+                          />
+                        ) : (
+                          <CoverPlaceholder
+                            title={book.title}
+                            authorName={resolveStaffByline(book)}
+                            className="aspect-[5/8] w-12 shrink-0 rounded-[2px]"
+                          />
+                        ))}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-muted">{pickMonthLabel(pick.published_at)}</p>
+                        <p className="font-medium break-words">
+                          {book ? book.title : "A book that is not on Libraria now"}
+                        </p>
+                        <p className="line-clamp-2 text-sm break-words text-muted">{pick.note}</p>
+                        <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                          <span className={`rounded-full px-2 py-0.5 font-semibold ${PICK_STATUS_CLASSES[status]}`}>
+                            {PICK_STATUS_LABELS[status]}
+                          </span>
+                          <span>{pick.badge ? `Badge: ${pick.badge}` : "No badge"}</span>
+                          <span>Quote from the {pick.quote_from === "book" ? "book" : "author"}</span>
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link href={`/admin/libraria?pick=${pick.id}#pick-form`} className={SMALL_BUTTON}>
+                          Edit
+                        </Link>
+                        <form action={deleteReadingPick}>
+                          <input type="hidden" name="pickId" value={pick.id} />
+                          <button
+                            type="submit"
+                            aria-label={`Delete the pick ${book ? book.title : ""}`.trim()}
+                            className={SMALL_BUTTON}
+                          >
+                            Delete
+                          </button>
+                        </form>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+
+            <PickForm pick={editingPick} books={books} />
           </>
         )}
       </section>
@@ -404,6 +527,106 @@ function SlideForm({
         </button>
         {slide && (
           <Link href="/admin/libraria#banner-slides" className="text-sm underline underline-offset-2 hover:decoration-2">
+            Cancel
+          </Link>
+        )}
+      </div>
+    </form>
+  );
+}
+
+// Publish a new pick, or edit one (?pick=<id>). The book's cover, title,
+// author, stars, price and button go in the box by themselves.
+function PickForm({ pick, books }: { pick: PickRow | null; books: PickableBook[] }) {
+  return (
+    <form
+      id="pick-form"
+      action={saveReadingPick}
+      className="mt-4 flex scroll-mt-6 flex-col gap-4 rounded-card border border-border bg-surface p-4 shadow-sm sm:p-5"
+    >
+      <h3 className="font-serif text-lg font-semibold">{pick ? "Edit pick" : "Publish a new pick"}</h3>
+      {pick && <input type="hidden" name="pickId" value={pick.id} />}
+
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Book
+        <select name="bookId" required defaultValue={pick?.book_id ?? ""} className={`${formControlClasses} min-h-11`}>
+          <option value="" disabled>
+            Choose a book
+          </option>
+          {books.map((b) => {
+            const author = resolveStaffByline(b);
+            return (
+              <option key={b.id} value={b.id}>
+                {b.title}
+                {author ? ` — ${author}` : ""}
+                {b.status === "preorder" ? " (pre-order)" : ""}
+              </option>
+            );
+          })}
+        </select>
+        <span className="text-xs font-normal text-muted">
+          Its cover, title, author, stars and price go in the box. Published and pre-order books only.
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Badge (optional)
+        <input
+          type="text"
+          name="badge"
+          maxLength={MAX_PICK_BADGE}
+          defaultValue={pick ? (pick.badge ?? "") : DEFAULT_PICK_BADGE}
+          className={`${formControlClasses} min-h-11 sm:max-w-xs`}
+        />
+        <span className="text-xs font-normal text-muted">Up to {MAX_PICK_BADGE} characters. Empty = no badge.</span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Why we are reading it
+        <textarea
+          name="note"
+          required
+          rows={4}
+          maxLength={MAX_PICK_NOTE}
+          defaultValue={pick?.note ?? ""}
+          className={formControlClasses}
+        />
+        <span className="text-xs font-normal text-muted">One paragraph, up to {MAX_PICK_NOTE} characters.</span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm font-medium">
+        Quote
+        <textarea
+          name="quote"
+          required
+          rows={3}
+          maxLength={MAX_PICK_QUOTE}
+          defaultValue={pick?.quote ?? ""}
+          className={formControlClasses}
+        />
+        <span className="text-xs font-normal text-muted">
+          One paragraph, up to {MAX_PICK_QUOTE} characters, without quotation marks.
+        </span>
+      </label>
+
+      <fieldset className="flex flex-col gap-1 text-sm">
+        <legend className="font-medium">The quote is from</legend>
+        <label className="flex min-h-11 items-center gap-2">
+          <input type="radio" name="quoteFrom" value="book" required defaultChecked={(pick?.quote_from ?? "book") === "book"} className="size-4" />
+          The book (shows “nga” and the book’s title)
+        </label>
+        <label className="flex min-h-11 items-center gap-2">
+          <input type="radio" name="quoteFrom" value="author" defaultChecked={pick?.quote_from === "author"} className="size-4" />
+          The author (shows “autori i librit”)
+        </label>
+      </fieldset>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" className={buttonClasses("primary", "md", "min-h-11 rounded-full px-5")}>
+          {pick ? "Save pick" : "Publish pick"}
+        </button>
+        {pick && (
+          <Link href="/admin/libraria#reading-picks" className="text-sm underline underline-offset-2 hover:decoration-2">
             Cancel
           </Link>
         )}

@@ -91,14 +91,17 @@ const PUBLIC_BASE_READS: Record<string, string[]> = {
   // they can't add or gift their own book.
   "app/(public)/shporta/actions.ts": ["books"],
   // LR1 lr1-12 a: the signed-in author's own book ids (ids only), so
-  // their own cards on Libraria show "Shiko librin", not "Shto".
-  "app/(public)/librari/page.tsx": ["books"],
+  // their own cards on Libraria show "Shiko librin", not "Shto". LR1
+  // patch 4 moved this read, unchanged, out of librari/page.tsx so the
+  // "Më shumë" page shares it.
+  "lib/libraria-picks-read.ts": ["books"],
 };
 // A helper that takes the author id as a parameter names it so.
 const OWN_ROW_EQ_BY_FILE: Record<string, RegExp> = {
   "lib/book-reviews.ts": /\.eq\("author_id",\s*params\.authorId\)/,
   "lib/account-deletion.ts": /\.eq\("author_id",\s*userId\)/,
   "app/(public)/shporta/actions.ts": /\.eq\("author_id",\s*userId\)/,
+  "lib/libraria-picks-read.ts": /\.eq\("author_id",\s*userId\)/,
 };
 
 describe("PEN-NAMES-2 static guard: public surfaces read the views, not the base tables", () => {

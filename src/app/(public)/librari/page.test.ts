@@ -128,6 +128,15 @@ let categoryRows: Row[] = [];
 let failCategoryRead = false;
 let slideRows: Row[] = [];
 let failSlideRead = false;
+let pickRows: Row[] = [];
+let failPickRead = false;
+
+function pickRow(n: number, bookId: string, extra: Row = {}): Row {
+  return {
+    id: `pick-${n}`, book_id: bookId, badge: "Zgjedhja e Librum", note: `Pick note ${n}.`, quote: `Pick quote ${n}.`,
+    quote_from: "book", published_at: `2026-11-${String(10 + n).padStart(2, "0")}T09:00:00Z`, ...extra,
+  };
+}
 
 const PIC = (n: number) => `slides/0000000${n}-0000-4000-8000-000000000000.jpg`;
 function slideRow(n: number, bookId: string, extra: Row = {}): Row {
@@ -150,6 +159,8 @@ describe("BookstorePage: LR1 shop front", () => {
     failCategoryRead = false;
     slideRows = [];
     failSlideRead = false;
+    pickRows = [];
+    failPickRead = false;
     rpcCalls = [];
     mockCreateClient.mockReset();
     mockCreateClient.mockImplementation(() => ({
@@ -158,6 +169,7 @@ describe("BookstorePage: LR1 shop front", () => {
         if (table === "public_books" && failBookList) return failing();
         if (table === "libraria_category_buttons") return failCategoryRead ? failing() : tableStub(categoryRows);
         if (table === "public_libraria_banner_slides") return failSlideRead ? failing() : tableStub(slideRows);
+        if (table === "public_libraria_reading_picks") return failPickRead ? failing() : tableStub(pickRows);
         return tableStub(
           table === "public_books"
             ? bookRows
@@ -507,6 +519,73 @@ describe("BookstorePage: LR1 shop front", () => {
     // Two slides: arrows and dots.
     expect(html).toContain('aria-label="Slajdi tjetër"');
     expect(html).toContain('aria-label="Shko te slajdi 2"');
+  });
+
+  // LR1 patch 4: "Çfarë po lexojmë".
+  it("no pick, or the picks read fails: no Çfarë po lexojmë section", async () => {
+    expect(await render()).not.toContain("Çfarë po lexojmë");
+    pickRows = [pickRow(1, "book-03")];
+    failPickRead = true;
+    expect(await render()).not.toContain("Çfarë po lexojmë");
+  });
+
+  it("the newest pick shows after Libra që i gjeni vetëm në Librum and before Libra jo-artistikë (lr4-1 a)", async () => {
+    bookRows = BOOKS.map((b) => (b.id === "book-05" ? { ...b, only_on_librum: true } : b));
+    pickRows = [pickRow(1, "book-03"), pickRow(3, "book-06", { badge: null, quote_from: "author" })];
+    reviewRows = [{ book_id: "book-06", rating: 4 }, { book_id: "book-06", rating: 5 }];
+    const html = await render();
+    const pick = section(html, "Çfarë po lexojmë");
+    expect(html.indexOf("Libra që i gjeni vetëm në Librum")).toBeLessThan(html.indexOf("Çfarë po lexojmë"));
+    expect(html.indexOf("Çfarë po lexojmë")).toBeLessThan(html.indexOf("Libra jo-artistikë"));
+    // pick-3 is the newest; pick-1 is a past pick.
+    expect(pick).toContain("Pick note 3.");
+    expect(pick).not.toContain("Pick note 1.");
+    expect(pick).toContain("Pick quote 3.");
+    expect(pick).toContain("autori i librit");
+    expect(pick).not.toContain("Zgjedhja e Librum");
+    expect(pick).toMatch(linkRe("/libra/book-06", "Book 06"));
+    expect(pick).toContain("(Autor)");
+    expect(pick).toContain("4,5 nga 5 yje, 2 vlerësime");
+    expect(pick).toContain("199 lekë");
+    expect(pick).toMatch(linkRe("/login?next=/librari", "Shto"));
+    expect(pick).toMatch(linkRe("/librari/cfare-po-lexojme", "Më shumë ›"));
+  });
+
+  it("a pick quoted from the book: badge, nga <title>; with only one pick there is no Më shumë", async () => {
+    pickRows = [pickRow(1, "book-03")];
+    const pick = section(await render(), "Çfarë po lexojmë");
+    expect(pick).toContain(">Zgjedhja e Librum</span>");
+    expect(pick).toContain("nga <i>Book 03</i>");
+    expect(pick).not.toContain("Më shumë");
+  });
+
+  it("an 18+ pick shows no 18+ tag (lr4-5 b); a free pick says Merre falas, a pre-order Shiko librin", async () => {
+    bookRows = BOOKS.map((b) => (b.id === "book-03" ? { ...b, is_adult: true } : b));
+    pickRows = [pickRow(1, "book-03")];
+    expect(section(await render(), "Çfarë po lexojmë")).not.toContain("18+");
+    pickRows = [pickRow(1, "book-09")];
+    expect(section(await render(), "Çfarë po lexojmë")).toMatch(linkRe("/libra/book-09", "Merre falas"));
+    pickRows = [pickRow(1, "book-08")];
+    expect(section(await render(), "Çfarë po lexojmë")).toMatch(linkRe("/libra/book-08", "Shiko librin"));
+  });
+
+  it("a pick whose book the shop can't read is skipped; the next one shows (lr4-3 a)", async () => {
+    pickRows = [pickRow(2, "book-missing"), pickRow(1, "book-03")];
+    const pick = section(await render(), "Çfarë po lexojmë");
+    expect(pick).toContain("Pick note 1.");
+    expect(pick).not.toContain("Pick note 2.");
+  });
+
+  it("a signed-in reader: Shto is a form, Në shportë once in the cart, Shiko librin for an owned book", async () => {
+    signedInUser = { id: "reader-1" };
+    pickRows = [pickRow(1, "book-03")];
+    expect(section(await render(), "Çfarë po lexojmë")).toContain('aria-label="Shto në shportë: Book 03"');
+    cartRows = [{ reader_id: "reader-1", book_id: "book-03", gift_email: null }];
+    expect(section(await render(), "Çfarë po lexojmë")).toMatch(linkRe("/shporta", "Në shportë"));
+    cartRows = [];
+    purchaseRows = [{ reader_id: "reader-1", book_id: "book-03" }];
+    ownedIds = ["book-03"];
+    expect(section(await render(), "Çfarë po lexojmë")).toMatch(linkRe("/libra/book-03", "Shiko librin"));
   });
 
   it("one slide: no arrows and no dots", async () => {

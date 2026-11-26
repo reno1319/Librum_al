@@ -13,11 +13,18 @@ import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import { LibrariaBanner, type BannerSlide } from "@/components/libraria-banner";
 import { MAX_SHOWING_SLIDES } from "@/lib/libraria-banner";
+import { LibrariaPickBox } from "@/components/libraria-pick";
+import {
+  fetchCartBookIds,
+  fetchOwnedOrOwnBookIds,
+  fetchRatings,
+  fetchReadingPicks,
+  type ReadingPick,
+} from "@/lib/libraria-picks-read";
 import {
   categoryButtons,
   NON_FICTION_GENRES,
   storeCardAction,
-  summarizeRatings,
   type RatingSummary,
 } from "@/lib/libraria-store";
 import type { PublicBook, PublicBundle } from "@/lib/types";
@@ -41,7 +48,9 @@ export const dynamic = "force-dynamic";
 // Libraria is a shop front of shelves. Two views at one address:
 //   - the shelves (no search, no category): the banner slides (patch
 //     3; none saved = no banner), "Më të rinjtë në Librum" with
-//     category buttons and the "Më shumë kategori" box, "Libra
+//     category buttons and the "Më shumë kategori" box, "Libra që i
+//     gjeni vetëm në Librum", "Çfarë po lexojmë" (patch 4: the newest
+//     pick, "Më shumë ›" to every pick), "Libra
 //     jo-artistikë", "Paketat" (lr1-10 a), and, for visitors only,
 //     "Bota e leximit ju pret" (lr1-5 a, his text as written, lr1-11 b);
 //   - the results (?q= and/or ?genre=): only the matching books, newest
@@ -437,60 +446,6 @@ async function fetchStaffCategoryButtons(supabase: SupabaseClient): Promise<stri
   return (data ?? []).map((r) => r.category);
 }
 
-// Approved reviews of the books on the page (public_reviews lists only
-// approved ones and no reader). Fail-soft: no stars.
-async function fetchRatings(supabase: SupabaseClient, bookIds: string[]): Promise<Map<string, RatingSummary>> {
-  if (bookIds.length === 0) return new Map();
-  const { data, error } = await supabase
-    .from("public_reviews")
-    .select("book_id, rating")
-    .in("book_id", bookIds)
-    .returns<{ book_id: string; rating: number }[]>();
-  if (error) {
-    console.error("Libraria: failed to load the ratings:", error);
-    return new Map();
-  }
-  return summarizeRatings(data ?? []);
-}
-
-// The signed-in reader's own cart rows (row rules return only theirs),
-// so a book already in it reads "Në shportë". Gift rows don't count.
-async function fetchCartBookIds(supabase: SupabaseClient, userId: string): Promise<Set<string>> {
-  const { data, error } = await supabase
-    .from("cart_items")
-    .select("book_id")
-    .eq("reader_id", userId)
-    .is("gift_email", null)
-    .returns<{ book_id: string }[]>();
-  if (error) {
-    console.error("Libraria: failed to load the cart:", error);
-    return new Set();
-  }
-  return new Set((data ?? []).map((r) => r.book_id));
-}
-
-// lr1-12 a (audit N1): the books this reader already owns (through
-// user_owns_book(), the same rule as the book page and the cart, so a
-// refunded or lost-disputed purchase does not count) and their own books
-// as an author. Their cards show "Shiko librin". One ownership call per
-// purchase row, as on the Bibliotekë page.
-async function fetchOwnedOrOwnBookIds(supabase: SupabaseClient, userId: string): Promise<Set<string>> {
-  const [purchases, own] = await Promise.all([
-    supabase.from("purchases").select("book_id").eq("reader_id", userId).returns<{ book_id: string }[]>(),
-    supabase.from("books").select("id").eq("author_id", userId).returns<{ id: string }[]>(),
-  ]);
-  if (purchases.error) console.error("Libraria: failed to load the reader's purchases:", purchases.error);
-  if (own.error) console.error("Libraria: failed to load the author's own books:", own.error);
-  const ids = new Set((own.data ?? []).map((r) => r.id));
-  const owned = await Promise.all(
-    (purchases.data ?? []).map(
-      async (r) => [r.book_id, !!(await supabase.rpc("user_owns_book", { target_book_id: r.book_id })).data] as const,
-    ),
-  );
-  for (const [id, yes] of owned) if (yes) ids.add(id);
-  return ids;
-}
-
 // A2 page heading: thin serif, as on the homepage (Renato D6).
 const SECTION_HEADING = "font-serif text-[1.75rem] font-normal leading-tight text-primary sm:text-3xl";
 const TEXT_LINK_CLASSES =
@@ -557,7 +512,7 @@ export default async function BookstorePage({
     );
   }
 
-  const [newest, onlyOnLibrum, nonFiction, bundles, slides, genresWithBooks, staffCategories] = await Promise.all([
+  const [newest, onlyOnLibrum, nonFiction, bundles, slides, genresWithBooks, staffCategories, picks] = await Promise.all([
     fetchShelf(supabase, "te-rinjte"),
     fetchShelf(supabase, "vetem-ne-librum"),
     fetchShelf(supabase, "jo-artistike"),
@@ -565,8 +520,12 @@ export default async function BookstorePage({
     fetchBannerSlides(supabase),
     fetchGenresWithBooks(supabase),
     fetchStaffCategoryButtons(supabase),
+    // LR1 patch 4: the newest pick, plus one more to know whether the
+    // "Më shumë" page has a past pick to show.
+    fetchReadingPicks(supabase, 2),
   ]);
-  const shown = [...(newest ?? []), ...(onlyOnLibrum ?? []), ...(nonFiction ?? [])];
+  const pick = picks[0] ?? null;
+  const shown = [...(newest ?? []), ...(onlyOnLibrum ?? []), ...(nonFiction ?? []), ...(pick ? [pick.book] : [])];
   const ratings = await fetchRatings(supabase, [...new Set(shown.map((b) => b.id))]);
   const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
 
@@ -606,6 +565,10 @@ export default async function BookstorePage({
           <Shelf shelfKey="vetem-ne-librum" books={onlyOnLibrum} ctx={ctx} />
         )}
 
+        {/* LR1 patch 4: the newest pick whose book Libraria lists
+            (lr4-1 a, lr4-3 a); none = no section. */}
+        {pick && <ReadingPickSection pick={pick} hasPast={picks.length > 1} ctx={ctx} />}
+
         {nonFiction && nonFiction.length > 0 && <Shelf shelfKey="jo-artistike" books={nonFiction} ctx={ctx} />}
 
         {bundles.length > 0 && <BundlesSection bundles={bundles} supabase={supabase} />}
@@ -613,6 +576,42 @@ export default async function BookstorePage({
         {!user && <ReadingInvite />}
       </div>
     </main>
+  );
+}
+
+// LR1 patch 4 (sketch r4, lb3 a): "Çfarë po lexojmë", the box, then
+// "Më shumë ›" to every pick (lr4-2 a) when there is a past one.
+function ReadingPickSection({ pick, hasPast, ctx }: { pick: ReadingPick; hasPast: boolean; ctx: CardContext }) {
+  const { book } = pick;
+  return (
+    <section className="mt-10 border-b border-border pb-9 sm:mt-12">
+      <h2 className={SECTION_HEADING}>Çfarë po lexojmë</h2>
+      <div className="mt-5">
+        <LibrariaPickBox
+          pick={{
+            book,
+            coverUrl: coverUrlFor(ctx.supabase, book.cover_path),
+            authorName: resolveBookByline(book),
+            rating: ctx.ratings.get(book.id) ?? null,
+            action: storeCardAction(book, ctx.signedIn, ctx.cartBookIds.has(book.id), ctx.ownedOrOwnBookIds.has(book.id)),
+            badge: pick.badge,
+            note: pick.note,
+            quote: pick.quote,
+            quoteFrom: pick.quoteFrom,
+          }}
+        />
+      </div>
+      {hasPast && (
+        <p className="mt-3 text-right">
+          <Link
+            href="/librari/cfare-po-lexojme"
+            className="focus-ring rounded-sm text-[1rem] font-semibold text-[#806510] underline-offset-2 hover:underline"
+          >
+            Më shumë ›
+          </Link>
+        </p>
+      )}
+    </section>
   );
 }
 
