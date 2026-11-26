@@ -8,6 +8,20 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 4 (2026-11-26): the admin Libraria page's reading picks.
+  // ("Choose a book." and "That book is not on Libraria now." are below.)
+  "That pick no longer exists.",
+  "Keep the badge on one line.",
+  "The badge can be at most 24 characters.",
+  "Write the note.",
+  "Keep the note as one paragraph.",
+  "The note can be at most 400 characters.",
+  "Write the quote.",
+  "Keep the quote as one paragraph.",
+  "The quote can be at most 240 characters.",
+  "Choose whether the quote is from the book or from the author.",
+  "Couldn’t save the pick. Please try again.",
+  "Couldn’t delete the pick. Please try again.",
   // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
   "That slide no longer exists.",
   "Choose a book.",
@@ -432,6 +446,10 @@ export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 export const PAGE_SUCCESS_MESSAGES: ReadonlySet<string> = new Set([
+  // LR1 patch 4 (2026-11-26): the admin Libraria page's reading picks.
+  "Pick published.",
+  "Pick saved.",
+  "Pick deleted.",
   // LR1 patch 3 (2026-11-25): the admin Libraria page's banner slides.
   "Slide saved.",
   "Slide deleted.",

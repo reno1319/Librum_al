@@ -41,7 +41,9 @@ import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
 //
 // LR1 (Renato 11-25, lb7 b): Libraria alone gets the shop header (logo,
 // search, "Lista ime", "Shporta", account; no menu links). Every other
-// page keeps today's header. The path comes from the header Proxy sets
+// page keeps today's header. LR1 patch 4: Libraria's "Më shumë" page of
+// picks (/librari/cfare-po-lexojme) gets the shop header too. The path
+// comes from the header Proxy sets
 // on every request (see src/lib/supabase/middleware.ts).
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
   const pathname = (await headers()).get(INTERNAL_PATHNAME_HEADER);
@@ -53,7 +55,7 @@ export default async function PublicLayout({ children }: { children: React.React
       >
         Kaloni te përmbajtja
       </a>
-      <SiteHeader variant={pathname === "/librari" ? "store" : "default"} />
+      <SiteHeader variant={pathname === "/librari" || pathname === "/librari/cfare-po-lexojme" ? "store" : "default"} />
       <div id="main-content" className="flex flex-1 flex-col">
         {children}
       </div>

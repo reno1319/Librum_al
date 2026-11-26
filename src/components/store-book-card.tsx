@@ -89,7 +89,7 @@ export function StoreBookCard({
   );
 }
 
-function CardButton({ bookId, title, action }: { bookId: string; title: string; action: StoreCardAction }) {
+export function CardButton({ bookId, title, action }: { bookId: string; title: string; action: StoreCardAction }) {
   switch (action) {
     case "add":
       return (
@@ -128,7 +128,7 @@ function CardButton({ bookId, title, action }: { bookId: string; title: string; 
 
 // Five gold stars filled to the nearest half, then "(count)". The
 // screen-reader text says it in words.
-function Stars({ rating }: { rating: RatingSummary }) {
+export function Stars({ rating }: { rating: RatingSummary }) {
   const fills = starFills(rating.average);
   const label = `${rating.average.toLocaleString("sq-AL", { maximumFractionDigits: 1 })} nga 5 yje, ${rating.count} ${rating.count === 1 ? "vlerësim" : "vlerësime"}`;
   return (
