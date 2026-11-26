@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { CategoryShelfTabs } from "@/components/category-shelf-tabs";
 import { GENRES } from "@/lib/genres";
 
 // ALL-CUTOVER APP-A: focused coverage of the maintenance gate on this
@@ -248,7 +249,7 @@ describe("BookstorePage: LR1 shop front", () => {
     ];
     const html = await render();
     const shelf = section(html, "Më të rinjtë në Librum");
-    expect(shelf).toMatch(linkRe("/librari", "Të gjitha kategoritë", 'aria-current="page"'));
+    expect(shelf).toMatch(linkRe("/librari", "Të gjitha kategoritë", 'aria-current="true"'));
     const buttons = [...shelf.slice(0, shelf.indexOf("<details")).matchAll(/href="\/librari\?genre=([^"]*)"/g)].map((m) =>
       decodeURIComponent(m[1].replace(/\+/g, " ")).replace(/&amp;/g, "&"),
     );
@@ -420,17 +421,102 @@ describe("BookstorePage: LR1 shop front", () => {
     expect(newest).toMatch(linkRe("/librari?rafti=te-rinjte", '<span class="underline decoration-2 underline-offset-4">' + TILE));
     expect(newest.indexOf("Book 07")).toBeLessThan(newest.indexOf(TILE));
     expect(section(html, "Libra që i gjeni vetëm në Librum")).toContain('href="/librari?rafti=vetem-ne-librum"');
-    // 10 non-fiction books: the row holds them all, so no tile.
+    // sl-3 a: 10 non-fiction books slide too, so the tile follows them.
     const nonFiction = section(html, "Libra jo-artistikë");
     expect(titles(nonFiction)).toHaveLength(10);
-    expect(nonFiction).not.toContain(TILE);
+    expect(nonFiction).toMatch(linkRe("/librari?rafti=jo-artistike", '<span class="underline decoration-2 underline-offset-4">' + TILE));
   });
 
-  it("sl-1 a: 14 books or fewer gives no tile", async () => {
-    bookRows = MANY.slice(0, 14);
+  it("sl-3 a: the tile shows whenever the row can slide (6 books or more), never for 5 or fewer", async () => {
+    bookRows = MANY.slice(0, 5);
     expect(section(await render(), "Më të rinjtë në Librum")).not.toContain(TILE);
-    bookRows = MANY.slice(0, 15);
-    expect(section(await render(), "Më të rinjtë në Librum")).toContain(TILE);
+    bookRows = MANY.slice(0, 6);
+    const six = section(await render(), "Më të rinjtë në Librum");
+    expect(titles(six)).toHaveLength(6);
+    expect(six).toContain(TILE);
+    expect(six.indexOf("Book 01")).toBeLessThan(six.indexOf(TILE));
+  });
+
+  // sl-2 b (swap in place), sl-4 a, sl-5 a, sl-6 a, sl-7 a: every
+  // category button's row is built on the server; the buttons'
+  // client component shows one at a time.
+  async function categoryTabs(): Promise<{ label: string; href: string; html: string }[]> {
+    const element = await BookstorePage({ searchParams: Promise.resolve({}) });
+    const find = (node: unknown): { props: { tabs: { label: string; href: string; row: unknown }[] } } | null => {
+      if (!node || typeof node !== "object") return null;
+      if (Array.isArray(node)) {
+        for (const n of node) {
+          const hit = find(n);
+          if (hit) return hit;
+        }
+        return null;
+      }
+      const el = node as { type?: unknown; props?: { tabs?: unknown; children?: unknown } };
+      if (el.type === CategoryShelfTabs) return el as never;
+      return find(el.props?.children);
+    };
+    const tabsEl = find(element);
+    expect(tabsEl).not.toBeNull();
+    return tabsEl!.props.tabs.map((t) => ({
+      label: t.label,
+      href: t.href,
+      html: renderToStaticMarkup(t.row as Parameters<typeof renderToStaticMarkup>[0]),
+    }));
+  }
+
+  it("sl-2 b: each button carries its category's newest books (14 at most), with the tile to that category's page", async () => {
+    bookRows = MANY;
+    categoryRows = [
+      { position: 1, category: "Histori" },
+      { position: 2, category: "Poezi" },
+    ];
+    const tabs = await categoryTabs();
+    expect(tabs.map((t) => [t.label, t.href])).toEqual([
+      ["Të gjitha kategoritë", "/librari"],
+      ["Histori", "/librari?genre=Histori"],
+      ["Poezi", "/librari?genre=Poezi"],
+    ]);
+    // All: the shelf's own list.
+    expect(titles(tabs[0].html)).toHaveLength(14);
+    expect(tabs[0].html).toContain('href="/librari?rafti=te-rinjte"');
+    // Histori: its 10 books, newest first, then the tile to Histori's page (sl-5 a).
+    expect(titles(tabs[1].html)).toEqual(["Book 20", "Book 18", "Book 16", "Book 14", "Book 12", "Book 10", "Book 08", "Book 06", "Book 04", "Book 02"]);
+    expect(tabs[1].html).toMatch(linkRe("/librari?genre=Histori", '<span class="underline decoration-2 underline-offset-4">' + TILE));
+    expect(tabs[1].html).toContain('aria-label="Më të rinjtë në Librum: Histori"');
+    // sl-7 a: a chosen category with no books says so, with no tile.
+    expect(titles(tabs[2].html)).toEqual([]);
+    expect(tabs[2].html).toContain("Ende nuk ka libra në këtë kategori.");
+    expect(tabs[2].html).not.toContain(TILE);
+  });
+
+  it("sl-2 b: a category with 5 books or fewer has no tile; the page only shows the first row until a tap", async () => {
+    bookRows = MANY.slice(0, 9);
+    categoryRows = [{ position: 1, category: "Histori" }];
+    const tabs = await categoryTabs();
+    expect(titles(tabs[1].html)).toEqual(["Book 08", "Book 06", "Book 04", "Book 02"]);
+    expect(tabs[1].html).not.toContain(TILE);
+    const shelf = section(await render(), "Më të rinjtë në Librum");
+    expect(titles(shelf)).toHaveLength(9);
+    expect(shelf).not.toContain("Më të rinjtë në Librum: Histori");
+  });
+
+  it("sl-2 b: a book only in a category row (older than the newest 14) still gets its stars", async () => {
+    bookRows = [...Array.from({ length: 14 }, (_, i) => book(i + 2, 199)), book(1, 199, ["Poezi"])];
+    categoryRows = [{ position: 1, category: "Poezi" }];
+    reviewRows = [
+      { book_id: "book-01", rating: 5 },
+      { book_id: "book-01", rating: 4 },
+    ];
+    const tabs = await categoryTabs();
+    expect(titles(tabs[0].html)).not.toContain("Book 01");
+    expect(titles(tabs[1].html)).toEqual(["Book 01"]);
+    expect(tabs[1].html).toContain("4,5 nga 5 yje, 2 vlerësime");
+  });
+
+  it("sl-6 a: the Më shumë kategori box still links every category to its page", async () => {
+    const html = await render();
+    const box = html.slice(html.indexOf("Më shumë kategori"), html.indexOf("</details>"));
+    expect(box).toContain('href="/librari?genre=Horror"');
   });
 
   it("sl-1 a: each row is the labelled sliding list; the arrows stay hidden until the browser measures the row", async () => {

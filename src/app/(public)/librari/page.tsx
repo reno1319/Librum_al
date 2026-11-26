@@ -34,6 +34,7 @@ import { DismissableDetails } from "@/components/dismissable-details";
 import { DetailsCloseButton } from "@/components/details-close-button";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 import { ShelfSlider, SHELF_ITEM_CLASSES } from "@/components/shelf-slider";
+import { CategoryShelfTabs } from "@/components/category-shelf-tabs";
 
 export const metadata: Metadata = {
   title: "Libraria",
@@ -348,9 +349,11 @@ async function fetchBannerSlides(supabase: SupabaseClient): Promise<BannerSlide[
 
 // A shelf row (Renato 11-26, Kobo-style): 5 across on a computer, the
 // arrows slide it twice, so 3 pages hold 14 books and the "Shiko të
-// gjithë listën" tile. A shelf with more books than the row holds
-// gets the tile, which opens the shelf's own list (sl-1 a).
+// gjithë listën" tile. The tile shows after the last book whenever the
+// row can slide, i.e. it has more books than one page of 5 (sl-3 a),
+// and opens the shelf's own list (sl-1 a).
 const SHELF_ROW_BOOKS = 14;
+const SHELF_PAGE_BOOKS = 5;
 
 // The shelves, by their list's ?rafti= key (sl-1 a).
 const SHELVES: Record<string, { title: string; genres?: readonly string[]; onlyOnLibrum?: boolean }> = {
@@ -380,15 +383,29 @@ function shelfQuery(supabase: SupabaseClient, key: ShelfKey, { count = false }: 
   return query.order("created_at", { ascending: false });
 }
 
-// A shelf row: one more book than the row holds, so the page knows
-// whether to show the tile. Fail-soft: an error gives null, and the
-// caller decides what that hides.
+// A shelf row: the newest books the row holds. Fail-soft: an error
+// gives null, and the caller decides what that hides.
 async function fetchShelf(supabase: SupabaseClient, key: ShelfKey): Promise<BookWithAuthor[] | null> {
   const { data, error } = await shelfQuery(supabase, key)
-    .limit(SHELF_ROW_BOOKS + 1)
+    .limit(SHELF_ROW_BOOKS)
     .returns<BookWithAuthor[]>();
   if (error) {
     console.error("Libraria: failed to load a shelf:", error);
+    return null;
+  }
+  return data ?? [];
+}
+
+// One category button's row under "Më të rinjtë" (sl-2 b): that
+// category's newest books, read up front so a tap swaps at once
+// (sl-4 a). Fail-soft: an error gives null (the row says so).
+async function fetchCategoryRow(supabase: SupabaseClient, genre: string): Promise<BookWithAuthor[] | null> {
+  const { data, error } = await shelfQuery(supabase, "te-rinjte")
+    .contains("categories", [genre])
+    .limit(SHELF_ROW_BOOKS)
+    .returns<BookWithAuthor[]>();
+  if (error) {
+    console.error("Libraria: failed to load a category row:", error);
     return null;
   }
   return data ?? [];
@@ -525,7 +542,15 @@ export default async function BookstorePage({
     fetchReadingPicks(supabase, 2),
   ]);
   const pick = picks[0] ?? null;
-  const shown = [...(newest ?? []), ...(onlyOnLibrum ?? []), ...(nonFiction ?? []), ...(pick ? [pick.book] : [])];
+  const buttons = categoryButtons(genresWithBooks, staffCategories);
+  const categoryRows = newest && newest.length > 0 ? await Promise.all(buttons.map((g) => fetchCategoryRow(supabase, g))) : [];
+  const shown = [
+    ...(newest ?? []),
+    ...categoryRows.flatMap((r) => r ?? []),
+    ...(onlyOnLibrum ?? []),
+    ...(nonFiction ?? []),
+    ...(pick ? [pick.book] : []),
+  ];
   const ratings = await fetchRatings(supabase, [...new Set(shown.map((b) => b.id))]);
   const ctx: CardContext = { supabase, ratings, signedIn: !!user, cartBookIds, ownedOrOwnBookIds };
 
@@ -554,9 +579,26 @@ export default async function BookstorePage({
             }
           />
         ) : (
-          <Shelf shelfKey="te-rinjte" books={newest} ctx={ctx} first={slides.length === 0}>
-            <CategoryButtons genres={categoryButtons(genresWithBooks, staffCategories)} />
-          </Shelf>
+          <ShelfSection title={SHELVES["te-rinjte"].title} first={slides.length === 0}>
+            <CategoryShelfTabs
+              tabs={[
+                {
+                  label: "Të gjitha kategoritë",
+                  href: "/librari",
+                  row: <ShelfRow label={SHELVES["te-rinjte"].title} books={newest} listHref="/librari?rafti=te-rinjte" ctx={ctx} />,
+                },
+                ...buttons.map((g, i) => {
+                  const listHref = buildBookstoreHref({}, { genre: g });
+                  return {
+                    label: g,
+                    href: listHref,
+                    row: <ShelfRow label={`${SHELVES["te-rinjte"].title}: ${g}`} books={categoryRows[i]} listHref={listHref} ctx={ctx} />,
+                  };
+                }),
+              ]}
+              more={<MoreCategories />}
+            />
+          </ShelfSection>
         )}
 
         {/* LR1 patch 2 (lr1-1 c): the books their authors ticked, newest
@@ -615,52 +657,71 @@ function ReadingPickSection({ pick, hasPast, ctx }: { pick: ReadingPick; hasPast
   );
 }
 
-// A shelf: a serif title, anything given (the category buttons), then
-// one row of cards that slides a page at a time (ShelfSlider): 14 books
-// at most, then the "Shiko të gjithë listën" tile when the shelf has
-// more (sl-1 a). Phones swipe the row.
-function Shelf({
-  shelfKey,
-  books,
-  ctx,
-  first = false,
-  children,
-}: {
-  shelfKey: ShelfKey;
-  books: BookWithAuthor[];
-  ctx: CardContext;
-  first?: boolean;
-  children?: React.ReactNode;
-}) {
+// A shelf: a serif title, then one row of cards that slides a page at
+// a time (ShelfSlider). Phones swipe the row.
+function Shelf({ shelfKey, books, ctx }: { shelfKey: ShelfKey; books: BookWithAuthor[]; ctx: CardContext }) {
   const { title } = SHELVES[shelfKey];
-  const hasMore = books.length > SHELF_ROW_BOOKS;
+  return (
+    <ShelfSection title={title}>
+      <ShelfRow label={title} books={books} listHref={`/librari?rafti=${shelfKey}`} ctx={ctx} />
+    </ShelfSection>
+  );
+}
+
+function ShelfSection({ title, first = false, children }: { title: string; first?: boolean; children: React.ReactNode }) {
   return (
     <section className={`${first ? "mt-4" : "mt-10 sm:mt-12"} border-b border-border pb-9`}>
       <h2 className={SECTION_HEADING}>{title}</h2>
       {children}
-      <ShelfSlider label={title}>
-        {books.slice(0, SHELF_ROW_BOOKS).map((book) => (
-          <li key={book.id} className={SHELF_ITEM_CLASSES}>
-            <div className="w-full">
-              <Card book={book} ctx={ctx} />
-            </div>
-          </li>
-        ))}
-        {hasMore && (
-          <li className={SHELF_ITEM_CLASSES}>
-            <Link
-              href={`/librari?rafti=${shelfKey}`}
-              className="focus-ring group flex min-h-48 w-full items-center justify-center gap-1.5 rounded-[3px] bg-transparent px-4 text-center text-[0.9375rem] font-semibold text-foreground transition-colors hover:bg-[#f3f1ec]"
-            >
-              <span className="underline decoration-2 underline-offset-4">Shiko të gjithë listën</span>
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0">
-                <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
-          </li>
-        )}
-      </ShelfSlider>
     </section>
+  );
+}
+
+// One row: 14 books at most, then the "Shiko të gjithë listën" tile to
+// listHref when the row can slide (sl-3 a). A category with no books
+// says so (sl-7 a); a failed read says so too.
+function ShelfRow({
+  label,
+  books,
+  listHref,
+  ctx,
+}: {
+  label: string;
+  books: BookWithAuthor[] | null | undefined;
+  listHref: string;
+  ctx: CardContext;
+}) {
+  if (!books || books.length === 0) {
+    return (
+      <p className="mt-6 mb-2 text-[0.9375rem] text-muted-foreground">
+        {books ? "Ende nuk ka libra në këtë kategori." : "Librat nuk u hapën dot tani. Provoni përsëri pas pak."}
+      </p>
+    );
+  }
+  const rowBooks = books.slice(0, SHELF_ROW_BOOKS);
+  return (
+    <ShelfSlider label={label}>
+      {rowBooks.map((book) => (
+        <li key={book.id} className={SHELF_ITEM_CLASSES}>
+          <div className="w-full">
+            <Card book={book} ctx={ctx} />
+          </div>
+        </li>
+      ))}
+      {rowBooks.length > SHELF_PAGE_BOOKS && (
+        <li className={SHELF_ITEM_CLASSES}>
+          <Link
+            href={listHref}
+            className="focus-ring group flex min-h-48 w-full items-center justify-center gap-1.5 rounded-[3px] bg-transparent px-4 text-center text-[0.9375rem] font-semibold text-foreground transition-colors hover:bg-[#f3f1ec]"
+          >
+            <span className="underline decoration-2 underline-offset-4">Shiko të gjithë listën</span>
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0">
+              <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+        </li>
+      )}
+    </ShelfSlider>
   );
 }
 
@@ -676,58 +737,43 @@ function Card({ book, ctx }: { book: BookWithAuthor; ctx: CardContext }) {
   );
 }
 
-// The buttons under "Më të rinjtë": "Të gjitha kategoritë" (this view,
-// so it is the selected one), the categories (staff's, or A–Zh: see
-// categoryButtons), then
-// "Më shumë kategori", a box with every category as plain text (Renato
-// 18:25Z). A tap on a category opens its results. The box closes on
+// After the category buttons (CategoryShelfTabs): "Më shumë kategori",
+// a box with every category as plain text (Renato 18:25Z). A tap on a
+// category there still opens its results (sl-6 a). The box closes on
 // its ✕, a tap outside, Escape or a tap on a category. On phones the
 // buttons stay one row that scrolls sideways and the box opens over
 // the page.
-const PILL =
-  "focus-ring inline-flex min-h-11 items-center rounded-full bg-[#ecebe8] px-5 text-[0.9375rem] whitespace-nowrap text-foreground transition-colors hover:bg-[#e0ded8]";
-
-function CategoryButtons({ genres }: { genres: string[] }) {
+function MoreCategories() {
   return (
-    <div className="-mx-4 mt-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:relative sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-      <Link href="/librari" aria-current="page" className={`${PILL} bg-primary! text-primary-foreground!`}>
-        Të gjitha kategoritë
-      </Link>
-      {genres.map((g) => (
-        <Link key={g} href={buildBookstoreHref({}, { genre: g })} className={PILL}>
-          {g}
-        </Link>
-      ))}
-      <DismissableDetails className="group" closeOnLinkClick>
-        <summary
-          className="focus-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-sm px-3 text-[0.9375rem] font-semibold whitespace-nowrap text-foreground underline decoration-2 underline-offset-4 [&::-webkit-details-marker]:hidden"
-        >
-          Më shumë kategori
-        </summary>
-        <div
-          role="group"
-          aria-label="Të gjitha kategoritë"
-          className="fixed inset-x-4 top-28 z-40 max-h-[75vh] overflow-y-auto rounded-[10px] border border-[#d9cdb0] bg-[#fffdf8] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:right-0 sm:w-[36rem] sm:max-h-none sm:p-6"
-        >
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="font-serif text-lg text-foreground">Të gjitha kategoritë</p>
-            <DetailsCloseButton label="Mbyll kategoritë" />
-          </div>
-          <ul className="grid grid-cols-2 gap-x-4 sm:grid-cols-3">
-            {GENRES.map((g) => (
-              <li key={g}>
-                <Link
-                  href={buildBookstoreHref({}, { genre: g })}
-                  className="focus-ring flex min-h-11 items-center rounded-sm px-1 text-[0.9375rem] text-foreground underline decoration-transparent underline-offset-2 hover:decoration-current"
-                >
-                  {g}
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <DismissableDetails className="group" closeOnLinkClick>
+      <summary
+        className="focus-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-sm px-3 text-[0.9375rem] font-semibold whitespace-nowrap text-foreground underline decoration-2 underline-offset-4 [&::-webkit-details-marker]:hidden"
+      >
+        Më shumë kategori
+      </summary>
+      <div
+        role="group"
+        aria-label="Të gjitha kategoritë"
+        className="fixed inset-x-4 top-28 z-40 max-h-[75vh] overflow-y-auto rounded-[10px] border border-[#d9cdb0] bg-[#fffdf8] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.18)] sm:absolute sm:inset-x-auto sm:top-[calc(100%+0.5rem)] sm:right-0 sm:w-[36rem] sm:max-h-none sm:p-6"
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="font-serif text-lg text-foreground">Të gjitha kategoritë</p>
+          <DetailsCloseButton label="Mbyll kategoritë" />
         </div>
-      </DismissableDetails>
-    </div>
+        <ul className="grid grid-cols-2 gap-x-4 sm:grid-cols-3">
+          {GENRES.map((g) => (
+            <li key={g}>
+              <Link
+                href={buildBookstoreHref({}, { genre: g })}
+                className="focus-ring flex min-h-11 items-center rounded-sm px-1 text-[0.9375rem] text-foreground underline decoration-transparent underline-offset-2 hover:decoration-current"
+              >
+                {g}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </DismissableDetails>
   );
 }
 
