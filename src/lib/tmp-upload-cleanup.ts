@@ -3,7 +3,8 @@
 // Every upload form first stages its file in the private "manuscripts"
 // bucket under the uploader's own "<uid>/tmp/<kind>/<uuid>.<ext>" key
 // (manuscript-field.tsx, cover-field.tsx, avatar-field.tsx,
-// blog-cover-field.tsx, docx-actions.ts). Saving the form promotes the
+// blog-cover-field.tsx, docx-actions.ts, and the Libraria banner's
+// slide-save-button.tsx). Saving the form promotes the
 // file to its final key and removes the temporary one; a tab closed
 // mid-form leaves it behind for good. This job removes those leftovers.
 //
@@ -42,6 +43,7 @@ export const TMP_UPLOAD_KINDS = {
   cover: new RegExp(`^${UUID}\\.(?:jpg|png)$`),
   avatar: new RegExp(`^${UUID}\\.(?:jpg|png)$`),
   blog: new RegExp(`^${UUID}\\.(?:jpg|png)$`),
+  libraria: new RegExp(`^${UUID}\\.(?:jpg|png)$`),
 } as const;
 
 export type TmpUploadKind = keyof typeof TMP_UPLOAD_KINDS;
@@ -107,7 +109,7 @@ export type TmpCleanupSummary = {
 };
 
 function emptyFound(): Record<TmpUploadKind, number> {
-  return { epub: 0, preview: 0, docx: 0, cover: 0, avatar: 0, blog: 0 };
+  return { epub: 0, preview: 0, docx: 0, cover: 0, avatar: 0, blog: 0, libraria: 0 };
 }
 
 function newestTimestampMs(entry: ListedEntry): number | null {
