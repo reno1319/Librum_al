@@ -11,6 +11,7 @@ import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { saveCategoryButtons } from "./actions";
 import { deleteBannerSlide, moveBannerSlide, saveBannerSlide } from "./banner-actions";
 import { deleteReadingPick, saveReadingPick } from "./pick-actions";
+import { SlideSaveButton } from "./slide-save-button";
 import {
   DEFAULT_PICK_BADGE,
   MAX_PICK_BADGE,
@@ -92,7 +93,7 @@ export default async function AdminLibrariaPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string; edit?: string; pick?: string }>;
 }) {
-  await requireStaff("catalog.feature");
+  const { userId } = await requireStaff("catalog.feature");
   const { error: rawError, success: rawSuccess, edit: rawEdit, pick: rawPick } = await searchParams;
   const error = pageErrorMessage(rawError);
   const success = pageSuccessMessage(rawSuccess);
@@ -251,7 +252,9 @@ export default async function AdminLibrariaPage({
               </ol>
             )}
 
-            <SlideForm slide={editing} books={books} cover={cover} />
+            {/* A fresh form per slide: Edit opens without a reload, and a
+                book list keeps what it showed before (bug 2026-11-26). */}
+            <SlideForm key={editing?.id ?? "new"} slide={editing} books={books} cover={cover} staffUserId={userId} />
           </>
         )}
       </section>
@@ -337,7 +340,7 @@ export default async function AdminLibrariaPage({
               </ol>
             )}
 
-            <PickForm pick={editingPick} books={books} />
+            <PickForm key={editingPick?.id ?? "new"} pick={editingPick} books={books} />
           </>
         )}
       </section>
@@ -395,10 +398,12 @@ function SlideForm({
   slide,
   books,
   cover,
+  staffUserId,
 }: {
   slide: SlideRow | null;
   books: PickableBook[];
   cover: (path: string | null) => string | null;
+  staffUserId: string;
 }) {
   const chosen = slide ? (books.find((b) => b.id === slide.book_id) ?? null) : null;
   const chosenAuthor = chosen ? resolveStaffByline(chosen) : null;
@@ -491,7 +496,7 @@ function SlideForm({
         Picture{slide ? " (leave empty to keep it)" : ""}
         <input
           type="file"
-          name="picture"
+          data-slide-picture="wide"
           accept="image/jpeg,image/png"
           required={!slide}
           className="text-sm file:mr-3 file:rounded-full file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary"
@@ -505,7 +510,7 @@ function SlideForm({
         Phone picture (optional)
         <input
           type="file"
-          name="phonePicture"
+          data-slide-picture="phone"
           accept="image/jpeg,image/png"
           className="text-sm file:mr-3 file:rounded-full file:border file:border-primary file:bg-transparent file:px-4 file:py-2 file:text-sm file:font-semibold file:text-primary"
         />
@@ -522,9 +527,11 @@ function SlideForm({
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" className={buttonClasses("primary", "md", "min-h-11 rounded-full px-5")}>
-          {slide ? "Save slide" : "Add slide"}
-        </button>
+        <SlideSaveButton
+          staffUserId={staffUserId}
+          label={slide ? "Save slide" : "Add slide"}
+          className={buttonClasses("primary", "md", "min-h-11 rounded-full px-5")}
+        />
         {slide && (
           <Link href="/admin/libraria#banner-slides" className="text-sm underline underline-offset-2 hover:decoration-2">
             Cancel

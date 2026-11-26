@@ -16,6 +16,30 @@ export const MAX_SLIDE_PICTURE_BYTES = 5 * 1024 * 1024;
 export const SLIDE_PICTURE_SIZE = { width: 2400 } as const;
 export const SLIDE_PHONE_PICTURE_SIZE = { width: 1200 } as const;
 
+// Banner two-pictures fix (Renato 2026-11-26): the browser sends each
+// picture straight to Storage, never through the save, because Vercel
+// refuses a request over about 4.5 MB (a wide and a phone picture
+// together are often more). Like the blog cover, the file waits in the
+// private "manuscripts" bucket under the staff member's own
+// "<uid>/tmp/libraria/<uuid>.<jpg|png>"; the save gets only that name,
+// checks the bytes itself, stores the shrunk JPEG in "libraria" and
+// removes the waiting file.
+export const SLIDE_STAGING_BUCKET = "manuscripts";
+const UUID_BODY = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const STAGED_SLIDE_FILE = new RegExp(`^${UUID_BODY}\\.(?:jpg|png)$`);
+const UUID_ONLY = new RegExp(`^${UUID_BODY}$`);
+
+export function stagedSlidePicturePath(userId: string, fileId: string, extension: "jpg" | "png"): string {
+  return `${userId}/tmp/libraria/${fileId}.${extension}`;
+}
+
+// Only that exact shape under the caller's own id.
+export function isOwnStagedSlidePicturePath(path: unknown, userId: unknown): path is string {
+  if (typeof path !== "string" || typeof userId !== "string" || !UUID_ONLY.test(userId)) return false;
+  const prefix = `${userId}/tmp/libraria/`;
+  return path.startsWith(prefix) && STAGED_SLIDE_FILE.test(path.slice(prefix.length));
+}
+
 export type SlideRow = {
   id: string;
   position: number;

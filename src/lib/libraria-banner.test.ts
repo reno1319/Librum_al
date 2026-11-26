@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isSlidePicturePath, parseSlideForm, slideDaysLabel, slideStatus, tiranaToday } from "./libraria-banner";
+import {
+  isOwnStagedSlidePicturePath,
+  isSlidePicturePath,
+  parseSlideForm,
+  slideDaysLabel,
+  slideStatus,
+  stagedSlidePicturePath,
+  tiranaToday,
+} from "./libraria-banner";
 
 // LR1 patch 3: the banner slide rules.
 const BOOK = "11111111-1111-4111-8111-111111111111";
@@ -117,5 +125,35 @@ describe("slideDaysLabel", () => {
     expect(slideDaysLabel({ starts_on: "2026-11-20", ends_on: "2026-12-10" })).toBe("2026-11-20 to 2026-12-10");
     expect(slideDaysLabel({ starts_on: "2026-11-20", ends_on: null })).toBe("From 2026-11-20");
     expect(slideDaysLabel({ starts_on: null, ends_on: "2026-12-10" })).toBe("Until 2026-12-10");
+  });
+});
+
+describe("staged slide pictures (two-pictures fix)", () => {
+  const ME = "55555555-5555-4555-8555-555555555555";
+  const FILE = "66666666-6666-4666-8666-666666666666";
+
+  it("builds the waiting-file name under the staff member's own folder", () => {
+    expect(stagedSlidePicturePath(ME, FILE, "png")).toBe(`${ME}/tmp/libraria/${FILE}.png`);
+    expect(isOwnStagedSlidePicturePath(stagedSlidePicturePath(ME, FILE, "jpg"), ME)).toBe(true);
+  });
+
+  it.each([
+    `77777777-7777-4777-8777-777777777777/tmp/libraria/${FILE}.jpg`,
+    `${ME}/tmp/blog/${FILE}.jpg`,
+    `${ME}/tmp/libraria/${FILE}.webp`,
+    `${ME}/tmp/libraria/${FILE}.jpg/x`,
+    `${ME}/tmp/libraria/../${FILE}.jpg`,
+    `${ME}/tmp/libraria/AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA.jpg`,
+    `/${ME}/tmp/libraria/${FILE}.jpg`,
+    `${ME}/tmp/libraria/${FILE}.jpg `,
+    "",
+    42,
+    null,
+  ])("refuses %s", (path) => {
+    expect(isOwnStagedSlidePicturePath(path, ME)).toBe(false);
+  });
+
+  it("refuses when the caller's id is not an id", () => {
+    expect(isOwnStagedSlidePicturePath(`x/tmp/libraria/${FILE}.jpg`, "x")).toBe(false);
   });
 });
