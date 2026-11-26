@@ -9,7 +9,7 @@
 --
 -- * Snapshot: every table/view/sequence privilege and every column
 --   privilege that anon, authenticated and service_role hold in public
---   (MAINTAIN excluded) must equal the 329 rows below EXACTLY, both ways.
+--   (MAINTAIN excluded) must equal the 335 rows below EXACTLY, both ways.
 --   The rows are staging's real grants, read on 2026-10-22, which equal
 --   the old-default rebuild of schema.sql, plus PEOPLE-1's three
 --   account_suspensions rows (migration 20261023090000) and DOWNLOADS-1's
@@ -58,7 +58,10 @@
 --   20261125150000), plus LR1 patch 3's three libraria_banner_slides
 --   rows (authenticated and service_role SELECT; nothing for anon) and
 --   three public_libraria_banner_slides rows (SELECT for every role;
---   migration 20261125200000). A relation with no
+--   migration 20261125200000), plus LR1 patch 4's three
+--   libraria_reading_picks rows (authenticated and service_role SELECT;
+--   nothing for anon) and three public_libraria_reading_picks rows
+--   (SELECT for every role; migration 20261126090000). A relation with no
 --   privilege for a role is a row with '-'.
 -- * Guard: anon holds no privilege at all (MAINTAIN included), checked
 --   as its effective privilege (PUBLIC and role membership count), on
@@ -234,6 +237,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','r libraria_banner_slides | anon | -'),
 ('rel','r libraria_banner_slides | authenticated | SELECT'),
 ('rel','r libraria_banner_slides | service_role | SELECT'),
+('rel','r libraria_reading_picks | anon | -'),
+('rel','r libraria_reading_picks | authenticated | SELECT'),
+('rel','r libraria_reading_picks | service_role | SELECT'),
 ('rel','r blog_post_reactions | anon | -'),
 ('rel','r blog_post_reactions | authenticated | SELECT'),
 ('rel','r blog_post_reactions | service_role | -'),
@@ -393,6 +399,9 @@ insert into grant_contract_expected (kind, line) values
 ('rel','v public_libraria_banner_slides | anon | SELECT'),
 ('rel','v public_libraria_banner_slides | authenticated | SELECT'),
 ('rel','v public_libraria_banner_slides | service_role | SELECT'),
+('rel','v public_libraria_reading_picks | anon | SELECT'),
+('rel','v public_libraria_reading_picks | authenticated | SELECT'),
+('rel','v public_libraria_reading_picks | service_role | SELECT'),
 ('rel','v public_books | anon | SELECT'),
 ('rel','v public_books | authenticated | SELECT'),
 ('rel','v public_books | service_role | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE'),
@@ -448,8 +457,8 @@ declare
   v_diff text;
 begin
   select count(*) into v_expected from grant_contract_expected;
-  if v_expected <> 329 then
-    raise exception 'FAIL: part1: the snapshot must hold 329 rows, holds %', v_expected;
+  if v_expected <> 335 then
+    raise exception 'FAIL: part1: the snapshot must hold 335 rows, holds %', v_expected;
   end if;
 
   select string_agg(side || ' ' || kind || ' ' || line, E'\n' order by side, kind, line)

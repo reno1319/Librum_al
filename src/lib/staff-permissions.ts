@@ -66,9 +66,12 @@ import type { Permission, StaffRole } from "@/lib/types";
 //
 // BOOK-PEN-NAME-RIGHTS-CHOICE-1 adds catalog.feature (pick or clear the
 // "Librum's choice" book), granted to owner and admin only; editor stays
-// the blog role. It is TypeScript-only: SQL staff_has_permission() does
-// not know it, because the two functions it gates (set_librum_choice,
-// clear_librum_choice) are service_role-only and never call it.
+// the blog role. It began TypeScript-only (set_librum_choice and
+// clear_librum_choice are service_role-only). LR1 patches 2 and 3 put
+// it in SQL staff_has_permission() for the Libraria admin functions,
+// which the database then allowed for the owner alone; LR1 patch 4
+// (migration 20261126090000, lr4-6 a) gives it to admin there too, so
+// both lists match.
 //
 // ADMIN-3-REVIEW adds books.review (approve or send back a book waiting
 // for review), owner and admin only (Renato's 6a). Unlike
