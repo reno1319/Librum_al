@@ -61,6 +61,8 @@ let failBookList = false;
 
 function tableStub(rows: Row[]) {
   let result = [...rows];
+  // The matches before .limit(), for a { count: "exact" } read.
+  let count: number | null = null;
   const builder: Record<string, unknown> = {
     select: () => builder,
     eq: (col: string, value: unknown) => ((result = result.filter((r) => r[col] === value)), builder),
@@ -76,10 +78,10 @@ function tableStub(rows: Row[]) {
         opts?.ascending ? String(a[col]).localeCompare(String(b[col])) : String(b[col]).localeCompare(String(a[col])),
       )),
       builder),
-    limit: (n: number) => ((result = result.slice(0, n)), builder),
+    limit: (n: number) => ((count = result.length), (result = result.slice(0, n)), builder),
     returns: () => builder,
     maybeSingle: () => Promise.resolve({ data: result[0] ?? null, error: null }),
-    then: (resolve: (v: unknown) => unknown) => resolve({ data: result, error: null }),
+    then: (resolve: (v: unknown) => unknown) => resolve({ data: result, error: null, count: count ?? result.length }),
   };
   return builder;
 }
@@ -211,12 +213,14 @@ describe("BookstorePage: LR1 shop front", () => {
   const linkRe = (href: string, text: string, extra = "") =>
     new RegExp(`<a\\b(?=[^>]*href="${esc(href)}")${extra ? `(?=[^>]*${extra})` : ""}[^>]*>${esc(text)}<`);
 
-  it("the shelves view: hidden Libraria heading, no strip, the newest five, and none of the old page", async () => {
+  it("the shelves view: hidden Libraria heading, no strip, every book up to 14, and none of the old page", async () => {
     const html = await render();
     expect(html).toContain('<h1 class="sr-only">Libraria</h1>');
     // lr3-6 a: the old "Zgjedhja e Librum" / "I ri në Librum" strip is gone.
     for (const gone of ["I ri në Librum", "Zgjedhja e Librum"]) expect(html, gone).not.toContain(gone);
-    expect(titles(section(html, "Më të rinjtë në Librum"))).toEqual(["Book 10", "Book 09", "Book 08", "Book 07", "Book 06"]);
+    expect(titles(section(html, "Më të rinjtë në Librum"))).toEqual(
+      ["Book 10", "Book 09", "Book 08", "Book 07", "Book 06", "Book 05", "Book 04", "Book 03", "Book 02", "Book 01"],
+    );
     for (const gone of ["Filtrat", "Renditja", "Zhanri", "Klasikët shqiptarë", "Jeni autor?", "Filloni të publikoni", "Të gjithë librat", "Hiq të gjitha"]) {
       expect(html, gone).not.toContain(gone);
     }
@@ -264,13 +268,13 @@ describe("BookstorePage: LR1 shop front", () => {
     expect(buttonsOf(await render())).toEqual(["Filozofi", "Histori", "Letërsi artistike"]);
   });
 
-  it("Libra që i gjeni vetëm në Librum: the newest five ticked books after Më të rinjtë, hidden without any", async () => {
+  it("Libra që i gjeni vetëm në Librum: the newest ticked books after Më të rinjtë, hidden without any", async () => {
     expect(await render()).not.toContain("Libra që i gjeni vetëm në Librum");
     bookRows = BOOKS.map((b) =>
       ["book-01", "book-03", "book-05", "book-06", "book-07", "book-09"].includes(String(b.id)) ? { ...b, only_on_librum: true } : b,
     );
     const html = await render();
-    expect(titles(section(html, "Libra që i gjeni vetëm në Librum"))).toEqual(["Book 09", "Book 07", "Book 06", "Book 05", "Book 03"]);
+    expect(titles(section(html, "Libra që i gjeni vetëm në Librum"))).toEqual(["Book 09", "Book 07", "Book 06", "Book 05", "Book 03", "Book 01"]);
     expect(html.indexOf("Më të rinjtë në Librum")).toBeLessThan(html.indexOf("Libra që i gjeni vetëm në Librum"));
     expect(html.indexOf("Libra që i gjeni vetëm në Librum")).toBeLessThan(html.indexOf("Libra jo-artistikë"));
   });
@@ -387,7 +391,84 @@ describe("BookstorePage: LR1 shop front", () => {
   it("old links with sort or a price still open the shelves view; the parts are ignored", async () => {
     const html = await render({ sort: "price_asc", minPrice: "500", maxPrice: "0" });
     expect(html).toContain("Më të rinjtë në Librum");
-    expect(titles(section(html, "Më të rinjtë në Librum"))).toHaveLength(5);
+    expect(titles(section(html, "Më të rinjtë në Librum"))).toHaveLength(10);
+  });
+
+  // Renato 11-26 (sl-1 a): Kobo-style rows -- 14 books, then the tile.
+  const MANY: Row[] = Array.from({ length: 20 }, (_, i) =>
+    book(i + 1, 199, i % 2 ? ["Histori"] : ["Letërsi artistike"], { only_on_librum: true }),
+  );
+  const TILE = "Shiko të gjithë listën";
+
+  it("sl-1 a: a shelf with more than 14 books shows the newest 14, then the tile to its own list", async () => {
+    bookRows = MANY;
+    const html = await render();
+    const newest = section(html, "Më të rinjtë në Librum");
+    expect(titles(newest)).toEqual(Array.from({ length: 14 }, (_, i) => `Book ${String(20 - i).padStart(2, "0")}`));
+    expect(newest).toMatch(linkRe("/librari?rafti=te-rinjte", '<span class="underline decoration-2 underline-offset-4">' + TILE));
+    expect(newest.indexOf("Book 07")).toBeLessThan(newest.indexOf(TILE));
+    expect(section(html, "Libra që i gjeni vetëm në Librum")).toContain('href="/librari?rafti=vetem-ne-librum"');
+    // 10 non-fiction books: the row holds them all, so no tile.
+    const nonFiction = section(html, "Libra jo-artistikë");
+    expect(titles(nonFiction)).toHaveLength(10);
+    expect(nonFiction).not.toContain(TILE);
+  });
+
+  it("sl-1 a: 14 books or fewer gives no tile", async () => {
+    bookRows = MANY.slice(0, 14);
+    expect(section(await render(), "Më të rinjtë në Librum")).not.toContain(TILE);
+    bookRows = MANY.slice(0, 15);
+    expect(section(await render(), "Më të rinjtë në Librum")).toContain(TILE);
+  });
+
+  it("sl-1 a: each row is the labelled sliding list; the arrows stay hidden until the browser measures the row", async () => {
+    const html = await render();
+    expect(html).toMatch(/<ul class="relative [^"]*snap-x[^"]*overflow-x-auto[^"]*" aria-label="Më të rinjtë në Librum" tabindex="-1">/);
+    // Audit N1: room for focus rings and cover shadows inside the row,
+    // cancelled by matching negative margins (no layout change).
+    const row = html.match(/<ul class="relative ([^"]*)" aria-label="Më të rinjtë në Librum"/)?.[1] ?? "";
+    for (const c of ["mt-3", "pt-2", "pb-2", "sm:-mx-2", "sm:px-2", "sm:-mb-2", "sm:scroll-px-2"]) expect(row.split(" "), c).toContain(c);
+    // Audit N2: both arrows are always in the page, hidden at the ends
+    // (out of the tab order) rather than removed.
+    for (const label of ["Librat e mëparshëm", "Librat e tjerë"]) {
+      expect(html).toMatch(new RegExp(`<button type="button" aria-label="${label}" aria-hidden="true" tabindex="-1" class="[^"]* invisible"`));
+    }
+  });
+
+  it("sl-1 a: a shelf's list: its title, the count, a chip back to Libraria, its books, no shelves", async () => {
+    bookRows = MANY;
+    const html = await render({ rafti: "te-rinjte" });
+    expect(html).toMatch(/<h1[^>]*>Më të rinjtë në Librum<\/h1>/);
+    expect(html).toContain(">20 libra<");
+    expect(html).toMatch(new RegExp('<a\\b(?=[^>]*aria-label="Hiq Më të rinjtë në Librum")(?=[^>]*href="/librari")'));
+    expect(titles(html)).toHaveLength(20);
+    expect(titles(html)[0]).toBe("Book 20");
+    expect(html).not.toContain(TILE);
+    expect(html).not.toContain("Libra jo-artistikë");
+    expect(html).not.toContain("Bota e leximit ju pret");
+  });
+
+  it("sl-1 a: the other lists hold only their shelf's books", async () => {
+    bookRows = MANY.map((b, i) => (i < 5 ? { ...b, only_on_librum: false } : b));
+    expect(titles(await render({ rafti: "vetem-ne-librum" }))).toHaveLength(15);
+    const nonFiction = await render({ rafti: "jo-artistike" });
+    expect(nonFiction).toMatch(/<h1[^>]*>Libra jo-artistikë<\/h1>/);
+    expect(titles(nonFiction)).toEqual(["Book 20", "Book 18", "Book 16", "Book 14", "Book 12", "Book 10", "Book 08", "Book 06", "Book 04", "Book 02"]);
+  });
+
+  it("sl-1 a: a list shows 48 books at most and says so", async () => {
+    bookRows = Array.from({ length: 50 }, (_, i) => book(i + 1, 199, ["Letërsi artistike"], { created_at: `2026-10-01T00:00:${String(i).padStart(2, "0")}Z` }));
+    const html = await render({ rafti: "te-rinjte" });
+    expect(titles(html)).toHaveLength(48);
+    expect(html).toContain("Po shfaqen 48 librat e parë");
+  });
+
+  it("sl-1 a: an unknown list opens the shelves; a category or search wins over a list; a failed read says so", async () => {
+    expect(await render({ rafti: "nope" })).toContain("Libra jo-artistikë");
+    expect(await render({ rafti: "toString" })).toContain("Libra jo-artistikë");
+    expect(await render({ rafti: "te-rinjte", genre: "Filozofi" })).toMatch(/<h1[^>]*>Filozofi<\/h1>/);
+    failBookList = true;
+    expect(await render({ rafti: "te-rinjte" })).toContain("Libraria nuk u hap dot tani.");
   });
 
   it("no match shows the help line and a way back; an unknown genre is ignored", async () => {
