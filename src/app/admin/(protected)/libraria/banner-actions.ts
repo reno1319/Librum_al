@@ -8,10 +8,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireStaff } from "@/lib/staff";
 import { detectCoverImageKind } from "@/lib/cover-image";
 import { IMAGE_CACHE_CONTROL_SECONDS, shrinkImageToJpeg } from "@/lib/cover-resize";
+import { checkStagedUploadSize } from "@/lib/staged-upload-size";
 import {
   MAX_SLIDE_PICTURE_BYTES,
   SLIDE_PHONE_PICTURE_SIZE,
   SLIDE_PICTURE_SIZE,
+  SLIDE_STAGING_BUCKET,
+  isOwnStagedSlidePicturePath,
   isSlidePicturePath,
   parseSlideForm,
   type SlideFormProblem,
@@ -27,6 +30,14 @@ import {
 // slides/<uuid>.jpg; the bucket has no storage policies. A picture that
 // a refused save uploaded, or that a save or delete replaced, is removed
 // again (best effort: a failed removal only leaves an unused file).
+//
+// Banner two-pictures fix (Renato 2026-11-26): the pictures no longer
+// come inside the form. Both together could pass Vercel's ~4.5 MB
+// request limit, which refused the save before this code ran. The
+// browser (slide-save-button.tsx) puts each picture in the private
+// staging bucket first; the form carries only "pictureStoragePath" and
+// "phonePictureStoragePath". Every way out of the save removes those
+// waiting files again.
 const PAGE_PATH = "/admin/libraria";
 const BUCKET = "libraria";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -84,19 +95,48 @@ function formPath(slideId: string | null): string {
   return slideId ? `${PAGE_PATH}?edit=${slideId}` : PAGE_PATH;
 }
 
-function uploadedFile(formData: FormData, name: string): File | null {
-  const value = formData.get(name);
-  return value instanceof File && value.size > 0 ? value : null;
+type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+// The waiting file's name, or null when this picture was not changed.
+// A name that is not the caller's own exact staging shape is refused.
+type StagedName = { ok: true; path: string | null } | { ok: false };
+
+function stagedName(formData: FormData, name: string, userId: string): StagedName {
+  const value = String(formData.get(name) ?? "").trim();
+  if (!value) return { ok: true, path: null };
+  return isOwnStagedSlidePicturePath(value, userId) ? { ok: true, path: value } : { ok: false };
 }
 
 type PictureResult = { ok: true; bytes: Buffer } | { ok: false; unreadable: boolean };
 
-async function preparePicture(file: File, size: { width: number }): Promise<PictureResult> {
-  if (file.size > MAX_SLIDE_PICTURE_BYTES || !(await detectCoverImageKind(file))) {
+async function preparePicture(supabase: ServerClient, path: string, size: { width: number }): Promise<PictureResult> {
+  const bucket = supabase.storage.from(SLIDE_STAGING_BUCKET);
+  // Refuse an oversized file before reading it (the staging bucket takes
+  // up to 50 MB).
+  if ((await checkStagedUploadSize(bucket, path, MAX_SLIDE_PICTURE_BYTES)) === "too_large") {
     return { ok: false, unreadable: false };
   }
-  const shrunk = await shrinkImageToJpeg(Buffer.from(await file.arrayBuffer()), size);
+  const { data, error } = await bucket.download(path);
+  if (error || !data) {
+    console.error("Libraria banner: staged picture read failed:", error);
+    return { ok: false, unreadable: true };
+  }
+  const bytes = Buffer.from(await data.arrayBuffer());
+  const file = new File([new Uint8Array(bytes)], "picture", { type: "application/octet-stream" });
+  if (bytes.length > MAX_SLIDE_PICTURE_BYTES || !(await detectCoverImageKind(file))) {
+    return { ok: false, unreadable: false };
+  }
+  const shrunk = await shrinkImageToJpeg(bytes, size);
   return shrunk ? { ok: true, bytes: shrunk } : { ok: false, unreadable: true };
+}
+
+// Best effort, with the staff member's own session (the bucket lets a
+// signed-in user remove only their own "<uid>/tmp/" files).
+async function removeStaged(supabase: ServerClient, paths: (string | null)[]): Promise<void> {
+  const list = paths.filter((p): p is string => typeof p === "string");
+  if (list.length === 0) return;
+  const { error } = await supabase.storage.from(SLIDE_STAGING_BUCKET).remove(list);
+  if (error) console.error("Libraria banner: staged picture removal failed:", error);
 }
 
 async function uploadPicture(bytes: Buffer): Promise<string | null> {
@@ -140,14 +180,27 @@ function revalidate(): void {
 }
 
 export async function saveBannerSlide(formData: FormData) {
-  await requireStaff("catalog.feature");
+  const { userId } = await requireStaff("catalog.feature");
 
+  const wideName = stagedName(formData, "pictureStoragePath", userId);
+  const phoneName = stagedName(formData, "phonePictureStoragePath", userId);
+  const staged = [wideName.ok ? wideName.path : null, phoneName.ok ? phoneName.path : null];
+  const supabase = await createClient();
+  try {
+    await saveSlide(formData, supabase, wideName, phoneName);
+  } finally {
+    await removeStaged(supabase, staged);
+  }
+}
+
+async function saveSlide(formData: FormData, supabase: ServerClient, wideName: StagedName, phoneName: StagedName) {
   const parsed = parseSlideForm(formData);
   if (!parsed.ok) redirect(withQuery(formPath(null), "error", problemMessage(parsed.reason)));
   const { slideId } = parsed;
 
-  const picture = uploadedFile(formData, "picture");
-  const phonePicture = uploadedFile(formData, "phonePicture");
+  if (!wideName.ok || !phoneName.ok) redirect(withQuery(formPath(slideId), "error", UNREADABLE_PICTURE));
+  const picture = wideName.path;
+  const phonePicture = phoneName.path;
 
   let stored: StoredPaths | null = null;
   if (slideId) {
@@ -159,9 +212,9 @@ export async function saveBannerSlide(formData: FormData) {
     redirect(withQuery(formPath(null), "error", CHOOSE_PICTURE));
   }
 
-  const wide = picture ? await preparePicture(picture, SLIDE_PICTURE_SIZE) : null;
+  const wide = picture ? await preparePicture(supabase, picture, SLIDE_PICTURE_SIZE) : null;
   if (wide && !wide.ok) redirect(withQuery(formPath(slideId), "error", wide.unreadable ? UNREADABLE_PICTURE : BAD_PICTURE));
-  const phone = phonePicture ? await preparePicture(phonePicture, SLIDE_PHONE_PICTURE_SIZE) : null;
+  const phone = phonePicture ? await preparePicture(supabase, phonePicture, SLIDE_PHONE_PICTURE_SIZE) : null;
   if (phone && !phone.ok) redirect(withQuery(formPath(slideId), "error", phone.unreadable ? UNREADABLE_PICTURE : BAD_PICTURE));
 
   const newWide = wide?.ok ? await uploadPicture(wide.bytes) : null;
@@ -175,7 +228,6 @@ export async function saveBannerSlide(formData: FormData) {
   const phonePath = newPhone ?? (parsed.removePhonePicture ? null : (stored?.phone_image_path ?? null));
   if (!imagePath) redirect(withQuery(formPath(slideId), "error", CHOOSE_PICTURE));
 
-  const supabase = await createClient();
   const { data, error } = await supabase.rpc("staff_save_libraria_banner_slide", {
     p_id: slideId,
     p_book_id: parsed.bookId,

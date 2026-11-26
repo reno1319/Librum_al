@@ -71,6 +71,7 @@ describe("isRemovableTmpUploadKey", () => {
     `${A}/tmp/cover/${F1}.png`,
     `${A}/tmp/avatar/${F1}.png`,
     `${A}/tmp/blog/${F1}.jpg`,
+    `${A}/tmp/libraria/${F1}.png`,
   ])("accepts %s", (key) => {
     expect(isRemovableTmpUploadKey(key)).toBe(true);
   });
@@ -122,6 +123,7 @@ describe("runTmpUploadCleanup", () => {
       [`${A}/tmp/cover/${F1}.jpg`]: { created_at: OLD, updated_at: OLD },
       [`${B}/tmp/avatar/${F1}.png`]: { created_at: OLD, updated_at: OLD },
       [`${B}/tmp/blog/${F2}.png`]: { created_at: OLD, updated_at: OLD },
+      [`${B}/tmp/libraria/${F1}.jpg`]: { created_at: OLD, updated_at: OLD },
       [`${B}/tmp/epub/${F2}.epub`]: { created_at: NEW, updated_at: NEW },
       // Final book files: never touched.
       [`${A}/${BOOK}.epub`]: { created_at: OLD, updated_at: OLD },
@@ -131,9 +133,9 @@ describe("runTmpUploadCleanup", () => {
 
     expect(summary.ok).toBe(true);
     expect(summary.accountsScanned).toBe(2);
-    expect(summary.removed).toBe(6);
-    expect(summary.found).toEqual({ epub: 1, preview: 1, docx: 1, cover: 1, avatar: 1, blog: 1 });
-    expect(summary.foundBytes).toBe(1000 + 500 + 4 * 10);
+    expect(summary.removed).toBe(7);
+    expect(summary.found).toEqual({ epub: 1, preview: 1, docx: 1, cover: 1, avatar: 1, blog: 1, libraria: 1 });
+    expect(summary.foundBytes).toBe(1000 + 500 + 5 * 10);
     expect(summary.tooNew).toBe(1);
     expect(summary.capped).toBe(false);
     expect([...store.keys()].sort()).toEqual(
