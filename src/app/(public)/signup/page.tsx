@@ -10,7 +10,7 @@ import { ACCOUNT_NAME_MAX_LENGTH } from "@/lib/account-name";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Krijo llogari",
+  title: "Regjistrohu",
   description: "Krijoni një llogari në Librum për të botuar ose për të blerë libra elektronikë.",
 };
 
@@ -131,7 +131,7 @@ export default async function SignupPage({
         </div>
 
         <button type="submit" className={`mt-2 ${buttonClasses("primary", "md")}`}>
-          Krijo llogarinë
+          Regjistrohu
         </button>
       </form>
 

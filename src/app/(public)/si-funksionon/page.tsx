@@ -159,11 +159,11 @@ export default async function HowItWorksPage() {
         </div>
       </section>
 
-      {/* Three steps on cream, between two waves. */}
+      {/* Four steps on cream, between two waves. */}
       <Wave />
       <section style={{ background: CREAM }}>
         <div className="page-container py-10 md:py-14">
-          <h2 className={`${SECTION_HEADING} text-center`}>Botoni në tre hapa</h2>
+          <h2 className={`${SECTION_HEADING} text-center`}>Botoni në katër hapa</h2>
 
           <div className="mx-auto mt-12 flex max-w-5xl flex-col gap-16 md:mt-16 md:gap-24">
             <article className="grid items-center gap-8 md:grid-cols-2 md:gap-14">
@@ -187,27 +187,42 @@ export default async function HowItWorksPage() {
               <Photo src={`${PHOTO_DIR}/prepare.jpg`} className="aspect-[6/5] md:order-2" />
             </article>
 
+            {/* fx2 a + sf2 b (Renato 2026-11-27): four steps like the
+                homepage; the old "Publikoni" step is split in two, and
+                both share the publish photo. */}
             <article className="grid items-center gap-8 md:grid-cols-2 md:gap-14">
               <Photo src={`${PHOTO_DIR}/publish.jpg`} className="aspect-[6/5] md:order-1" />
-              <div className="md:order-2">
-                <h3 className={STEP_TITLE}>
-                  <span className="font-bold">Hapi 2:</span> Publikoni
-                </h3>
-                <Bullets
-                  items={[
-                    "Krijoni një llogari si autor dhe hyni në Panelin e autorit.",
-                    "Shtoni titullin, bëni një përshkrim të librit tuaj, zgjidhni deri në 3 zhanre, fjalët kyçe dhe vendosni çmimin: nga 99 lekë, ose falas për veprat që janë në domenin publik.",
-                    "Zgjidhni deklaratën e të drejtave që i korrespondon librit tuaj.",
-                    "Dërgojeni librin për shqyrtim. Pasi Librum ta miratojë, libri shfaqet në Librari për t'u shitur.",
-                  ]}
-                />
+              <div className="flex flex-col gap-10 md:order-2">
+                <div>
+                  <h3 className={STEP_TITLE}>
+                    <span className="font-bold">Hapi 2:</span> Krijoni librin
+                  </h3>
+                  <Bullets
+                    items={[
+                      "Krijoni një llogari si autor dhe hyni në Panelin e autorit.",
+                      "Shtoni titullin, bëni një përshkrim të librit tuaj, zgjidhni deri në 3 zhanre dhe fjalët kyçe.",
+                    ]}
+                  />
+                </div>
+                <div>
+                  <h3 className={STEP_TITLE}>
+                    <span className="font-bold">Hapi 3:</span> Vendosni çmimin dhe botojeni
+                  </h3>
+                  <Bullets
+                    items={[
+                      "Vendosni çmimin: nga 99 lekë, ose falas për veprat që janë në domenin publik.",
+                      "Zgjidhni deklaratën e të drejtave që i korrespondon librit tuaj.",
+                      "Dërgojeni librin për shqyrtim. Pasi Librum ta miratojë, libri shfaqet në Librari për t'u shitur.",
+                    ]}
+                  />
+                </div>
               </div>
             </article>
 
             <article className="grid items-center gap-8 md:grid-cols-2 md:gap-14">
               <div className="md:order-1">
                 <h3 className={STEP_TITLE}>
-                  <span className="font-bold">Hapi 3:</span> Fitoni
+                  <span className="font-bold">Hapi 4:</span> Fitoni
                 </h3>
                 <div className="mt-6 flex flex-wrap items-end gap-x-6 gap-y-2">
                   <p className="font-serif text-7xl leading-none text-primary sm:text-8xl">{STANDARD_ROYALTY_PERCENT}%</p>
