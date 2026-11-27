@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { siteOriginOrNull } from "@/lib/seo";
 import { Libre_Franklin, Geist_Mono, Libre_Caslon_Text } from "next/font/google";
 import "./globals.css";
 
@@ -30,9 +31,17 @@ const libreCaslonText = Libre_Caslon_Text({
 // own. The one deliberate exception is the homepage, which uses
 // `title: { absolute: "..." }` to keep its own full brand title exactly
 // as-is without the template appending a redundant second "| Librum".
+//
+// S2 (Renato 11-27, fix all): `default` matches the homepage's own title.
+// S1 (fx3 b): metadataBase makes the site-wide share card
+// (src/app/opengraph-image.png) a full librum.al address; left out when
+// the origin can't be resolved, like every canonical link.
+const siteOrigin = siteOriginOrNull();
+
 export const metadata: Metadata = {
+  ...(siteOrigin ? { metadataBase: new URL(siteOrigin) } : {}),
   title: {
-    default: "Librum — botoni librat tuaj elektronikë",
+    default: "Librum — Vetëbotim për libra elektronikë",
     template: "%s | Librum",
   },
   description: "Platformë shqiptare për botimin dhe shitjen e librave elektronikë.",

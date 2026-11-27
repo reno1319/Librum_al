@@ -3,8 +3,11 @@ import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
 import { POLICY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/rimbursimet"),
   title: "Politika e rimbursimit",
   description: "Kur mund t'i merrni paratë mbrapsht për një libër elektronik të Librum, dhe si ta kërkoni.",
 };

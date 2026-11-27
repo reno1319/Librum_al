@@ -231,7 +231,7 @@ describe("AdminFinancePage", () => {
     expect(mockListFinanceRefundEntitlementMismatches).not.toHaveBeenCalled();
   });
 
-  it("renders exactly one H1, titled 'Finance', with a Stripe-Dashboard-replacement disclaimer", async () => {
+  it("renders exactly one H1, titled 'Finance', with a payment-provider-dashboard disclaimer", async () => {
     mockRequireStaff.mockResolvedValue({ userId: "u1", role: "owner" });
     setDefaultOkMocks();
 
@@ -241,7 +241,8 @@ describe("AdminFinancePage", () => {
 
     expect(h1s).toHaveLength(1);
     expect(collectText(h1s[0])).toContain("Finance");
-    expect(text).toContain("not a Stripe Dashboard replacement");
+    expect(text).toContain("not a replacement for the payment provider");
+    expect(text).not.toContain("Stripe Dashboard");
   });
 
   it("requests refund/dispute/checkout with FINANCE_DISPLAY_PAGE_SIZE + 1 (26) as the lookahead limit, and mismatches with 25 (no +1, no pagination)", async () => {
@@ -973,5 +974,20 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
     expect(html).toContain("Shuma nuk është e disponueshme (monedhë e panjohur)");
     expect(html).not.toContain("USD 19.99");
     expect(html).not.toMatch(/\$\d/);
+  });
+});
+
+// CSV-1 (idea 35, ex1 b): the staff download block under the counters.
+describe("AdminFinancePage: CSV download", () => {
+  it("links the export route under the summary cards, and the page itself still reads no ledger rows", async () => {
+    const { readFileSync } = await import("node:fs");
+    const pathModule = await import("node:path");
+    const pageSource = readFileSync(pathModule.join(__dirname, "page.tsx"), "utf8");
+    const cards = pageSource.indexOf("<SummaryCards result={summaryResult} />");
+    const link = pageSource.indexOf('href="/admin/finance/export" download');
+    expect(cards).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(cards);
+    expect(pageSource).toContain("All sales (CSV)");
+    expect(pageSource).not.toContain("author_ledger_entries");
   });
 });

@@ -1,10 +1,14 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 import { REPLY_PROMISE, SUPPORT_EMAIL, whatsappChatHref } from "@/lib/contact";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/kontakt"),
   title: "Kontakt",
-  description: "Kontaktoni ekipin e Librum.",
+  // P7 (Renato 11-27): one fuller sentence for search results.
+  description: "Na shkruani për pyetje rreth botimit, blerjeve, leximit të librave ose llogarisë suaj në Librum.",
 };
 
 // TRUST PACK (pipeline item 5): the reply promise (5. a) and the

@@ -79,7 +79,7 @@ import { classicAuthorPath, formatClassicYears, loadClassicAuthorsByWork } from 
 import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER, DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
 import { bookShareTarget } from "@/lib/contact";
 import { ShareButtons } from "@/components/share-buttons";
-import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull } from "@/lib/seo";
+import { bookPagePath, buildBookBreadcrumbJsonLd, buildBookJsonLd, canonicalMetadata, serializeJsonLd, siteOriginOrNull, NOT_FOUND_METADATA, shareCardImages } from "@/lib/seo";
 import { pageErrorMessage } from "@/lib/page-messages";
 import { editorPath } from "@/lib/book-editor-copy";
 import {
@@ -261,7 +261,13 @@ export async function generateMetadata({
   // "Preview my book" page) and earlier buyers can open an unpublished
   // book's page, so a crawler never sees it anyway; this is extra safety.
   // BD16 P4 (D1): a pre-order is a public book page too.
-  if (!book || (book.status !== "published" && !isPreorder(book))) {
+  // S2 (pb1 a): no book at all = the page answers notFound() (or sends
+  // to a picked edition); keep its tab title. A draft its author can
+  // still open keeps the site title.
+  if (!book) {
+    return { ...NOT_FOUND_METADATA, robots: { index: false, follow: false } };
+  }
+  if (book.status !== "published" && !isPreorder(book)) {
     return { robots: { index: false, follow: false } };
   }
 
@@ -293,7 +299,8 @@ export async function generateMetadata({
       title: ogTitle,
       description,
       type: "book",
-      ...(coverUrl ? { images: [{ url: coverUrl }] } : {}),
+      // S1 (pb2 a): no cover = the site-wide share card.
+      ...(coverUrl ? { images: [{ url: coverUrl }] } : shareCardImages()),
     },
     twitter: {
       card: "summary_large_image",

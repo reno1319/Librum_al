@@ -95,3 +95,46 @@ export function discountExpiryDisplayDate(expiresAt: string): string {
     year: "numeric",
   });
 }
+
+// fx4 a (Renato 2026-11-27): Paneli > Zbritjet asks for the expiry as
+// three Albanian selects (dita / muaji / viti) instead of the browser's
+// date box, which showed "mm/dd/yyyy" on an English phone.
+export const DISCOUNT_EXPIRY_MONTHS = [
+  "janar",
+  "shkurt",
+  "mars",
+  "prill",
+  "maj",
+  "qershor",
+  "korrik",
+  "gusht",
+  "shtator",
+  "tetor",
+  "nëntor",
+  "dhjetor",
+] as const;
+
+// This year in Albania and the four after it.
+export const DISCOUNT_EXPIRY_YEAR_COUNT = 5;
+
+export function discountExpiryYears(now: Date = new Date()): number[] {
+  const thisYear = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: DISCOUNT_TIME_ZONE, year: "numeric" }).format(now),
+  );
+  return Array.from({ length: DISCOUNT_EXPIRY_YEAR_COUNT }, (_, i) => thisYear + i);
+}
+
+/**
+ * The three selects as one value for discountExpiryInstant(): "" when
+ * all three are left empty (no expiry), "YYYY-MM-DD" when all three are
+ * picked, and null when only some are (the form then asks again).
+ * Whether the day exists in that month is left to discountExpiryInstant().
+ */
+export function discountExpiryDateFromParts(day: string, month: string, year: string): string | null {
+  const parts = [day.trim(), month.trim(), year.trim()];
+  if (parts.every((part) => part === "")) return "";
+  if (!parts.every((part) => /^\d{1,4}$/.test(part))) return null;
+  const [d, m, y] = parts.map(Number);
+  if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1000) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}

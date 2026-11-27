@@ -316,7 +316,7 @@ describe("BookstorePage: LR1 shop front", () => {
     expect(invite).toContain(
       "Krijoni një llogari falas në Librum dhe regjistrohuni për të marrë emailet tona. Mësoni më shumë për librat e\n        rinj, ofertat dhe merrni sugjerime leximi nga ekipi ynë.".replace(/\n\s+/g, " "),
     );
-    expect(invite).toMatch(linkRe("/signup", "Krijo llogari"));
+    expect(invite).toMatch(linkRe("/signup", "Regjistrohu"));
     signedInUser = { id: "reader-1" };
     expect(await render()).not.toContain("Bota e leximit ju pret");
   });

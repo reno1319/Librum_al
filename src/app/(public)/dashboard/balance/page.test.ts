@@ -381,3 +381,14 @@ describe("BalancePage: amounts are separated by currency (Patch 4)", () => {
     expect(html).not.toMatch(/\$/);
   });
 });
+
+// CSV-1 (idea 35, ex4 a): the download sits next to "Lëvizjet e fundit".
+describe("Dashboard Balance: CSV download", () => {
+  it("links the export route with a plain download anchor beside the activity heading", () => {
+    const heading = source.indexOf("Lëvizjet e fundit</h2>");
+    const link = source.indexOf('href="/dashboard/balance/export" download');
+    expect(heading).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(heading);
+    expect(source.slice(link, link + 200)).toContain("Shkarko të gjitha (CSV)");
+  });
+});

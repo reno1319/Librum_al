@@ -36,8 +36,10 @@ describe("Route group structure: public chrome stays out of /admin/*", () => {
     const source = read("(public)/layout.tsx");
     expect(source).toMatch(/import\s*\{\s*SiteHeader\s*\}\s*from\s*"@\/components\/site-header"/);
     expect(source).toMatch(/import\s*\{\s*SiteFooter\s*\}\s*from\s*"@\/components\/site-footer"/);
-    // LR1: Libraria gets the store variant of the same header.
-    expect(source).toMatch(/<SiteHeader\s+variant=\{[^}]*\}\s*\/>/);
+    // HEADER FIX (hd1 a): the layout no longer picks the header (it is
+    // not drawn again between pages); SiteHeader picks it per page.
+    expect(source).toMatch(/<SiteHeader\s*\/>/);
+    expect(source).not.toMatch(/INTERNAL_PATHNAME_HEADER|next\/headers/);
     expect(source).toMatch(/<SiteFooter\s*\/>/);
   });
 

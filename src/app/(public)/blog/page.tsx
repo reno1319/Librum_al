@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { blogNowIso } from "@/lib/blog-schedule";
 import type { Metadata } from "next";
+import { shareCardImages } from "@/lib/seo";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
@@ -47,9 +48,11 @@ export function generateMetadata(): Metadata {
       description,
       url: `${origin}/blog`,
       type: "website",
+      // S1 (pb2 a): the site-wide share card.
+      ...shareCardImages(),
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
     },
   };
 }

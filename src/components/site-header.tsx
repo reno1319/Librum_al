@@ -10,6 +10,7 @@ import { FeedbackButton } from "@/components/feedback-button";
 import { accountFirstName } from "@/lib/account-first-name";
 import { LibrumLogo } from "@/components/librum-logo";
 import { StaffBar } from "@/components/staff-bar";
+import { SiteHeaderSwitch } from "@/components/site-header-switch";
 import { roleHasPermission } from "@/lib/staff-permissions";
 import { cartCountLabel } from "@/lib/cart";
 import type { StaffRole } from "@/lib/types";
@@ -123,11 +124,13 @@ const BRASS_BUTTON_CLASSES =
   "focus-ring inline-flex items-center rounded-full bg-accent px-4 py-2.5 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground";
 
 // LR1 (Renato 11-25, sketch pictures r4, lb7 b): Libraria's own header.
-// "store" is chosen by src/app/(public)/layout.tsx for /librari only;
-// every other page keeps "default", byte-for-byte today's header.
+// HEADER FIX (hd1 a): with no variant given (the (public) layout), both
+// headers are drawn and SiteHeaderSwitch shows "store" on the pages in
+// src/lib/store-header-paths.ts and "default" everywhere else, after
+// every move between pages. A variant given draws only that one (tests).
 export type SiteHeaderVariant = "default" | "store";
 
-export async function SiteHeader({ variant = "default" }: { variant?: SiteHeaderVariant } = {}) {
+export async function SiteHeader({ variant }: { variant?: SiteHeaderVariant } = {}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -188,24 +191,22 @@ export async function SiteHeader({ variant = "default" }: { variant?: SiteHeader
     />
   );
 
-  if (variant === "store") {
-    return (
-      <header className="relative bg-primary text-primary-foreground">
-        {staffBar}
-        <StoreHeaderRow
-          signedIn={!!user}
-          recoveryActive={recoveryActive}
-          headerName={nav.headerName}
-          accountHref={nav.accountHref}
-          accountLabel={nav.accountLabel}
-          cartCount={cartCount}
-        />
-        {user && !recoveryActive && <FeedbackButton />}
-      </header>
-    );
-  }
+  const storeHeader = (
+    <header className="relative bg-primary text-primary-foreground">
+      {staffBar}
+      <StoreHeaderRow
+        signedIn={!!user}
+        recoveryActive={recoveryActive}
+        headerName={nav.headerName}
+        accountHref={nav.accountHref}
+        accountLabel={nav.accountLabel}
+        cartCount={cartCount}
+      />
+      {user && !recoveryActive && <FeedbackButton />}
+    </header>
+  );
 
-  return (
+  const normalHeader = (
     <header className="relative bg-primary text-primary-foreground">
       {staffBar}
       {/* FIX1 (X12): one row from 1024px up -- no wrapping at lg, and
@@ -347,12 +348,16 @@ export async function SiteHeader({ variant = "default" }: { variant?: SiteHeader
       {user && !recoveryActive && <FeedbackButton />}
     </header>
   );
+
+  if (variant === "store") return storeHeader;
+  if (variant === "default") return normalHeader;
+  return <SiteHeaderSwitch store={storeHeader} normal={normalHeader} />;
 }
 
 // LR1: the shop header row. Logo, the search (it sends ?q= to Libraria),
 // "Lista ime" (the wishlist) and "Shporta" (the cart) as labelled icons,
-// then the account: signed out, "Krijo llogari" with "Keni llogari?
-// Hyni" under it; signed in, the same greeting link as every other page,
+// then the account: signed out, "Regjistrohu" with "Keni llogari?
+// Hyr" under it (fx1 b, 11-27: the same words as every other header); signed in, the same greeting link as every other page,
 // and "Dil". No menu links and no menu button (lb7 b); the footer still
 // links every page. Signed-out taps on the two icons go through log in
 // first. On phones the search drops to its own full-width row.
@@ -439,12 +444,12 @@ function StoreHeaderRow({
         {!signedIn ? (
           <div className="flex flex-col items-center gap-1">
             <Link href="/signup" className={`${BRASS_BUTTON_CLASSES} px-3! py-1.5! text-sm sm:px-4! sm:py-2! sm:text-base`}>
-              Krijo llogari
+              Regjistrohu
             </Link>
             <span className="text-[0.6875rem] text-primary-foreground/90 sm:text-xs">
               Keni llogari?{" "}
               <Link href="/login" className={QUIET_LINK_ON_DARK_CLASSES}>
-                Hyni
+                Hyr
               </Link>
             </span>
           </div>

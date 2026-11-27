@@ -152,10 +152,10 @@ beforeEach(() => {
 });
 
 describe("generateMetadata", () => {
-  it("a missing or draft slug returns {} -- no private draft metadata is ever exposed publicly", async () => {
+  it("a missing or draft slug returns only the not-found title -- no private draft metadata is ever exposed publicly", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: null });
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: "missing-or-draft" }) });
-    expect(metadata).toEqual({});
+    expect(metadata).toEqual({ title: "Faqja nuk u gjet" });
   });
 
   it("uses seo_title/seo_description when present, overriding title/excerpt", async () => {
@@ -199,12 +199,14 @@ describe("generateMetadata", () => {
     );
   });
 
-  it("without a cover image: twitter card falls back to summary, no images field", async () => {
+  it("without a cover image: the site-wide share card (S1 pb2 a)", async () => {
     mockMaybeSingle.mockResolvedValueOnce({ data: { ...basePost, cover_image_path: null } });
     const metadata = await generateMetadata({ params: Promise.resolve({ slug: basePost.slug }) });
     const twitter = metadata.twitter as { card?: string };
-    expect(twitter.card).toBe("summary");
-    expect((metadata.openGraph as { images?: unknown }).images).toBeUndefined();
+    expect(twitter.card).toBe("summary_large_image");
+    expect((metadata.openGraph as { images?: unknown }).images).toEqual([
+      { url: "http://localhost:3000/opengraph-image.png", width: 1200, height: 630, alt: "librum. Vetëbotim për autorët që shkruajnë shqip" },
+    ]);
   });
 });
 

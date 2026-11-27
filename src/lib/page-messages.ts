@@ -8,6 +8,9 @@
 import { AUTH_GENERIC_ERROR_MESSAGE } from "@/lib/auth-page-messages";
 
 export const PAGE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
+  // CSV-1 (2026-11-27, idea 35): Bilanci's "Shkarko të gjitha (CSV)".
+  "Skedari nuk u krijua. Provoni përsëri.",
+  "Ka shumë lëvizje për një skedar. Na shkruani te support@librum.al.",
   // LR1 patch 4 (2026-11-26): the admin Libraria page's reading picks.
   // ("Choose a book." and "That book is not on Libraria now." are below.)
   "That pick no longer exists.",

@@ -3,8 +3,11 @@ import { BRASS_CTA_CLASSES, PageBand, SECTION_CONTAINER } from "@/components/pag
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import { WORD_TEMPLATE_PATH } from "@/lib/word-guide-paths";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/ndihme/word"),
   title: "Si ta përgatitni dorëshkrimin në Word",
   description:
     "Rregullat që ndjek Librum kur e kthen një dorëshkrim Word (.docx) në libër elektronik, si dhe shablloni i Librum për ta shkarkuar.",

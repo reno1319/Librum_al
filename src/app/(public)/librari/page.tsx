@@ -30,6 +30,7 @@ import {
 import type { PublicBook, PublicBundle } from "@/lib/types";
 import type { PenNameRef } from "@/lib/pen-names";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 import { DismissableDetails } from "@/components/dismissable-details";
 import { DetailsCloseButton } from "@/components/details-close-button";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
@@ -37,6 +38,8 @@ import { ShelfSlider, SHELF_ITEM_CLASSES } from "@/components/shelf-slider";
 import { CategoryShelfTabs } from "@/components/category-shelf-tabs";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/librari"),
   title: "Libraria",
   description: "Zbuloni libra elektronikë të pavarur nga autorë që shkruajnë shqip në Librum.",
 };
@@ -888,7 +891,7 @@ function ReadingInvite() {
         href="/signup"
         className="focus-ring mt-2 inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-6 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
-        Krijo llogari
+        Regjistrohu
       </Link>
     </section>
   );

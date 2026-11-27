@@ -187,11 +187,21 @@ export default async function AdminFinancePage({
       <div className="mt-2">
         <PageHeader
           title="Finance"
-          description="Review financial operations and items that may require attention. This is not a Stripe Dashboard replacement, and not every Stripe transaction is mirrored here -- it surfaces the specific exceptions Librum can detect on its own."
+          description="Review financial operations and items that may require attention. This is not a replacement for the payment provider's own dashboard, and not every payment is mirrored here -- it surfaces the specific exceptions Librum can detect on its own."
         />
       </div>
 
       <SummaryCards result={summaryResult} />
+
+      <section className="mt-10">
+        <h2 className="font-serif text-xl font-semibold">All sales (CSV)</h2>
+        <p className="mt-1 text-sm text-muted">
+          Every sale, refund and payout in the ledger, for all authors. No buyer details, no tax numbers.
+        </p>
+        <a href="/admin/finance/export" download className={buttonClasses("outline", "sm", "mt-3")}>
+          Download CSV
+        </a>
+      </section>
 
       <RefundSection
         rawParams={rawParams}
@@ -306,11 +316,13 @@ function RefundSection({
         method="get"
         className="mt-4 flex flex-wrap items-end gap-3 rounded-card border border-border bg-surface p-4"
       >
-        <div>
+        {/* min-w-0 + max-w-full: the longest state name made this
+            select 3 px wider than a 390 px phone (site check-up P5). */}
+        <div className="min-w-0 max-w-full">
           <label htmlFor="refund-state" className="block text-xs text-muted">
             State
           </label>
-          <select id="refund-state" name="refund_state" defaultValue={rawParams.refund_state ?? ""} className={controlClass}>
+          <select id="refund-state" name="refund_state" defaultValue={rawParams.refund_state ?? ""} className={`${controlClass} max-w-full`}>
             <option value="">All states</option>
             {REFUND_STATE_OPTIONS.map((state) => (
               <option key={state} value={state}>
@@ -463,8 +475,8 @@ function DisputeSection({
     <section id="disputes" className="mt-10 scroll-mt-6">
       <h2 className="font-serif text-xl font-semibold text-foreground">Disputes</h2>
       <p className="mt-1 text-sm text-muted">
-        Stripe disputes Librum has recorded, including any transfer-reversal recovery status. Review
-        an open dispute directly in Stripe -- Librum does not track evidence deadlines.
+        Payment disputes Librum has recorded, including any transfer-reversal recovery status. Review
+        an open dispute directly with the payment provider -- Librum does not track evidence deadlines.
       </p>
 
       <form
@@ -616,7 +628,7 @@ function CheckoutExceptionSection({
     <section id="checkout" className="mt-10 scroll-mt-6">
       <h2 className="font-serif text-xl font-semibold text-foreground">Checkout exceptions</h2>
       <p className="mt-1 text-sm text-muted">
-        Single-book checkouts Stripe confirmed as paid that Librum did not fulfill. Each has a specific
+        Single-book checkouts the payment provider confirmed as paid that Librum did not fulfill. Each has a specific
         recorded reason -- some represent a deliberate outcome, not a bug. Bundle reconciliation is not
         included in this view.
       </p>

@@ -9,7 +9,7 @@ import { authorPagePath, type PenNameRef } from "@/lib/pen-names";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
 import type { PublicBook } from "@/lib/types";
-import { canonicalMetadata, seriesPagePath } from "@/lib/seo";
+import { canonicalMetadata, seriesPagePath, NOT_FOUND_METADATA } from "@/lib/seo";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
 // LIBRUM 2.0 PRODUCT-3: the public series page didn't exist before this
@@ -139,7 +139,8 @@ export async function generateMetadata({
   // description. Falls back to the root layout's generic site metadata,
   // same as every other not-found path in this app.
   if (!data) {
-    return {};
+    // S2 (pb1 a): the page answers notFound(); keep its tab title.
+    return NOT_FOUND_METADATA;
   }
 
   const authorName = data.series.pen?.name ?? null;

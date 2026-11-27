@@ -25,8 +25,11 @@ import {
   Wave,
 } from "@/components/author-page-kit";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/fitimet"),
   title: "Fitimet",
   description: "Honorari i autorit për çdo shitje në Librum dhe informacioni për pagesat.",
 };
@@ -157,7 +160,14 @@ export default async function PricingPage() {
           {/* Example table, then the live calculator. */}
           <h2 className={`${SECTION_HEADING} mt-14`}>Shihni sa fitoni</h2>
           <p className="mt-3 text-[0.9375rem] italic text-foreground/75">Shembuj për një shitje</p>
-          <div className="mx-auto mt-8 max-w-4xl overflow-x-auto text-left">
+          {/* Site check-up P6 (11-27): on phones this box scrolls sideways,
+              so keyboard users can reach it and screen readers hear its name. */}
+          <div
+            role="region"
+            aria-label="Shembuj për një shitje"
+            tabIndex={0}
+            className="focus-ring mx-auto mt-8 max-w-4xl overflow-x-auto text-left"
+          >
             <table className="w-full min-w-[34rem] border-collapse bg-white text-[0.9375rem]">
               <thead>
                 <tr>

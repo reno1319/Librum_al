@@ -1,6 +1,4 @@
-import { headers } from "next/headers";
 import { SiteHeader } from "@/components/site-header";
-import { INTERNAL_PATHNAME_HEADER } from "@/lib/internal-headers";
 import { SiteFooter } from "@/components/site-footer";
 import { VisitorStats } from "@/components/visitor-stats";
 import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
@@ -42,11 +40,11 @@ import { isVisitorStatsEnabled } from "@/lib/visitor-stats";
 // LR1 (Renato 11-25, lb7 b): Libraria alone gets the shop header (logo,
 // search, "Lista ime", "Shporta", account; no menu links). Every other
 // page keeps today's header. LR1 patch 4: Libraria's "Më shumë" page of
-// picks (/librari/cfare-po-lexojme) gets the shop header too. The path
-// comes from the header Proxy sets
-// on every request (see src/lib/supabase/middleware.ts).
-export default async function PublicLayout({ children }: { children: React.ReactNode }) {
-  const pathname = (await headers()).get(INTERNAL_PATHNAME_HEADER);
+// picks (/librari/cfare-po-lexojme) gets the shop header too.
+// HEADER FIX (Renato 11-27, hd1 a): this layout is not drawn again when
+// you move between pages, so it no longer picks the header; SiteHeader
+// picks it from the browser's current path (src/components/site-header-switch.tsx).
+export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <a
@@ -55,7 +53,7 @@ export default async function PublicLayout({ children }: { children: React.React
       >
         Kaloni te përmbajtja
       </a>
-      <SiteHeader variant={pathname === "/librari" || pathname === "/librari/cfare-po-lexojme" ? "store" : "default"} />
+      <SiteHeader />
       <div id="main-content" className="flex flex-1 flex-col">
         {children}
       </div>
