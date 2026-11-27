@@ -193,6 +193,16 @@ export default async function AdminFinancePage({
 
       <SummaryCards result={summaryResult} />
 
+      <section className="mt-10">
+        <h2 className="font-serif text-xl font-semibold">All sales (CSV)</h2>
+        <p className="mt-1 text-sm text-muted">
+          Every sale, refund and payout in the ledger, for all authors. No buyer details, no tax numbers.
+        </p>
+        <a href="/admin/finance/export" download className={buttonClasses("outline", "sm", "mt-3")}>
+          Download CSV
+        </a>
+      </section>
+
       <RefundSection
         rawParams={rawParams}
         query={refundQuery}
