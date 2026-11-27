@@ -8,10 +8,15 @@ import { TERMS_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { SellerDetailsBlock } from "@/components/seller-details";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/kushtet"),
   title: "Kushtet e përdorimit",
-  description: "Kushtet e përdorimit të Librum.",
+  // P7 (Renato 11-27): one fuller sentence for search results.
+  description:
+    "Rregullat e përdorimit të Librum për autorët dhe lexuesit: llogaritë, përmbajtja, licenca e leximit, pagesat, rimbursimet dhe honorari i autorit.",
 };
 
 // AUTHOR PAGES REDESIGN: the green header band, a "Contents" box (Renato,

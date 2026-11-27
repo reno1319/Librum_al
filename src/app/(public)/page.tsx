@@ -22,6 +22,7 @@ import {
   TEXT_LINK_CLASSES,
 } from "@/components/page-bands";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 import { isDayParam } from "@/lib/account-deletion-reasons";
 import { formatDateOnly } from "@/lib/book-detail-dates";
 
@@ -59,6 +60,8 @@ import { formatDateOnly } from "@/lib/book-detail-dates";
 // already IS the full brand title, so applying the template on top of it
 // would produce "Librum — Self-Publish Your Ebook | Librum".
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/"),
   title: { absolute: "Librum — Vetëbotim për libra elektronikë" },
   description:
     "Platforma e vetëbotimit e ndërtuar për autorët që shkruajnë shqip. Botoni në mënyrë të pavarur, vendosni vetë çmimin dhe arrini te lexuesit përmes Librum.",

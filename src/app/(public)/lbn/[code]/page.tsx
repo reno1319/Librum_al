@@ -1,4 +1,6 @@
 import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next";
+import { NOT_FOUND_METADATA } from "@/lib/seo";
 import { normalizeLbn } from "@/lib/lbn";
 import { createClient } from "@/lib/supabase/server";
 
@@ -10,6 +12,11 @@ import { createClient } from "@/lib/supabase/server";
 // is not looked up at all.
 
 export const dynamic = "force-dynamic";
+
+// S2 (pb1 a): this page only ever redirects or answers notFound(), so
+// its own title is the not-found one (else the tab flips to the site
+// title after loading).
+export const metadata: Metadata = NOT_FOUND_METADATA;
 
 export default async function LbnPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;

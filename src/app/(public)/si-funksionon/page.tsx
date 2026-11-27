@@ -18,8 +18,11 @@ import {
   Wave,
 } from "@/components/author-page-kit";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/si-funksionon"),
   title: "Si funksionon",
   description: "Si ta përgatitni, ta publikoni, t'i vini çmimin dhe ta shisni librin tuaj elektronik me Librum.",
 };

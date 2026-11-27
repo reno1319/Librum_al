@@ -41,7 +41,7 @@ const mockCreateClient = vi.fn(async () => ({
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => mockCreateClient() }));
 
-const { default: LbnPage } = await import("./page");
+const { default: LbnPage, metadata: lbnMetadata } = await import("./page");
 const BOOK = "b0000000-0000-4000-8000-000000000001";
 const open = (code: string) => LbnPage({ params: Promise.resolve({ code }) });
 
@@ -81,5 +81,11 @@ describe("/lbn/<code>", () => {
     result = { data: null, error: { code: "57014" } };
     await expect(open("LE7K4M9X2D")).rejects.toBe(NOT_FOUND);
     expect(redirects).toEqual([]);
+  });
+});
+
+describe("/lbn/<code> tab title (S2)", () => {
+  it("is the not-found title, since the page only redirects or is not found", () => {
+    expect(lbnMetadata).toEqual({ title: "Faqja nuk u gjet" });
   });
 });

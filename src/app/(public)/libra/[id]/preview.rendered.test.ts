@@ -124,10 +124,10 @@ describe("noindex (7a)", () => {
     expect(metadata).toEqual({ robots: { index: false, follow: false } });
   });
 
-  it("a missing book: robots noindex too", async () => {
+  it("a missing book: robots noindex too, and the not-found title (S2)", async () => {
     stub({ user: null, book: null });
     const metadata = await generateMetadata({ params: Promise.resolve({ id: BOOK_ID }) });
-    expect(metadata).toEqual({ robots: { index: false, follow: false } });
+    expect(metadata).toEqual({ title: "Faqja nuk u gjet", robots: { index: false, follow: false } });
   });
 
   it("a live book keeps its normal metadata, with no robots rule", async () => {
@@ -135,5 +135,13 @@ describe("noindex (7a)", () => {
     const metadata = await generateMetadata({ params: Promise.resolve({ id: BOOK_ID }) });
     expect(metadata.title).toBe("Preview Book");
     expect(metadata.robots).toBeUndefined();
+  });
+
+  it("a live book without a cover shares the site-wide card (S1 pb2 a)", async () => {
+    stub({ user: null, book: { ...BASE_BOOK, status: "published", published_at: "2026-09-02T00:00:00Z" } });
+    const metadata = await generateMetadata({ params: Promise.resolve({ id: BOOK_ID }) });
+    expect((metadata.openGraph as { images?: unknown }).images).toEqual([
+      { url: "http://localhost:3000/opengraph-image.png", width: 1200, height: 630, alt: "librum. Vetëbotim për autorët që shkruajnë shqip" },
+    ]);
   });
 });

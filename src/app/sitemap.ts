@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { authorPagePath } from "@/lib/pen-names";
 import { bookPagePath, bundlePagePath, seriesPagePath } from "@/lib/seo";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
+import { classicAuthorPath } from "@/lib/classic-authors";
+import { BLOG_CATEGORY_COLUMNS, blogCategoryHref, toBlogCategories, type BlogCategoryRow } from "@/lib/blog-categories";
 
 // LIBRUM 2.0 LAUNCH-FIX-1A SEO-2: static public/marketing routes. The
 // per-entity pages (books/authors/series/bundles) were left for a later
@@ -29,6 +31,8 @@ const STATIC_PUBLIC_ROUTES = [
   "/si-funksionon",
   "/fitimet",
   "/librari",
+  // M1 (Renato 11-27, fx5 a).
+  "/librari/cfare-po-lexojme",
   "/ndihme",
   "/ndihme/leximi",
   "/ndihme/word",
@@ -86,6 +90,8 @@ type SitemapBookRow = {
   id: string;
   pen_name_id: string | null;
   series_id: string | null;
+  pd_work_id: string | null;
+  status: string;
   updated_at: string;
 };
 type SitemapBundleRow = { id: string; updated_at: string };
@@ -115,7 +121,7 @@ async function catalogSitemapEntries(origin: string): Promise<MetadataRoute.Site
     readAllPages<SitemapBookRow>((from, to) =>
       supabase
         .from("public_books")
-        .select("id, pen_name_id, series_id, updated_at")
+        .select("id, pen_name_id, series_id, pd_work_id, status, updated_at")
         // BD16 P4 (D1): a pre-order's page is public, so it is listed.
         .in("status", LISTED_BOOK_STATUSES)
         .not("price_all", "is", null)
@@ -143,6 +149,28 @@ async function catalogSitemapEntries(origin: string): Promise<MetadataRoute.Site
     if (book.series_id) latest(series, book.series_id, updated);
   }
 
+  // M1 (Renato 11-27, fx5 a): classic author pages, by the page's own
+  // rule -- a published, priced edition of one of their works (a
+  // pre-order alone doesn't open the page).
+  const classicWorks = new Map<string, Date>();
+  for (const book of books) {
+    if (book.pd_work_id && book.status === "published") latest(classicWorks, book.pd_work_id, new Date(book.updated_at));
+  }
+  const classics = new Map<string, Date>();
+  if (classicWorks.size > 0) {
+    const { data: classicAuthors } = await supabase
+      .from("public_classic_authors")
+      .select("slug, pd_work_ids")
+      .overlaps("pd_work_ids", [...classicWorks.keys()])
+      .returns<{ slug: string; pd_work_ids: string[] | null }[]>();
+    for (const author of classicAuthors ?? []) {
+      for (const workId of author.pd_work_ids ?? []) {
+        const updated = classicWorks.get(workId);
+        if (updated) latest(classics, author.slug, updated);
+      }
+    }
+  }
+
   return [
     ...books.map((book) => ({
       url: `${origin}${bookPagePath(book.id)}`,
@@ -150,11 +178,28 @@ async function catalogSitemapEntries(origin: string): Promise<MetadataRoute.Site
     })),
     ...[...authors].map(([id, lastModified]) => ({ url: `${origin}${authorPagePath(id)}`, lastModified })),
     ...[...series].map(([id, lastModified]) => ({ url: `${origin}${seriesPagePath(id)}`, lastModified })),
+    ...[...classics].map(([slug, lastModified]) => ({ url: `${origin}${classicAuthorPath(slug)}`, lastModified })),
     ...bundles.map((bundle) => ({
       url: `${origin}${bundlePagePath(bundle.id)}`,
       lastModified: new Date(bundle.updated_at),
     })),
   ];
+}
+
+// M1 (Renato 11-27, fx5 a): every blog category page (an empty
+// category keeps its page too, blog8). A failed read leaves them out
+// instead of failing the whole sitemap.
+async function blogCategorySitemapEntries(origin: string): Promise<MetadataRoute.Sitemap> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("blog_categories")
+    .select(BLOG_CATEGORY_COLUMNS)
+    .order("sort_order", { ascending: true })
+    .returns<BlogCategoryRow[]>();
+  return toBlogCategories(data ?? []).map((category) => ({
+    url: `${origin}${blogCategoryHref(category)}`,
+    lastModified: new Date(),
+  }));
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -166,10 +211,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }));
   const blogIndexEntry: MetadataRoute.Sitemap = [{ url: `${origin}/blog`, lastModified: new Date() }];
 
-  const [blogEntries, catalogEntries] = await Promise.all([
+  const [blogEntries, blogCategoryEntries, catalogEntries] = await Promise.all([
     blogSitemapEntries(origin),
+    blogCategorySitemapEntries(origin),
     catalogSitemapEntries(origin),
   ]);
 
-  return [...staticEntries, ...blogIndexEntry, ...blogEntries, ...catalogEntries];
+  return [...staticEntries, ...blogIndexEntry, ...blogCategoryEntries, ...blogEntries, ...catalogEntries];
 }

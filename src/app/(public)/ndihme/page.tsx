@@ -5,8 +5,11 @@ import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import { ClosingCtaBand, PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/ndihme"),
   title: "Ndihmë",
   description: "Pyetjet më të shpeshta për botimin dhe blerjen e librave elektronikë në Librum.",
 };

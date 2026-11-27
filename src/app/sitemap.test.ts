@@ -16,7 +16,7 @@ function mockQuery(table: string) {
   const query: Query = { table, calls: [] };
   queries.push(query);
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "lte", "in", "not", "order", "range", "returns"]) {
+  for (const method of ["select", "eq", "lte", "in", "not", "order", "range", "returns", "overlaps"]) {
     builder[method] = (...args: unknown[]) => {
       query.calls.push({ method, args });
       return builder;
@@ -241,5 +241,54 @@ describe("sitemap", () => {
       expect(paths.filter((p) => /^\/(libra|autore|seri|paketa)\//.test(p))).toHaveLength(0);
       expect(queriesOf("public_books")).toHaveLength(1);
     });
+  });
+});
+
+// M1 (Renato 11-27, fx5 a): "Çfarë po lexojmë", blog category pages and
+// classic author pages.
+describe("sitemap M1 additions", () => {
+  const WORK_LIVE = "00000000-0000-4000-8000-0000000000f1";
+  const WORK_PREORDER = "00000000-0000-4000-8000-0000000000f2";
+  beforeEach(() => {
+    queries = [];
+    tableRows = {
+      blog_posts: [],
+      public_books: [
+        { id: BOOK_A, pen_name_id: PEN_1, series_id: null, pd_work_id: WORK_LIVE, status: "published", updated_at: "2026-09-01T00:00:00Z" },
+        { id: BOOK_B, pen_name_id: PEN_1, series_id: null, pd_work_id: WORK_PREORDER, status: "preorder", updated_at: "2026-09-05T00:00:00Z" },
+      ],
+      public_bundles: [],
+      public_classic_authors: [
+        { slug: "naim-frasheri", pd_work_ids: [WORK_LIVE] },
+        { slug: "vetem-paraporosi", pd_work_ids: [WORK_PREORDER] },
+      ],
+      blog_categories: [
+        { value: "zeja", label: "Zeja e Shkrimit", short_label: "Zeja", url_slug: "zeja-e-shkrimit", description: "d", colour: "green", cta: "publish", sort_order: 1 },
+      ],
+    };
+  });
+
+  const pathsOf = async () => (await sitemap()).map((entry) => new URL(entry.url).pathname);
+
+  it("lists /librari/cfare-po-lexojme", async () => {
+    expect(await pathsOf()).toContain("/librari/cfare-po-lexojme");
+  });
+
+  it("lists every blog category page", async () => {
+    expect(await pathsOf()).toContain("/blog/kategoria/zeja-e-shkrimit");
+  });
+
+  it("lists a classic author only through a published edition, with its date", async () => {
+    const entries = await sitemap();
+    const naim = entries.find((entry) => new URL(entry.url).pathname === "/klasiket/naim-frasheri");
+    expect(naim?.lastModified).toEqual(new Date("2026-09-01T00:00:00Z"));
+    expect(entries.map((entry) => new URL(entry.url).pathname)).not.toContain("/klasiket/vetem-paraporosi");
+    expect(argsOf(queriesOf("public_classic_authors")[0], "overlaps")).toEqual([["pd_work_ids", [WORK_LIVE]]]);
+  });
+
+  it("reads no classic authors when no book is a classic edition", async () => {
+    tableRows.public_books = [];
+    await sitemap();
+    expect(queriesOf("public_classic_authors")).toEqual([]);
   });
 });

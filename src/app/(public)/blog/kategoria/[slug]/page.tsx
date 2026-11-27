@@ -3,7 +3,7 @@ import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { canonicalMetadata } from "@/lib/seo";
+import { canonicalMetadata, NOT_FOUND_METADATA, shareCardImages } from "@/lib/seo";
 import {
   BLOG_CATEGORY_EMPTY_LINE,
   blogCategoryHref,
@@ -47,15 +47,17 @@ export async function generateMetadata({
   const { slug } = await params;
   const category = getBlogCategoryByUrlSlug(await getBlogCategories(), slug);
   const page = parseBlogPageParam((await searchParams).faqe);
-  if (!category || page === null) return {};
+  // S2 (pb1 a): the page answers notFound(); keep its tab title.
+  if (!category || page === null) return NOT_FOUND_METADATA;
 
   const title = page === 1 ? `${category.label} · Blog` : `${category.label} · Blog · Faqja ${page}`;
   return {
     title,
     description: category.description,
     ...canonicalMetadata(pageHref(category, page)),
-    openGraph: { title: `${title} — Librum`, description: category.description, type: "website" },
-    twitter: { card: "summary" },
+    // S1 (pb2 a): the site-wide share card.
+    openGraph: { title: `${title} — Librum`, description: category.description, type: "website", ...shareCardImages() },
+    twitter: { card: "summary_large_image" },
   };
 }
 

@@ -42,6 +42,25 @@ export function canonicalMetadata(path: string): { alternates?: { canonical: str
   return origin ? { alternates: { canonical: `${origin}${path}` } } : {};
 }
 
+// S2 (Renato 11-27, pb1 a): the metadata a page returns for an id it
+// is about to answer with notFound(). Without its own title, the tab
+// flips from "Faqja nuk u gjet" to the site default once the page has
+// loaded (the page's metadata streams in after the not-found page).
+export const NOT_FOUND_METADATA = { title: "Faqja nuk u gjet" } as const;
+
+// S1 (Renato 11-27, fx3 b): the site-wide share card,
+// src/app/opengraph-image.png (1200 x 630). Pages without their own Open
+// Graph settings get it automatically; a page that sets openGraph (blog,
+// a book without a cover) lists it itself (pb2 a). `{}` when the origin
+// can't be resolved, like canonicalMetadata().
+export const SHARE_CARD_PATH = "/opengraph-image.png";
+export const SHARE_CARD_ALT = "librum. Vetëbotim për autorët që shkruajnë shqip";
+
+export function shareCardImages(): { images?: { url: string; width: number; height: number; alt: string }[] } {
+  const origin = siteOriginOrNull();
+  return origin ? { images: [{ url: `${origin}${SHARE_CARD_PATH}`, width: 1200, height: 630, alt: SHARE_CARD_ALT }] } : {};
+}
+
 type BookJsonLdInput = Pick<
   PublicBook,
   | "id"

@@ -79,7 +79,8 @@ describe("audit r1 N2: a no-op save of a picked edition", () => {
   };
   it("is unchanged when only the spelling differs", () => {
     expect(pdFrozenDetailsUnchanged(stored, form)).toBe(true);
-    const { reading_age_min: _ignored, ...withoutAge } = form;
+    const withoutAge: Omit<typeof form, "reading_age_min"> & { reading_age_min?: null } = { ...form };
+    delete withoutAge.reading_age_min;
     expect(pdFrozenDetailsUnchanged({ ...stored, reading_age_min: 12 }, withoutAge)).toBe(true);
   });
   it("is changed by any real change", () => {

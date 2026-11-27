@@ -25,8 +25,11 @@ import {
   Wave,
 } from "@/components/author-page-kit";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/fitimet"),
   title: "Fitimet",
   description: "Honorari i autorit për çdo shitje në Librum dhe informacioni për pagesat.",
 };

@@ -2,8 +2,11 @@ import Link from "next/link";
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import { REPLY_PROMISE, SUPPORT_EMAIL } from "@/lib/contact";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/ndihme/leximi"),
   title: "Si ta lexoni librin tuaj",
   description: "Ku janë librat që shkarkoni nga Librum dhe si të hapni një EPUB në iPhone, Android, kompjuter ose Kindle.",
 };

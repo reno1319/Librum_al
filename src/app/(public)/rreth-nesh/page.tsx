@@ -5,8 +5,11 @@ import { ROYALTY_RULE_SENTENCE } from "@/lib/royalty";
 import { getAuthorPageCta } from "@/lib/author-page-cta";
 import { visibleTeam } from "@/lib/team";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/rreth-nesh"),
   title: "Rreth nesh",
   description: "Librum është një platformë vetëbotimi për libra elektronikë, e krijuar për autorët që shkruajnë shqip.",
 };
