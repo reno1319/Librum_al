@@ -7,7 +7,7 @@ import { BookCard } from "@/components/book-card";
 import { getAuthorInitials } from "@/lib/author-initials";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import { canonicalMetadata } from "@/lib/seo";
+import { canonicalMetadata, NOT_FOUND_METADATA } from "@/lib/seo";
 import {
   classicAuthorPath,
   formatClassicLifeLine,
@@ -61,7 +61,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (resolveMaintenanceMode(process.env.ALL_CUTOVER_MAINTENANCE_MODE)) return {};
   const { slug } = await params;
   const data = await getClassicPageData(slug);
-  if (!data) return {};
+  // S2 (pb1 a): the page answers notFound(); keep its tab title.
+  if (!data) return NOT_FOUND_METADATA;
   const { author } = data;
   return {
     title: `${author.name} (${author.birth_year}–${author.death_year})`,

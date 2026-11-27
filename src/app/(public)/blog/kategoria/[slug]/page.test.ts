@@ -226,9 +226,9 @@ describe("BlogCategoryPage", () => {
 });
 
 describe("generateMetadata", () => {
-  it("unknown slug or bad page: {}", async () => {
-    expect(await generateMetadata(props("nope"))).toEqual({});
-    expect(await generateMetadata(props("editorial", "x"))).toEqual({});
+  it("unknown slug or bad page: only the not-found title (S2)", async () => {
+    expect(await generateMetadata(props("nope"))).toEqual({ title: "Faqja nuk u gjet" });
+    expect(await generateMetadata(props("editorial", "x"))).toEqual({ title: "Faqja nuk u gjet" });
   });
 
   it("title, description and canonical per page", async () => {

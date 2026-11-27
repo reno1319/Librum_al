@@ -1,9 +1,12 @@
 import { PageBand, SECTION_CONTAINER } from "@/components/page-bands";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 // K4 (Kolibër list): an accessibility statement. It names only what the
 // site really does today and says plainly what is not checked yet.
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/aksesueshmeria"),
   title: "Aksesueshmëria",
   description: "Si përpiqet Librum të jetë i lehtë për t'u përdorur nga të gjithë, çfarë nuk funksionon ende mirë dhe si të na tregoni për një problem.",
 };

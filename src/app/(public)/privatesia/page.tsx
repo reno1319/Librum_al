@@ -4,8 +4,11 @@ import { SellerDetailsBlock } from "@/components/seller-details";
 import { isWhatsappContactLive } from "@/lib/contact";
 import { PRIVACY_LAST_UPDATED_LINE } from "@/lib/policy-dates";
 import type { Metadata } from "next";
+import { canonicalMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = {
+  // M2 (Renato 11-27, fx5 a): the bare address as canonical link.
+  ...canonicalMetadata("/privatesia"),
   title: "Politika e privatësisë",
   description: "Si i mbledh, i përdor, i ndan dhe i ruan Librum të dhënat tuaja personale.",
 };

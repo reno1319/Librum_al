@@ -22,9 +22,17 @@ function queryStub(table: string) {
 }
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: (table: string) => queryStub(table) }),
+  createClient: async () => ({
+    from: (table: string) => queryStub(table),
+    storage: { from: (bucket: string) => ({ getPublicUrl: (path: string) => ({ data: { publicUrl: `https://cdn.example/${bucket}/${path}` } }) }) },
+  }),
 }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
+// The static pages below load display fonts at import time.
+vi.mock("next/font/google", () => ({
+  Playfair_Display: () => ({ className: "font-hero-letter" }),
+  Ultra: () => ({ className: "font-hero-heavy" }),
+}));
 
 const { generateMetadata: authorMetadata } = await import("./autore/[id]/page");
 const { generateMetadata: seriesMetadata } = await import("./seri/[id]/page");
@@ -54,9 +62,25 @@ describe("author page", () => {
     });
   });
 
-  it("a missing pen name still gets no metadata at all", async () => {
+  it("a missing pen name gets only the not-found title (S2)", async () => {
     tableRows.public_pen_names = { row: null, list: [] };
-    expect(await authorMetadata(params(PEN_ID))).toEqual({});
+    expect(await authorMetadata(params(PEN_ID))).toEqual({ title: "Faqja nuk u gjet" });
+  });
+});
+
+describe("author page share picture (S1 fx3 b)", () => {
+  it("uses the pen-name photo when there is one", async () => {
+    tableRows.public_pen_names = { row: { id: PEN_ID, name: "Ana Shkrimtarja", avatar_path: "u1/avatar.jpg" }, list: [] };
+    const metadata = await authorMetadata(params(PEN_ID));
+    const image = { url: "https://cdn.example/avatars/u1/avatar.jpg", alt: "Ana Shkrimtarja" };
+    expect(metadata.openGraph).toEqual({ locale: "sq_AL", images: [image] });
+    expect(metadata.twitter).toEqual({ card: "summary", images: [image] });
+  });
+
+  it("sets no share picture without a photo, so the site-wide card applies", async () => {
+    const metadata = await authorMetadata(params(PEN_ID));
+    expect(metadata.openGraph).toBeUndefined();
+    expect(metadata.twitter).toBeUndefined();
   });
 });
 
@@ -67,9 +91,9 @@ describe("series page", () => {
     });
   });
 
-  it("a series with nothing public still gets no metadata at all", async () => {
+  it("a series with nothing public gets only the not-found title (S2)", async () => {
     tableRows.public_books = { row: null, list: [] };
-    expect(await seriesMetadata(params(SERIES_ID))).toEqual({});
+    expect(await seriesMetadata(params(SERIES_ID))).toEqual({ title: "Faqja nuk u gjet" });
   });
 });
 
@@ -94,5 +118,31 @@ describe("when the site address can't be resolved", () => {
     expect((await authorMetadata(params(PEN_ID))).alternates).toBeUndefined();
     expect((await seriesMetadata(params(SERIES_ID))).alternates).toBeUndefined();
     expect((await bundleMetadata(params(BUNDLE_ID))).alternates).toBeUndefined();
+  });
+});
+
+// M2 (Renato 11-27, fx5 a): the homepage and the 12 other static pages
+// in the sitemap carry a canonical link to their bare address.
+describe("static pages", () => {
+  const STATIC_PAGES: [string, () => Promise<{ metadata: { alternates?: unknown } }>][] = [
+    ["/", () => import("./page")],
+    ["/rreth-nesh", () => import("./rreth-nesh/page")],
+    ["/si-funksionon", () => import("./si-funksionon/page")],
+    ["/fitimet", () => import("./fitimet/page")],
+    ["/librari", () => import("./librari/page")],
+    ["/ndihme", () => import("./ndihme/page")],
+    ["/ndihme/leximi", () => import("./ndihme/leximi/page")],
+    ["/ndihme/word", () => import("./ndihme/word/page")],
+    ["/kontakt", () => import("./kontakt/page")],
+    ["/kushtet", () => import("./kushtet/page")],
+    ["/privatesia", () => import("./privatesia/page")],
+    ["/rimbursimet", () => import("./rimbursimet/page")],
+    ["/aksesueshmeria", () => import("./aksesueshmeria/page")],
+  ];
+
+  it.each(STATIC_PAGES)("%s links to its bare address", async (path, load) => {
+    vi.resetModules();
+    const { metadata } = await load();
+    expect(metadata.alternates).toEqual({ canonical: `https://librum.al${path}` });
   });
 });

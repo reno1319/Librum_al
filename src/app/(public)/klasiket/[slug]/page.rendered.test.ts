@@ -99,10 +99,10 @@ describe("K6: the classic author page", () => {
     expect(await render()).toContain("Lindi më 1846 · Vdiq më 1900");
   });
 
-  it("Q3 a: no live author, no live book, or a malformed slug is a 404 (and no metadata)", async () => {
+  it("Q3 a: no live author, no live book, or a malformed slug is a 404 (only the not-found title, S2)", async () => {
     classicRow = null;
     await expect(render()).rejects.toThrow();
-    expect(await generateMetadata(params("naim-frasheri"))).toEqual({});
+    expect(await generateMetadata(params("naim-frasheri"))).toEqual({ title: "Faqja nuk u gjet" });
     classicRow = NAIM;
     bookList = [];
     await expect(render()).rejects.toThrow();

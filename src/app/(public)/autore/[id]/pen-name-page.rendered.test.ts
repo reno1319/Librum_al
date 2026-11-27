@@ -231,7 +231,7 @@ describe("PEN-NAMES-1 Author Page", () => {
     install();
     await expect(render(ACCOUNT)).rejects.toBeInstanceOf(NotFoundSignal);
     await expect(render("not-a-uuid")).rejects.toBeInstanceOf(NotFoundSignal);
-    expect(await generateMetadata({ params: Promise.resolve({ id: ACCOUNT }) })).toEqual({});
+    expect(await generateMetadata({ params: Promise.resolve({ id: ACCOUNT }) })).toEqual({ title: "Faqja nuk u gjet" });
   });
 
   it("metadata comes from the pen name", async () => {

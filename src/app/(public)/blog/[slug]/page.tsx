@@ -3,6 +3,7 @@ import { blogNowIso } from "@/lib/blog-schedule";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import type { Metadata } from "next";
+import { NOT_FOUND_METADATA, shareCardImages } from "@/lib/seo";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSiteOrigin } from "@/lib/site-url";
 import { formatTimestampAsDate } from "@/lib/book-detail-dates";
@@ -88,7 +89,8 @@ export async function generateMetadata({
   // description/cover as public marketing copy. Falling back to {}
   // lets the root layout's generic site metadata apply instead, exactly
   // matching Book Detail's own precedent.
-  if (!post) return {};
+  // S2 (pb1 a): the page answers notFound(); keep its tab title.
+  if (!post) return NOT_FOUND_METADATA;
 
   const title = post.seo_title ?? post.title;
   const description = post.seo_description ?? truncateForMetadata(post.excerpt, METADATA_DESCRIPTION_MAX);
@@ -111,10 +113,11 @@ export async function generateMetadata({
       type: "article",
       ...(post.published_at ? { publishedTime: post.published_at } : {}),
       modifiedTime: post.updated_at,
-      ...(coverUrl ? { images: [{ url: coverUrl }] } : {}),
+      // S1 (pb2 a): no cover = the site-wide share card.
+      ...(coverUrl ? { images: [{ url: coverUrl }] } : shareCardImages()),
     },
     twitter: {
-      card: coverUrl ? "summary_large_image" : "summary",
+      card: "summary_large_image",
     },
   };
 }

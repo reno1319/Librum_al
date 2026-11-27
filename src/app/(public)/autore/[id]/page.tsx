@@ -25,7 +25,7 @@ import {
 import { Alert } from "@/components/ui/alert";
 import type { PublicBook, PublicBundle, PublicSeries } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
-import { canonicalMetadata } from "@/lib/seo";
+import { canonicalMetadata, NOT_FOUND_METADATA } from "@/lib/seo";
 import { pageErrorMessage, pageSuccessMessage } from "@/lib/page-messages";
 import { LISTED_BOOK_STATUSES } from "@/lib/preorder-reader";
 
@@ -86,15 +86,28 @@ export async function generateMetadata({
   // A missing id gets the same generic root-layout metadata a 404 gets
   // anywhere else in this app.
   if (!penName) {
-    return {};
+    // S2 (pb1 a): the page answers notFound(); keep its tab title.
+    return NOT_FOUND_METADATA;
   }
 
   const authorPublicName = penName.name;
+  // S1 (fx3 b): the pen-name photo is the share picture when there is
+  // one; otherwise nothing is set here and the site-wide share card
+  // applies. Local URL construction only (no network call).
+  const avatarUrl = penName.avatar_path
+    ? (await createClient()).storage.from("avatars").getPublicUrl(penName.avatar_path).data.publicUrl
+    : null;
 
   return {
     title: authorPublicName,
     description: `Librat dhe të dhënat për autorin ${authorPublicName} në Librum.`,
     ...canonicalMetadata(authorPagePath(penName.id)),
+    ...(avatarUrl
+      ? {
+          openGraph: { locale: "sq_AL", images: [{ url: avatarUrl, alt: authorPublicName }] },
+          twitter: { card: "summary", images: [{ url: avatarUrl, alt: authorPublicName }] },
+        }
+      : {}),
   };
 }
 

@@ -150,13 +150,16 @@ describe("generateMetadata", () => {
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it("canonical points to /blog, OG type is website, twitter card is summary", () => {
+  it("canonical points to /blog, OG type is website, large share card (S1 pb2 a)", () => {
     const metadata = generateMetadata();
     expect(metadata.alternates?.canonical).toBe("http://localhost:3000/blog");
-    const openGraph = metadata.openGraph as { type?: string };
+    const openGraph = metadata.openGraph as { type?: string; images?: unknown };
     const twitter = metadata.twitter as { card?: string };
     expect(openGraph.type).toBe("website");
-    expect(twitter.card).toBe("summary");
+    expect(openGraph.images).toEqual([
+      { url: "http://localhost:3000/opengraph-image.png", width: 1200, height: 630, alt: "librum. Vetëbotim për autorët që shkruajnë shqip" },
+    ]);
+    expect(twitter.card).toBe("summary_large_image");
   });
 });
 
