@@ -976,3 +976,18 @@ describe("AdminFinancePage: transaction currency (Patch 4)", () => {
     expect(html).not.toMatch(/\$\d/);
   });
 });
+
+// CSV-1 (idea 35, ex1 b): the staff download block under the counters.
+describe("AdminFinancePage: CSV download", () => {
+  it("links the export route under the summary cards, and the page itself still reads no ledger rows", async () => {
+    const { readFileSync } = await import("node:fs");
+    const pathModule = await import("node:path");
+    const pageSource = readFileSync(pathModule.join(__dirname, "page.tsx"), "utf8");
+    const cards = pageSource.indexOf("<SummaryCards result={summaryResult} />");
+    const link = pageSource.indexOf('href="/admin/finance/export" download');
+    expect(cards).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(cards);
+    expect(pageSource).toContain("All sales (CSV)");
+    expect(pageSource).not.toContain("author_ledger_entries");
+  });
+});

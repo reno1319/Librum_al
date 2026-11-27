@@ -286,7 +286,12 @@ export default async function BalancePage({
             );
           })}
 
-          <h2 className="mt-10 font-serif text-xl font-normal">Lëvizjet e fundit</h2>
+          <div className="mt-10 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-serif text-xl font-normal">Lëvizjet e fundit</h2>
+            <a href="/dashboard/balance/export" download className={buttonClasses("outline", "sm")}>
+              Shkarko të gjitha (CSV)
+            </a>
+          </div>
           {activity.length === 0 ? (
             <EmptyState className="mt-4" title="Ende nuk ka lëvizje." />
           ) : (
