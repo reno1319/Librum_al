@@ -231,7 +231,7 @@ describe("AdminFinancePage", () => {
     expect(mockListFinanceRefundEntitlementMismatches).not.toHaveBeenCalled();
   });
 
-  it("renders exactly one H1, titled 'Finance', with a Stripe-Dashboard-replacement disclaimer", async () => {
+  it("renders exactly one H1, titled 'Finance', with a payment-provider-dashboard disclaimer", async () => {
     mockRequireStaff.mockResolvedValue({ userId: "u1", role: "owner" });
     setDefaultOkMocks();
 
@@ -241,7 +241,8 @@ describe("AdminFinancePage", () => {
 
     expect(h1s).toHaveLength(1);
     expect(collectText(h1s[0])).toContain("Finance");
-    expect(text).toContain("not a Stripe Dashboard replacement");
+    expect(text).toContain("not a replacement for the payment provider");
+    expect(text).not.toContain("Stripe Dashboard");
   });
 
   it("requests refund/dispute/checkout with FINANCE_DISPLAY_PAGE_SIZE + 1 (26) as the lookahead limit, and mismatches with 25 (no +1, no pagination)", async () => {

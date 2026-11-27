@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { redirectForMaintenance, throwMaintenanceError } from "@/lib/maintenance-response";
 import { FIXED_ALL_DISCOUNT_FORM_TYPE, parseFixedDiscountAll } from "@/lib/discount-amount";
-import { discountExpiryInstant, parseMaxUses } from "@/lib/discount-code-limits";
+import { discountExpiryDateFromParts, discountExpiryInstant, parseMaxUses } from "@/lib/discount-code-limits";
 
 export async function createDiscountCode(formData: FormData) {
   // ALL-CUTOVER APP-A: discount amount is written by this action --
@@ -29,7 +29,15 @@ export async function createDiscountCode(formData: FormData) {
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const type = String(formData.get("type") ?? "");
   const rawValue = formData.get("value");
-  const expiresAt = String(formData.get("expiresAt") ?? "").trim();
+  // fx4 a: the expiry arrives as three selects (dita / muaji / viti). A
+  // page opened before that change still sends the old single date.
+  const expiresAt = formData.has("expiresDay")
+    ? discountExpiryDateFromParts(
+        String(formData.get("expiresDay") ?? ""),
+        String(formData.get("expiresMonth") ?? ""),
+        String(formData.get("expiresYear") ?? ""),
+      )
+    : String(formData.get("expiresAt") ?? "").trim();
 
   if (!bookId || !code) {
     redirect(`/dashboard/discounts?error=${encodeURIComponent("Plotësoni të gjitha fushat")}`);
@@ -77,6 +85,9 @@ export async function createDiscountCode(formData: FormData) {
   // in Albania (see discount-code-limits.ts), so the stored instant is
   // the next day's midnight there, never the raw date.
   let expiresAtInstant: string | null = null;
+  if (expiresAt === null) {
+    redirect(`/dashboard/discounts?error=${encodeURIComponent("Zgjidhni një datë skadimi të vlefshme")}`);
+  }
   if (expiresAt) {
     expiresAtInstant = discountExpiryInstant(expiresAt);
     if (!expiresAtInstant) {

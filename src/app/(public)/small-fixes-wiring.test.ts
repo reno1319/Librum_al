@@ -29,7 +29,7 @@ describe("FIX1 X2: every header Sign up preselects Author", () => {
   it("desktop header and phone menu link to /signup?role=author", () => {
     for (const file of ["src/components/site-header.tsx", "src/components/mobile-nav.tsx"]) {
       // LR1: Libraria's own header (StoreHeaderRow, below the default
-      // header) is a reader's shop, so its "Krijo llogari" goes to the
+      // header) is a reader's shop, so its "Regjistrohu" goes to the
       // plain sign-up, Reader chosen; checked separately below.
       const full = read(file);
       const cut = full.indexOf("function StoreHeaderRow(");
@@ -59,19 +59,22 @@ describe("FIX1 X2: every header Sign up preselects Author", () => {
 });
 
 describe("FIX1 X3: How it works numbers each step once", () => {
-  // K5 (Renato 11-14): three steps, "Hapi 1:" to "Hapi 3:", each once,
-  // under a heading that says three.
-  it("the three step titles are numbered once each", async () => {
+  // K5 (Renato 11-14) then fx2 a (11-27): four steps, "Hapi 1:" to
+  // "Hapi 4:", each once, under a heading that says four, like the homepage.
+  it("the four step titles are numbered once each", async () => {
     const html = await renderHowItWorks();
     const steps = [...html.matchAll(/>Hapi (\d):<\/span>/g)].map((m) => m[1]);
-    expect(steps).toEqual(["1", "2", "3"]);
-    expect(html).toContain(">Botoni në tre hapa</h2>");
+    expect(steps).toEqual(["1", "2", "3", "4"]);
+    expect(html).toContain(">Botoni në katër hapa</h2>");
+    expect(html).not.toContain("tre hapa");
+    expect(html).toContain("</span> Krijoni librin</h3>");
+    expect(html).toContain("</span> Vendosni çmimin dhe botojeni</h3>");
     expect(html).not.toContain("Gjashtë hapa");
     expect(html).not.toContain("list-decimal");
   });
 
   // K5 (his pick): one rights line, no list of the statements.
-  it("step 2 has one rights line and does not list the statements", async () => {
+  it("step 3 has one rights line and does not list the statements", async () => {
     const html = await renderHowItWorks();
     expect(html).toContain("Zgjidhni deklaratën e të drejtave që i korrespondon librit tuaj.");
     for (const { text } of Object.values(RIGHTS_STATEMENTS)) {
@@ -183,5 +186,35 @@ describe("AUTHOR PAGES REDESIGN: the Terms contents box", () => {
     expect(headings.map((m) => m[1])).toEqual(titles.map((_, i) => String(i + 1)));
     expect(headings.map((m) => m[2].trim())).toEqual(titles);
     expect(titles).toHaveLength(18);
+  });
+});
+
+describe("fx1 b + rg3 a: Regjistrohu and Hyr, one word each", () => {
+  it("the sign-up page's tab title and submit button say Regjistrohu", () => {
+    const source = read("src/app/(public)/signup/page.tsx");
+    expect(source).toContain('title: "Regjistrohu",');
+    expect(source).not.toContain("Krijo llogari");
+  });
+});
+
+describe("site check-up P6: small accessibility fixes", () => {
+  it("Kushtet's gold section numbers are dark enough on cream (5.0:1, was 4.43)", () => {
+    const source = read("src/app/(public)/kushtet/page.tsx");
+    expect(source).not.toContain("#8a6d12");
+    expect(source).toContain("text-[#806510]");
+  });
+
+  it("Fitimet's sideways-scrolling table box is reachable by keyboard and named", () => {
+    const source = read("src/app/(public)/fitimet/page.tsx");
+    expect(source).toMatch(
+      /role="region"\s+aria-label="Shembuj për një shitje"\s+tabIndex=\{0\}\s+className="focus-ring [^"]*overflow-x-auto/,
+    );
+  });
+
+  it("the Libraria banner's slides are groups, not list items", () => {
+    const source = read("src/components/libraria-banner.tsx");
+    expect(source).not.toMatch(/<li[\s>]/);
+    expect(source).not.toMatch(/<ul[\s>]/);
+    expect(source).toMatch(/<div\s+key=\{slide\.id\}\s+role="group"\s+aria-roledescription="slide"/);
   });
 });

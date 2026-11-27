@@ -14,7 +14,7 @@ import {
   MINIMUM_FIXED_DISCOUNT_ALL,
   describeDiscountCode,
 } from "@/lib/discount-amount";
-import { discountExpiryDisplayDate } from "@/lib/discount-code-limits";
+import { DISCOUNT_EXPIRY_MONTHS, discountExpiryDisplayDate, discountExpiryYears } from "@/lib/discount-code-limits";
 import { groupAllDigits } from "@/lib/catalog-price";
 import type { Book, DiscountCode } from "@/lib/types";
 import type { Metadata } from "next";
@@ -173,10 +173,46 @@ export default async function DiscountsPage({
             librin nën çmimin minimal refuzohet gjatë pagesës.
           </p>
 
-          <label className="flex flex-col gap-1 text-sm">
-            Vlen deri më (opsionale)
-            <input name="expiresAt" type="date" className={formControlClasses} />
-          </label>
+          {/* fx4 a (11-27): dita / muaji / viti in Albanian, never the
+              browser's date box (an English phone showed mm/dd/yyyy). */}
+          <fieldset className="flex flex-col gap-1 text-sm">
+            <legend className="mb-1">Vlen deri më (opsionale)</legend>
+            <div className="flex flex-wrap gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                Dita
+                <select name="expiresDay" defaultValue="" className={formControlClasses}>
+                  <option value="">–</option>
+                  {Array.from({ length: 31 }, (_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Muaji
+                <select name="expiresMonth" defaultValue="" className={formControlClasses}>
+                  <option value="">–</option>
+                  {DISCOUNT_EXPIRY_MONTHS.map((month, i) => (
+                    <option key={month} value={i + 1}>
+                      {month}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                Viti
+                <select name="expiresYear" defaultValue="" className={formControlClasses}>
+                  <option value="">–</option>
+                  {discountExpiryYears().map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </fieldset>
 
           <label className="flex flex-col gap-1 text-sm">
             Numri maksimal i përdorimeve (opsional)

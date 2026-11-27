@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { plainFileInputClasses } from "@/lib/form-styles";
 
 // LIBRUM 2.0 LAUNCH-FIX-1A AVATAR-1: the same direct browser->Storage
 // pattern PRODUCT-5 proved for manuscripts and covers (see
@@ -38,6 +37,8 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MANUSCRIPTS_BUCKET = "manuscripts";
 const GENERIC_ERROR = "Fotoja nuk u ngarkua dot. Provoni përsëri.";
 const TOO_LARGE_ERROR = "Ky imazh e kalon kufirin prej 5 MB.";
+const PHOTO_BUTTON_CLASSES =
+  "inline-flex min-h-11 w-fit cursor-pointer items-center rounded-full border border-primary bg-surface px-4 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover peer-focus-visible:shadow-[var(--focus-ring)]";
 const UNSUPPORTED_FORMAT_ERROR = "Format imazhi i papranuar. Përdorni JPEG ose PNG.";
 
 export function AvatarField({
@@ -217,14 +218,19 @@ export function AvatarField({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Site check-up P3 (11-27): the browser's own file button shows
+            "Choose File / No file chosen" in the phone's language, often
+            English. The real input is hidden but still focusable; our
+            Albanian button is what people see and tap. */}
         <label className="flex flex-col gap-1 text-sm">
           Fotoja (JPEG ose PNG, deri në 5 MB)
           <input
             type="file"
             accept="image/png,image/jpeg"
-            className={plainFileInputClasses}
+            className="peer sr-only"
             onChange={(e) => handleAvatarChange(e.target.files?.[0] ?? null)}
           />
+          <span className={PHOTO_BUTTON_CLASSES}>Zgjidhni foton</span>
         </label>
 
         {status === "uploading" && (

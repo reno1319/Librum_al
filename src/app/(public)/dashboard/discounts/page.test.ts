@@ -114,6 +114,12 @@ describe("DiscountsPage: ALL discount creation and display", () => {
     expect(form).toMatch(/<input type="text" inputMode="decimal"[^>]*name="value"\/>/);
     expect(form).not.toContain('step="0.01"');
     expect(form).toContain("nga 1 deri në 100.000 lekë");
+    // fx4 a: the expiry is dita / muaji / viti in Albanian, no date box.
+    expect(form).not.toContain('type="date"');
+    expect(form).toContain("<legend");
+    expect(form).toMatch(/Dita<select name="expiresDay"/);
+    expect(form).toMatch(/Muaji<select name="expiresMonth"[\s\S]*<option value="1">janar<\/option>[\s\S]*<option value="12">dhjetor<\/option>/);
+    expect(form).toMatch(/Viti<select name="expiresYear"/);
     // The page description names lek, not dollars.
     expect(html).toContain("një shumë fikse në lekë");
     expect(html).not.toMatch(/\$\d/);
