@@ -356,8 +356,8 @@ export async function SiteHeader({ variant }: { variant?: SiteHeaderVariant } = 
 
 // LR1: the shop header row. Logo, the search (it sends ?q= to Libraria),
 // "Lista ime" (the wishlist) and "Shporta" (the cart) as labelled icons,
-// then the account: signed out, "Krijo llogari" with "Keni llogari?
-// Hyni" under it; signed in, the same greeting link as every other page,
+// then the account: signed out, "Regjistrohu" with "Keni llogari?
+// Hyr" under it (fx1 b, 11-27: the same words as every other header); signed in, the same greeting link as every other page,
 // and "Dil". No menu links and no menu button (lb7 b); the footer still
 // links every page. Signed-out taps on the two icons go through log in
 // first. On phones the search drops to its own full-width row.
@@ -444,12 +444,12 @@ function StoreHeaderRow({
         {!signedIn ? (
           <div className="flex flex-col items-center gap-1">
             <Link href="/signup" className={`${BRASS_BUTTON_CLASSES} px-3! py-1.5! text-sm sm:px-4! sm:py-2! sm:text-base`}>
-              Krijo llogari
+              Regjistrohu
             </Link>
             <span className="text-[0.6875rem] text-primary-foreground/90 sm:text-xs">
               Keni llogari?{" "}
               <Link href="/login" className={QUIET_LINK_ON_DARK_CLASSES}>
-                Hyni
+                Hyr
               </Link>
             </span>
           </div>

@@ -12,7 +12,38 @@ import { FEEDBACK_BODY_MAX, FEEDBACK_KIND_LABEL, FEEDBACK_KINDS, type FeedbackKi
 // modal <dialog>, so it sits above this button; the admin has no
 // SiteHeader. On phones it moves above the buy bar while that shows
 // (globals.css).
+//
+// fb1 a (Renato 2026-11-27): on phones the button hid text under it, so
+// below the md breakpoint it slides away while the page scrolls down and
+// comes back on any scroll up, near the top, and at the end of the page.
+// It never hides while its box is open. Computers are unchanged.
 type Kind = FeedbackKind;
+
+const PHONE_QUERY = "(max-width: 767.98px)";
+// Small finger jitters do not flip it.
+const SCROLL_STEP_PX = 8;
+const TOP_ZONE_PX = 80;
+const END_ZONE_PX = 24;
+
+export function feedbackFabHidden({
+  previousY,
+  y,
+  viewportHeight,
+  pageHeight,
+  wasHidden,
+}: {
+  previousY: number;
+  y: number;
+  viewportHeight: number;
+  pageHeight: number;
+  wasHidden: boolean;
+}): boolean {
+  if (y <= TOP_ZONE_PX) return false;
+  if (y + viewportHeight >= pageHeight - END_ZONE_PX) return false;
+  if (y - previousY > SCROLL_STEP_PX) return true;
+  if (previousY - y > SCROLL_STEP_PX) return false;
+  return wasHidden;
+}
 
 export function FeedbackButton() {
   const pathname = usePathname();
@@ -23,6 +54,34 @@ export function FeedbackButton() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const boxRef = useRef<HTMLTextAreaElement>(null);
+  const [hidden, setHidden] = useState(false);
+
+  useEffect(() => {
+    const phone = window.matchMedia(PHONE_QUERY);
+    let previousY = window.scrollY;
+    let wasHidden = false;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const next = phone.matches
+        ? feedbackFabHidden({
+            previousY,
+            y,
+            viewportHeight: window.innerHeight,
+            pageHeight: document.documentElement.scrollHeight,
+            wasHidden,
+          })
+        : false;
+      if (Math.abs(y - previousY) > SCROLL_STEP_PX || next !== wasHidden) previousY = y;
+      if (next !== wasHidden) {
+        wasHidden = next;
+        setHidden(next);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const tuckedAway = hidden && !open;
 
   useEffect(() => {
     if (kind) boxRef.current?.focus();
@@ -46,7 +105,14 @@ export function FeedbackButton() {
   };
 
   return (
-    <div data-feedback-fab="" className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex flex-col items-end gap-3 md:right-6 md:bottom-6">
+    <div
+      data-feedback-fab=""
+      data-hidden={tuckedAway ? "true" : undefined}
+      inert={tuckedAway}
+      className={`fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex flex-col items-end gap-3 transition-[translate,opacity] duration-200 motion-reduce:transition-none md:right-6 md:bottom-6 ${
+        tuckedAway ? "pointer-events-none translate-y-[calc(100%+2rem)] opacity-0" : ""
+      }`}
+    >
       {open && (
         <div
           role="dialog"

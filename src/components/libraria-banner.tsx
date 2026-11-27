@@ -99,12 +99,14 @@ export function LibrariaBanner({ slides }: { slides: BannerSlide[] }) {
           }
         }}
       >
-        <ul
+        {/* Site check-up P6 (11-27): plain boxes, not a list. Each slide
+            is a named group, and list items may not take another role. */}
+        <div
           className={`flex ${reduceMotion ? "" : "transition-transform duration-500 ease-out"}`}
           style={{ transform: `translateX(-${index * 100}%)` }}
         >
           {slides.map((slide, i) => (
-            <li
+            <div
               key={slide.id}
               role="group"
               aria-roledescription="slide"
@@ -114,9 +116,9 @@ export function LibrariaBanner({ slides }: { slides: BannerSlide[] }) {
               className="w-full shrink-0"
             >
               <Slide slide={slide} eager={i === 0} />
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       </div>
 
       {count > 1 && (

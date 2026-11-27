@@ -129,7 +129,7 @@ describe("SiteHeader store variant (Libraria)", () => {
     menuProps.length = 0;
   });
 
-  it("a visitor: search to Libraria, both icons through log in, Krijo llogari and Hyni, no menu", async () => {
+  it("a visitor: search to Libraria, both icons through log in, Regjistrohu and Hyr, no menu", async () => {
     const html = await renderStore();
     expect(html).toMatch(/<form[^>]*action="\/librari"[^>]*method="get"|<form[^>]*method="get"[^>]*action="\/librari"/);
     expect(html).toMatch(/id="store-header-q"[^>]*name="q"|name="q"[^>]*id="store-header-q"/);
@@ -137,9 +137,11 @@ describe("SiteHeader store variant (Libraria)", () => {
     expect(html).toContain(">Lista ime</span>");
     expect(html).toContain('href="/login?next=/shporta"');
     expect(html).toContain(">Shporta</span>");
-    expect(html).toMatch(/href="\/signup"[^>]*>Krijo llogari</);
+    expect(html).toMatch(/href="\/signup"[^>]*>Regjistrohu</);
+    expect(html).not.toContain("Krijo llogari");
     expect(html).toMatch(/Keni llogari\?/);
-    expect(html).toMatch(/href="\/login"[^>]*>Hyni</);
+    expect(html).toMatch(/href="\/login"[^>]*>Hyr</);
+    expect(html).not.toContain(">Hyni<");
     expect(menuProps).toHaveLength(0);
     expect(cartQueries).toHaveLength(0);
   });
@@ -152,7 +154,7 @@ describe("SiteHeader store variant (Libraria)", () => {
     expect(html).toMatch(/aria-label="Shporta, 2 libra"/);
     expect(html).toContain(">2</span>");
     expect(html).toContain("Përshëndetje, ");
-    expect(html).not.toContain("Krijo llogari");
+    expect(html).not.toContain("Regjistrohu");
     expect(menuProps).toHaveLength(0);
   });
 

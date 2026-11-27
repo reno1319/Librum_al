@@ -891,7 +891,7 @@ function ReadingInvite() {
         href="/signup"
         className="focus-ring mt-2 inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-6 font-semibold text-accent-foreground transition-colors hover:bg-primary-foreground"
       >
-        Krijo llogari
+        Regjistrohu
       </Link>
     </section>
   );

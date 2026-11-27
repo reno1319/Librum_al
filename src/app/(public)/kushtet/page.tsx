@@ -106,7 +106,7 @@ export default function TermsPage() {
             <ol className="mt-3 grid gap-x-8 gap-y-1.5 text-sm sm:grid-cols-2">
               {SECTION_TITLES.map((title, i) => (
                 <li key={title} className="flex gap-2">
-                  <span className="w-6 shrink-0 text-right font-serif text-[#8a6d12]">{i + 1}.</span>
+                  <span className="w-6 shrink-0 text-right font-serif text-[#806510]">{i + 1}.</span>
                   <a href={`#section-${i + 1}`} className="focus-ring rounded-sm text-primary underline underline-offset-2 hover:decoration-2">
                     {title}
                   </a>
@@ -118,7 +118,7 @@ export default function TermsPage() {
           <div className="mt-10 flex flex-col gap-8 text-foreground/90">
             <section id="section-1" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">1.</span> Pranimi i Kushteve
+                <span className="text-[#806510]">1.</span> Pranimi i Kushteve
               </h2>
               <p className="mt-2">
                 Duke krijuar një llogari ose duke përdorur Librum, ju
@@ -133,7 +133,7 @@ export default function TermsPage() {
 
             <section id="section-2" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">2.</span> Kush jemi
+                <span className="text-[#806510]">2.</span> Kush jemi
               </h2>
               <p className="mt-2">
                 Librum është shitësi i çdo libri që blihet në Librum dhe pala
@@ -150,7 +150,7 @@ export default function TermsPage() {
 
             <section id="section-3" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">3.</span> Llogaritë dhe mosha
+                <span className="text-[#806510]">3.</span> Llogaritë dhe mosha
               </h2>
               <p className="mt-2">
                 Duhet të jeni të paktën 16 vjeç për të krijuar një llogari
@@ -168,7 +168,7 @@ export default function TermsPage() {
 
             <section id="section-4" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">4.</span> Roli i Librum
+                <span className="text-[#806510]">4.</span> Roli i Librum
               </h2>
               <p className="mt-2">
                 Librum është një platformë dixhitale botimi dhe shitjeje.
@@ -182,7 +182,7 @@ export default function TermsPage() {
 
             <section id="section-5" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">5.</span> Përmbajtja e autorit dhe licenca
+                <span className="text-[#806510]">5.</span> Përmbajtja e autorit dhe licenca
               </h2>
               <p className="mt-2">
                 Autorët mbeten pronarë të gjithçkaje që ngarkojnë. Librum
@@ -259,7 +259,7 @@ export default function TermsPage() {
 
             <section id="section-6" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">6.</span> Rregullat e përmbajtjes dhe shkeljet
+                <span className="text-[#806510]">6.</span> Rregullat e përmbajtjes dhe shkeljet
               </h2>
               <p className="mt-2">
                 Nuk lejohet përmbajtje e paligjshme, përmbajtje që shkel të
@@ -281,7 +281,7 @@ export default function TermsPage() {
 
             <section id="section-7" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">7.</span> Licenca juaj e leximit
+                <span className="text-[#806510]">7.</span> Licenca juaj e leximit
               </h2>
               <p className="mt-2">
                 Kur blini një libër, merrni një licencë personale për ta
@@ -305,7 +305,7 @@ export default function TermsPage() {
 
             <section id="section-8" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">8.</span> Pagesat dhe honorari i autorit
+                <span className="text-[#806510]">8.</span> Pagesat dhe honorari i autorit
               </h2>
               <p className="mt-2">
                 Pagesat e lexuesve përpunohen në lekë (ALL) në faqen e
@@ -325,7 +325,7 @@ export default function TermsPage() {
 
             <section id="section-9" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">9.</span> Anulimi dhe rimbursimet
+                <span className="text-[#806510]">9.</span> Anulimi dhe rimbursimet
               </h2>
               <p className="mt-2">
                 Mund ta anuloni një blerje për çfarëdo arsye brenda 14
@@ -358,7 +358,7 @@ export default function TermsPage() {
 
             <section id="section-10" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">10.</span> Kundërshtimet e pagesave
+                <span className="text-[#806510]">10.</span> Kundërshtimet e pagesave
               </h2>
               <p className="mt-2">
                 Banka ose lëshuesi i kartës së një lexuesi mund t&apos;i
@@ -381,7 +381,7 @@ export default function TermsPage() {
 
             <section id="section-11" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">11.</span> Pagesat për autorët
+                <span className="text-[#806510]">11.</span> Pagesat për autorët
               </h2>
               <p className="mt-2">
                 Librum do ta publikojë mënyrën dhe kohën e pagesave për autorët
@@ -393,7 +393,7 @@ export default function TermsPage() {
 
             <section id="section-12" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">12.</span> Heqja nga publikimi dhe largimi nga Librum
+                <span className="text-[#806510]">12.</span> Heqja nga publikimi dhe largimi nga Librum
               </h2>
               <p className="mt-2">
                 Një autor mund ta heqë një vepër nga publikimi ose të
@@ -410,7 +410,7 @@ export default function TermsPage() {
 
             <section id="section-13" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">13.</span> Mbyllja e llogarisë
+                <span className="text-[#806510]">13.</span> Mbyllja e llogarisë
               </h2>
               <p className="mt-2">
                 Secila palë mund ta përfundojë këtë marrëdhënie në çdo kohë.
@@ -435,7 +435,7 @@ export default function TermsPage() {
 
             <section id="section-14" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">14.</span> Disponueshmëria dhe ndryshimet e platformës
+                <span className="text-[#806510]">14.</span> Disponueshmëria dhe ndryshimet e platformës
               </h2>
               <p className="mt-2">
                 Librum mund të ndryshojë, të shtojë ose të heqë funksione të
@@ -448,7 +448,7 @@ export default function TermsPage() {
 
             <section id="section-15" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">15.</span> Garancitë dhe përgjegjësia
+                <span className="text-[#806510]">15.</span> Garancitë dhe përgjegjësia
               </h2>
               <p className="mt-2">
                 Përtej të drejtave që ju jep ligji, Librum ofrohet
@@ -475,7 +475,7 @@ export default function TermsPage() {
 
             <section id="section-16" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">16.</span> Ligji i zbatueshëm dhe mosmarrëveshjet
+                <span className="text-[#806510]">16.</span> Ligji i zbatueshëm dhe mosmarrëveshjet
               </h2>
               <p className="mt-2">
                 Nëse keni një ankesë, ju lutemi na shkruani fillimisht te{" "}
@@ -497,7 +497,7 @@ export default function TermsPage() {
 
             <section id="section-17" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">17.</span> Ndryshimet e këtyre Kushteve
+                <span className="text-[#806510]">17.</span> Ndryshimet e këtyre Kushteve
               </h2>
               <p className="mt-2">
                 Ne mund t&apos;i përditësojmë këto Kushte herë pas here, dhe
@@ -512,7 +512,7 @@ export default function TermsPage() {
 
             <section id="section-18" className="scroll-mt-6">
               <h2 className="font-serif text-xl font-normal text-primary">
-                <span className="text-[#8a6d12]">18.</span> Kontakti
+                <span className="text-[#806510]">18.</span> Kontakti
               </h2>
               <p className="mt-2">
                 Për pyetje rreth këtyre Kushteve, na shkruani te{" "}

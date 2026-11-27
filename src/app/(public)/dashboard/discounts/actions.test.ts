@@ -362,6 +362,25 @@ describe("createDiscountCode: max uses and expiry", () => {
     expect(stub.inserts[0].expires_at).toBeNull();
   });
 
+  it("fx4 a: dita / muaji / viti are stored like the old date", async () => {
+    await submit({ expiresDay: "10", expiresMonth: "7", expiresYear: "2026" });
+    expect(stub.inserts[0].expires_at).toBe("2026-07-10T22:00:00.000Z");
+  });
+
+  it("fx4 a: three empty selects mean no expiry", async () => {
+    await submit({ expiresDay: "", expiresMonth: "", expiresYear: "" });
+    expect(stub.inserts[0].expires_at).toBeNull();
+  });
+
+  it.each([
+    [{ expiresDay: "10", expiresMonth: "", expiresYear: "2026" }],
+    [{ expiresDay: "30", expiresMonth: "2", expiresYear: "2027" }],
+  ])("fx4 a: a partial or impossible pick never reaches the insert (%j)", async (fields) => {
+    const outcome = await submit(fields);
+    expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20nj%C3%AB%20dat%C3%AB%20skadimi%20t%C3%AB%20vlefshme" });
+    expect(stub.inserts).toHaveLength(0);
+  });
+
   it("a malformed date never reaches the insert", async () => {
     const outcome = await submit({ expiresAt: "2026-02-30" });
     expect(outcome).toMatchObject({ target: "/dashboard/discounts?error=Zgjidhni%20nj%C3%AB%20dat%C3%AB%20skadimi%20t%C3%AB%20vlefshme" });
