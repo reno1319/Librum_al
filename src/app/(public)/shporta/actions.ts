@@ -106,6 +106,49 @@ async function addToCartThen(bookId: string, loginNext: string, done: string | n
   if (done) redirect(done);
 }
 
+// Amazon book page P5 (bp10 b): "Shto të dyja në shportë" under
+// "Blihen shpesh bashkë" adds this book and the other one, then opens
+// the cart. The same rules as "Shto në shportë" for each book; a book
+// the reader already owns or already has in the cart is skipped, and
+// any refusal opens this book's page with its reason. The button shows
+// only once card payment is open.
+export async function addBothToCart(bookId: string, otherId: string) {
+  const { supabase, user } = await signedInUser(`/libra/${bookId}`);
+  if (bookId === otherId) refuseBook(bookId, "unavailable");
+
+  const toAdd: string[] = [];
+  for (const id of [bookId, otherId]) {
+    const refusal = await bookRefusal(supabase, id, user.id);
+    if (refusal) refuseBook(bookId, refusal);
+    const { data: owned } = await supabase.rpc("user_owns_book", { target_book_id: id });
+    if (owned) continue;
+    const { data: existing } = await supabase
+      .from("cart_items")
+      .select("id")
+      .eq("reader_id", user.id)
+      .eq("book_id", id)
+      .is("gift_email", null)
+      .maybeSingle();
+    if (!existing) toAdd.push(id);
+  }
+
+  if (toAdd.length > 0) {
+    const { count } = await supabase
+      .from("cart_items")
+      .select("id", { count: "exact", head: true })
+      .eq("reader_id", user.id);
+    if ((count ?? 0) + toAdd.length > CART_MAX_ITEMS) cartFull(bookId);
+    for (const id of toAdd) {
+      const { error } = await supabase.from("cart_items").insert({ reader_id: user.id, book_id: id });
+      // 23505: added a moment ago in another tab; the book is in the cart.
+      if (error && error.code !== "23505") addFailed(bookId);
+    }
+  }
+
+  revalidatePath("/", "layout");
+  redirect("/shporta");
+}
+
 // g1 a: a gift is a cart row with the friend's email and an optional
 // note. With an item id it edits that gift (g2 a, while still in the
 // cart).

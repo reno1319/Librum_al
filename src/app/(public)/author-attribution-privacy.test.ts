@@ -196,8 +196,9 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
     expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")');
     const shelfSelects = source.match(/\.select\("\*, pen:public_pen_names\(id, name\)"\)/g) ?? [];
     // youMightLike, plus the Amazon page P2 shelf chips "Nga <autori>"
-    // and one per category.
-    expect(shelfSelects.length).toBe(3);
+    // and one per category. Amazon page P5: plus the "bought together"
+    // books (chip "Blerë bashkë me këtë" and "Blihen shpesh bashkë").
+    expect(shelfSelects.length).toBe(4);
     expect(source).not.toMatch(/public_author_profiles\(/);
     expect(source).not.toMatch(/profiles\(display_name, public_author_name/);
   });
