@@ -30,8 +30,9 @@ describe("pre-orders in public lists", () => {
   // P1: plus the author's book count, which counts what "More by" lists.
   // Amazon page (md1 a): two shelves now (series, you-might-like).
   // Amazon page P2: plus the shelf's "Nga <autori>" and category chips.
+  // Amazon page P5: plus the "bought together" books read.
   it("the book page's shelves and the author's book count list them", () => {
-    expect(count(read("src/app/(public)/libra/[id]/page.tsx"), IN_LISTED)).toBe(5);
+    expect(count(read("src/app/(public)/libra/[id]/page.tsx"), IN_LISTED)).toBe(6);
   });
 
   it("the home page stays released books only", () => {

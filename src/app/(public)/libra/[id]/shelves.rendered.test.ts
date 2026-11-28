@@ -176,10 +176,10 @@ describe("item 13: the section bar", () => {
 });
 
 describe("items 11, 23, 24: the shelf with chips", () => {
-  it("heading kept as today (bp16 a), chips: similar, the author, each category; the old bottom row is gone", async () => {
+  it("heading \"Lexuesit blenë edhe\" (P5, fb3 b), chips: similar, the author, each category; the old bottom row is gone", async () => {
     const html = await render();
-    expect(html.match(/<h2[^>]*>Mund t&#x27;ju pëlqejnë edhe<\/h2>/g)).toHaveLength(1);
-    expect(html).not.toContain("Lexuesit blenë edhe");
+    expect(html.match(/<h2[^>]*>Lexuesit blenë edhe<\/h2>/g)).toHaveLength(1);
+    expect(html).not.toContain("Mund t&#x27;ju pëlqejnë edhe");
     // Romane's row is empty here, so only Histori gets a chip.
     expect(chipLabels(html)).toEqual(["Libra të ngjashëm", "Nga An Author", "Histori"]);
     expect(html).toMatch(/<a href="\/autore\/pen-an-author" data-shelf-chip=""/);

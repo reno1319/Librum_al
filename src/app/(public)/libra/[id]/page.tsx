@@ -43,6 +43,18 @@ import {
   summarizeReviews,
 } from "@/lib/review-summary";
 import { BookPageShelf } from "@/components/book-page-shelf";
+import {
+  ADD_BOTH_LABEL,
+  ALSO_BOUGHT_CHIP,
+  ALSO_BOUGHT_HEADING,
+  BOUGHT_TOGETHER_HEADING,
+  THIS_BOOK_LABEL,
+  inIdOrder,
+  pickTogetherBook,
+  readBooksBoughtTogether,
+  showAddBoth,
+  togetherTotalLabel,
+} from "@/lib/bought-together";
 import { BookPageCard } from "@/components/book-page-card";
 import { BookPageSectionBar } from "@/components/book-page-section-bar";
 import { AdultTag } from "@/components/adult-tag";
@@ -125,7 +137,7 @@ import { BookDescriptionView } from "@/components/book-description-view";
 import { CoverZoom, ExpandableText, ShareIconButton, TileStrip } from "@/components/book-page-extras";
 import { StickyBuyBar } from "@/components/sticky-buy-bar";
 import { ADD_TO_CART_LABEL, CARD_PAYMENT_SOON_LINE, GIFT_LABEL, IN_CART_LABEL } from "@/lib/cart";
-import { addToCart } from "../../shporta/actions";
+import { addBothToCart, addToCart } from "../../shporta/actions";
 import {
   IconBuilding,
   IconCalendar,
@@ -567,6 +579,7 @@ export default async function BookDetailPage({
     { data: bundleLinks },
     salesRanks,
     isLibrumPick,
+    boughtTogetherIds,
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -724,6 +737,10 @@ export default async function BookDetailPage({
     // picked this book in Admin › Libraria.
     readBookSalesRanks(createAdminClient(), id),
     readIsLibrumPick(supabase, id),
+    // Amazon page P5 (fb1 a, fb4 a): the other books 3+ readers bought
+    // as well (paid copies, any age; book ids only, server-side admin
+    // client).
+    readBooksBoughtTogether(createAdminClient(), id),
   ]);
   const rankBadge = topRankBadge(salesRanks);
   const rankLine = rankParts(salesRanks);
@@ -794,10 +811,35 @@ export default async function BookDetailPage({
       : { data: null };
   const bundles: BookPageBundle[] = bundlesData ?? [];
 
+  // Amazon page P5: the paired books, read back through public_books with
+  // the shelf's own rules (listed, priced; never an 18+ book on a book for
+  // children or teens), in pair order.
+  const { data: boughtTogetherData } =
+    boughtTogetherIds.length > 0
+      ? await (() => {
+          let paired = supabase
+            .from("public_books")
+            .select("*, pen:public_pen_names(id, name)")
+            .in("id", boughtTogetherIds)
+            .in("status", LISTED_BOOK_STATUSES)
+            .not("price_all", "is", null);
+          if (isYoungReaderBook(book)) paired = paired.eq("is_adult", false);
+          return paired.returns<BookWithAuthor[]>();
+        })()
+      : { data: null };
+  const boughtTogether = inIdOrder(boughtTogetherData ?? [], boughtTogetherIds);
+  // bp9 b + fb2 b: "Blihen shpesh bashkë" shows the best real pair, else
+  // the first same-genre book, always under the same heading.
+  const togetherBook = pickTogetherBook(boughtTogether, youMightLike, book.id);
+
   // Amazon page P2 (item 11): the shelf's chips. "Libra të ngjashëm"
   // first, then "Nga <autori>", then one per category -- a chip whose
   // books are exactly the first chip's is left out, and so is an empty one.
-  const shelfRows: { kind: "similar" | "author" | "category"; label: string; href: string; books: BookWithAuthor[] }[] = [];
+  const shelfRows: { kind: "bought" | "similar" | "author" | "category"; label: string; href: string; books: BookWithAuthor[] }[] = [];
+  // fb3 b: "Blerë bashkë me këtë" first, only when real pairs exist.
+  if (boughtTogether.length > 0) {
+    shelfRows.push({ kind: "bought", label: ALSO_BOUGHT_CHIP, href: `/libra/${book.id}#te-ngjashem`, books: boughtTogether });
+  }
   if (youMightLike.length > 0) {
     shelfRows.push({
       kind: "similar",
@@ -1797,6 +1839,75 @@ export default async function BookDetailPage({
       />
 
       {/* ============================================================
+          Item 10 (P5, bp9 b, bp10 b, fb2 b): "Blihen shpesh bashkë" --
+          this book + the best real pair (3+ readers bought both), else
+          the first same-genre book; the two prices added up. The add
+          button shows only once card payment is open.
+          ============================================================ */}
+      {togetherBook && (
+        <section
+          data-bought-together=""
+          aria-labelledby="blihen-bashke"
+          className="mt-9 border-t border-border pt-5 md:mt-8 md:border-t-0 md:pt-0"
+        >
+          <h2 id="blihen-bashke" className={SECTION_HEADING}>
+            {BOUGHT_TOGETHER_HEADING}
+          </h2>
+          <div className="mt-4 flex flex-wrap items-start gap-x-4 gap-y-4 md:gap-x-[1.125rem]">
+            <TogetherItem
+              href={null}
+              title={book.title}
+              coverUrl={coverUrl}
+              authorName={resolveBookByline(book)}
+              label={THIS_BOOK_LABEL}
+              price={formattedPrice}
+            />
+            <span aria-hidden="true" className="self-center pb-10 text-[1.75rem] leading-none text-muted">
+              +
+            </span>
+            <TogetherItem
+              href={`/libra/${togetherBook.id}`}
+              title={togetherBook.title}
+              coverUrl={
+                togetherBook.cover_path
+                  ? supabase.storage.from("covers").getPublicUrl(togetherBook.cover_path).data.publicUrl
+                  : null
+              }
+              authorName={resolveBookByline(togetherBook)}
+              label={togetherBook.title}
+              price={formatCatalogPriceLabel(togetherBook.price_all)}
+            />
+            {(() => {
+              const total = togetherTotalLabel(book.price_all, togetherBook.price_all);
+              const addBoth = showAddBoth({ paidCheckoutAvailable, purchaseState, books: [book, togetherBook] });
+              if (!total && !addBoth) return null;
+              return (
+                <div data-together-total="" className="flex w-full flex-col gap-2.5 md:ml-6 md:w-auto md:min-w-[16.25rem]">
+                  {total && (
+                    <p className="text-sm text-foreground">
+                      Gjithsej: <b className="text-xl">{total}</b>
+                    </p>
+                  )}
+                  {addBoth &&
+                    (user ? (
+                      <form action={addBothToCart.bind(null, book.id, togetherBook.id)}>
+                        <button type="submit" data-add-both="" className={ADD_BOTH_BTN}>
+                          {ADD_BOTH_LABEL}
+                        </button>
+                      </form>
+                    ) : (
+                      <Link href={`/login?next=/libra/${book.id}`} data-add-both="" className={ADD_BOTH_BTN}>
+                        {ADD_BOTH_LABEL}
+                      </Link>
+                    ))}
+                </div>
+              );
+            })()}
+          </div>
+        </section>
+      )}
+
+      {/* ============================================================
           Item 11 (+ 12, 20, 23, 24): the shelf of other books, with a
           chip per list, cards with stars and "I ri". It replaces the old
           "Mund t'ju pëlqejnë edhe" row at the bottom of the page.
@@ -1805,7 +1916,7 @@ export default async function BookDetailPage({
         <div className="mt-9 border-t border-border pt-5 md:mt-8 md:border-t-0 md:pt-0">
           <BookPageShelf
             id="te-ngjashem"
-            heading={SHELF_HEADING}
+            heading={ALSO_BOUGHT_HEADING}
             headingClassName={SECTION_HEADING}
             tabs={shelfRows.map((row) => ({
               label: row.label,
@@ -2369,10 +2480,70 @@ export default async function BookDetailPage({
 // DR1 fix 4: the serif section heading, as the dashboard h2.
 // fs1 a (Amazon sizes): headings 21px bold, one sans font.
 const SECTION_HEADING = "text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]";
+const ADD_BOTH_BTN =
+  "focus-ring inline-flex min-h-11 w-full items-center justify-center rounded-full bg-accent px-5 text-[0.9375rem] font-semibold text-accent-foreground md:min-h-8 md:w-auto md:text-sm";
+
+// Amazon page P5 (item 10): one book of "Blihen shpesh bashkë" -- cover,
+// a tick, the label ("Ky libër" or the title) and the price. This book
+// is not a link (the reader is on it); the other opens its page.
+function TogetherItem({
+  href,
+  title,
+  coverUrl,
+  authorName,
+  label,
+  price,
+}: {
+  href: string | null;
+  title: string;
+  coverUrl: string | null;
+  authorName: string | null;
+  label: string;
+  price: string;
+}) {
+  const cover = coverUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={coverUrl}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className="aspect-[5/8] w-full rounded-[3px] object-contain object-bottom drop-shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
+    />
+  ) : (
+    <CoverPlaceholder title={title} authorName={authorName} className="aspect-[5/8] w-full rounded-[3px] shadow-[0_2px_6px_rgba(0,0,0,0.18)]" />
+  );
+  const text = (
+    <span className="mt-1.5 flex items-start gap-1 text-[0.8125rem] leading-snug text-foreground">
+      <span aria-hidden="true" className="mt-px inline-flex size-4 shrink-0 items-center justify-center rounded-[3px] bg-primary text-[0.6875rem] leading-none text-primary-foreground">
+        ✓
+      </span>
+      <span>
+        {href ? label : <b>{label}</b>}
+        <br />
+        {price}
+      </span>
+    </span>
+  );
+  return (
+    <div data-together-item="" className="w-[6.25rem] md:w-[8.125rem]">
+      {href ? (
+        <Link href={href} className="focus-ring block rounded-[3px] hover:underline">
+          {cover}
+          {text}
+        </Link>
+      ) : (
+        <>
+          {cover}
+          {text}
+        </>
+      )}
+    </div>
+  );
+}
 const PAGE_SECTION_CLASSES = "mt-9 border-t border-border pt-5";
 // Item 11 heading (bp16 a, Renato 11-28): today's honest heading
 // until patch 5 brings real "readers also bought" data.
-const SHELF_HEADING = "Mund t'ju pëlqejnë edhe";
 const DETAIL_LINK_CLASSES =
   "focus-ring rounded-sm text-foreground underline underline-offset-2 hover:text-primary hover:decoration-2";
 const INLINE_LINK_CLASSES =

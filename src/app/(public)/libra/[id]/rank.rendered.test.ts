@@ -109,7 +109,8 @@ describe("item 7: the Renditja line", () => {
   it("lists Libraria then each category, each linking to that list", async () => {
     rankRpc = ranks([null, 14], ["Romancë", 1], ["Histori", 3]);
     const html = await render();
-    expect(rpcCalls).toEqual([{ name: "book_sales_ranks", args: { p_book_id: BOOK_ID } }]);
+    // P5 adds a second admin call (books_bought_together); this checks the rank call.
+    expect(rpcCalls.filter((c) => c.name === "book_sales_ranks")).toEqual([{ name: "book_sales_ranks", args: { p_book_id: BOOK_ID } }]);
     expect(html).toContain('<dt class="font-semibold text-foreground">Renditja:</dt>');
     const line = rankLine(html)!;
     expect(line.replace(/<[^>]+>/g, "")).toBe("Nr. 14 në Librari · Nr. 1 në Romancë · Nr. 3 në Histori");
