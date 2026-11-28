@@ -679,7 +679,7 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).toContain('<div class="min-w-0 max-md:contents lg:pr-5 lg:pl-[3.125rem]"><div class="max-md:col-start-2 max-md:row-start-1 max-md:self-center"><h1');
     expect(html).toMatch(/<div class="max-md:col-span-2 max-md:row-start-3"><hr class="my-3.5 /);
     expect(html).toMatch(/<aside aria-label="Çmimi dhe marrja e librit" class="w-full max-md:col-span-2 max-md:row-start-2 md:col-start-2 lg:col-start-3 lg:row-start-1">/);
-    expect(html).toContain('<h2 class="text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]">Rreth autorit</h2>');
+    expect(html).toContain('<h2 id="rreth-autorit-titulli" class="text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]">Rreth autorit</h2>');
     expect(html).toContain('<h2 class="text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]">Vlerësimet</h2>');
   });
 
@@ -823,7 +823,9 @@ describe("BookDetailPage: patch A buy box and sticky bar", () => {
 
   it("no rating line under the title before the first review; one quiet line in the empty section, none for the owner", async () => {
     const reader = await render({ user: { id: "reader" } });
-    expect(reader).not.toContain('href="#vleresimet"');
+    // Amazon page P2: the section bar links to the reviews too, so
+    // the check is on the rating line itself.
+    expect(reader).not.toContain("data-rating-line");
     expect(reader).toContain("Ende pa vlerësime. Vlerësimi i parë mund të jetë i juaji, pasi ta lexoni librin.");
     expect(reader).not.toContain("Ende nuk ka vlerësime.");
     const owner = await render({ user: { id: "reader" }, owns: true });

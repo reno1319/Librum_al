@@ -190,7 +190,9 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   it("every author-attribution select on this page reads the pen name view, never the base profiles table", () => {
     expect(source).toContain('.select("*, pen:public_pen_names(id, name, bio, avatar_path, links)")');
     const shelfSelects = source.match(/\.select\("\*, pen:public_pen_names\(id, name\)"\)/g) ?? [];
-    expect(shelfSelects.length).toBe(1); // youMightLike (Amazon page, md1 a: no "More by" shelf)
+    // youMightLike, plus the Amazon page P2 shelf chips "Nga <autori>"
+    // and one per category.
+    expect(shelfSelects.length).toBe(3);
     expect(source).not.toMatch(/public_author_profiles\(/);
     expect(source).not.toMatch(/profiles\(display_name, public_author_name/);
   });
