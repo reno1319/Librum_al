@@ -71,6 +71,9 @@ const PUBLIC_FILES = [
 // the account deletion's own-books read. Each must carry an own-row filter.
 const PUBLIC_BASE_READS: Record<string, string[]> = {
   "app/(public)/libra/[id]/page.tsx": ["books", "reviews"],
+  // Amazon book page P3 (bp4 a): the all-reviews page keeps the book
+  // page's gate for a book that is not live (the author's own row).
+  "app/(public)/libra/[id]/vleresimet/page.tsx": ["books"],
   "app/(public)/libra/[id]/actions.ts": ["books"],
   "app/(public)/paketa/[id]/page.tsx": ["bundles"],
   // K8 rate prompt (11-20): the reader's own reviews (book ids only), so
