@@ -48,6 +48,15 @@ import { BookPageSectionBar } from "@/components/book-page-section-bar";
 import { AdultTag } from "@/components/adult-tag";
 import { isNewOnLibrum, sameBookIds, SHELF_ROW_LIMIT } from "@/lib/book-page-shelf";
 import { fetchRatings } from "@/lib/libraria-picks-read";
+import {
+  PICK_BADGE_TEXT,
+  RANK_DETAIL_LABEL,
+  rankNumberText,
+  rankParts,
+  readBookSalesRanks,
+  readIsLibrumPick,
+  topRankBadge,
+} from "@/lib/book-rank";
 import { formatBundleSavingsAll, resolveBundleSavingsAll } from "@/lib/bundle-catalog";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
@@ -556,6 +565,8 @@ export default async function BookDetailPage({
     { data: moreByAuthorData },
     categoryRows,
     { data: bundleLinks },
+    salesRanks,
+    isLibrumPick,
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -708,7 +719,14 @@ export default async function BookDetailPage({
       .select("bundle_id")
       .eq("book_id", id)
       .returns<{ bundle_id: string }[]>(),
+    // Amazon page P4 (items 2 + 7): the rank (paid sales of the last 30
+    // days; ranks only, server-side admin client) and whether staff ever
+    // picked this book in Admin › Libraria.
+    readBookSalesRanks(createAdminClient(), id),
+    readIsLibrumPick(supabase, id),
   ]);
+  const rankBadge = topRankBadge(salesRanks);
+  const rankLine = rankParts(salesRanks);
   const classicAuthor = book.pd_work_id ? (classicsByWork.get(book.pd_work_id) ?? null) : null;
 
   const allReviews = reviews ?? [];
@@ -1490,6 +1508,28 @@ export default async function BookDetailPage({
             </RatingPopover>
           )}
 
+          {/* Amazon page P4 (item 2): "Nr. 1 në <kategoria>" when the
+              book is first there (bp6 a minimum, paid sales of the last
+              30 days), and "Zgjedhja e Librum" for a book staff picked in
+              Admin › Libraria (bp8 a, rk3 a). */}
+          {(rankBadge || isLibrumPick) && (
+            <p data-title-badges="" className="mt-2 flex flex-wrap items-center gap-2">
+              {rankBadge && (
+                <span className="rounded-[3px] bg-primary px-[0.5625rem] py-[0.1875rem] text-[0.78125rem] font-semibold text-[#f3df9a]">
+                  {rankNumberText(1)} në{" "}
+                  <Link href={rankBadge.href} className="focus-ring rounded-sm text-[#f3df9a] hover:underline">
+                    {rankBadge.label}
+                  </Link>
+                </span>
+              )}
+              {isLibrumPick && (
+                <span className="rounded-[3px] border border-[#e9d590] bg-reader-tint px-[0.5625rem] py-[0.1875rem] text-[0.78125rem] font-semibold text-[#6b5200]">
+                  {PICK_BADGE_TEXT}
+                </span>
+              )}
+            </p>
+          )}
+
           {seriesInfo && (
             <p className="mt-1 text-sm text-foreground">
               {book.series_position ? `Libri ${book.series_position} i serisë ` : "Pjesë e serisë "}
@@ -1883,6 +1923,23 @@ export default async function BookDetailPage({
           {/* LBN (lbnq8 a): every book's Librum Book Number. */}
           {book.lbn && (
             <DetailRow label="LBN">{book.lbn}</DetailRow>
+          )}
+          {/* Amazon page P4 (item 7): "Nr. 14 në Librari · Nr. 1 në
+              Romancë", each place a link to that list in Libraria. */}
+          {rankLine.length > 0 && (
+            <DetailRow label={RANK_DETAIL_LABEL}>
+              <span data-rank-line="">
+                {rankLine.map((part, index) => (
+                  <Fragment key={part.category ?? ""}>
+                    {index > 0 && " · "}
+                    {rankNumberText(part.rank)} në{" "}
+                    <Link href={part.href} className={INLINE_LINK_CLASSES}>
+                      {part.label}
+                    </Link>
+                  </Fragment>
+                ))}
+              </span>
+            </DetailRow>
           )}
           {reviewCount > 0 && (
             <DetailRow label="Vlerësimet">
