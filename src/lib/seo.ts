@@ -153,6 +153,8 @@ export function buildBookJsonLd(
 // B2 (Renato 11-13, folded in from A2): schema.org BreadcrumbList for
 // the book page -- the same path its visible breadcrumbs show:
 // Libraria > the book's primary genre (when it has one) > the title.
+// BK2: the visible "Ebook" step is left out here: it has no page of its
+// own, and every step but the last needs one.
 // Hidden data only; no price, nothing about the author.
 export function buildBookBreadcrumbJsonLd(
   book: { id: string; title: string; genre: string | null },

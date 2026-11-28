@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BOOK_TYPES, bookEyebrow, bookTypeOf, isBookType } from "./book-types";
+import { BOOK_TYPES, bookTypeOf, isBookType } from "./book-types";
 
 describe("BOOK_TYPES", () => {
   it("is the eight types Renato agreed (11-06), NFC, in that order", () => {
@@ -36,24 +36,5 @@ describe("bookTypeOf / isBookType", () => {
     expect(bookTypeOf({ book_type: "Poezi" })).toBe("Poezi");
     expect(bookTypeOf({ book_type: "Tregime" })).toBeNull();
     expect(bookTypeOf({})).toBeNull();
-  });
-});
-
-describe("bookEyebrow", () => {
-  it("shows the type, then the genre", () => {
-    expect(bookEyebrow({ book_type: "Roman", genre: "Horror" })).toBe("Roman · Horror");
-  });
-  it("shows the genre alone while there is no type, and the type alone with no genre", () => {
-    expect(bookEyebrow({ book_type: null, genre: "Horror" })).toBe("Horror");
-    expect(bookEyebrow({ book_type: "Ese", genre: null })).toBe("Ese");
-    expect(bookEyebrow({ book_type: null, genre: "  " })).toBeNull();
-    expect(bookEyebrow({})).toBeNull();
-  });
-  it("never repeats the same word", () => {
-    expect(bookEyebrow({ book_type: "Poezi", genre: "Poezi" })).toBe("Poezi");
-    expect(bookEyebrow({ book_type: "Biografi & kujtime", genre: "Biografi & kujtime" })).toBe("Biografi & kujtime");
-  });
-  it("ignores a stored type that is not on the list", () => {
-    expect(bookEyebrow({ book_type: "Tregime", genre: "Horror" })).toBe("Horror");
   });
 });

@@ -37,7 +37,7 @@ import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
 import { initialReviewStars, parseRateStars } from "@/lib/rate-prompt";
 import { CONTRIBUTOR_ROLE_VERB } from "@/lib/contributor-roles";
 import { getLanguageLabel } from "@/lib/languages";
-import { BOOK_TYPE_LABEL, bookEyebrow, bookTypeOf } from "@/lib/book-types";
+import { BOOK_TYPE_LABEL, bookTypeOf } from "@/lib/book-types";
 import { PAGE_ESTIMATE_LABEL, pageEstimateText } from "@/lib/page-estimate";
 import { READING_TIME_LABEL, readingTimeText } from "@/lib/reading-time";
 import { formatDateOnly, formatTimestampAsDate } from "@/lib/book-detail-dates";
@@ -990,7 +990,9 @@ export default async function BookDetailPage({
           Parapamje. Ky libër nuk është në Librari.
         </p>
       )}
-      {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. */}
+      {/* REDESIGN STEP 3 (P1): Bookstore › Genre › Title. BK2 (Renato
+          11-25, bk2 a): Libraria › Ebook › Genre › Title. "Ebook" is plain
+          text: every book is an ebook, so it has no page of its own yet. */}
       <nav aria-label="Rruga e navigimit" className="-my-2 text-[0.875rem] text-muted">
         <ol className="flex flex-wrap items-center gap-x-2">
           <li>
@@ -998,6 +1000,8 @@ export default async function BookDetailPage({
               Libraria
             </Link>
           </li>
+          <li aria-hidden="true">›</li>
+          <li>Ebook</li>
           {book.genre && (
             <>
               <li aria-hidden="true">›</li>
@@ -1186,12 +1190,11 @@ export default async function BookDetailPage({
               </div>
             )}
           </div>
-          {coverUrl && <p className="text-xs text-muted max-md:hidden">Klikoni ballinën për ta parë të madhe</p>}
         </div>
 
         {/* DR1 fix 1: on phones (below md) this column dissolves into
             the stacked page so the price box (max-md:order-2) sits right
-            under the title, author, genre and rating, above the
+            under the title, author, type and rating, above the
             description. Visual order only -- one box, same DOM order, so
             tablet and desktop are unchanged. Nothing is sticky. */}
         <div className="min-w-0 max-md:contents">
@@ -1287,10 +1290,11 @@ export default async function BookDetailPage({
             </p>
           )}
 
-          {/* Upload notes C: the book's type, then the genre; P1: plain
-              words, no capitals. (Upload notes 3a: no "ebook" word here.) */}
-          {bookEyebrow(book) && (
-            <p className="mt-1 text-[0.8125rem] text-muted">{bookEyebrow(book)}</p>
+          {/* Upload notes C: the book's type; P1: plain words, no
+              capitals. BK3 (Renato 11-25, bk3 a): no genre here, the
+              breadcrumb above already shows it. */}
+          {bookTypeOf(book) && (
+            <p className="mt-1 text-[0.8125rem] text-muted">{bookTypeOf(book)}</p>
           )}
 
           {seriesInfo && (
