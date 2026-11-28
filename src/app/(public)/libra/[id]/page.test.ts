@@ -514,9 +514,10 @@ describe("BookDetailPage: redesign step 3", () => {
   it("a paid book's price card carries the mockup's three lines and the existing security note", async () => {
     const html = await render({ user: { id: "reader" } });
     expect(html).toContain(">Blej librin</button>");
-    // P1: EPUB and DRM sit in their own smaller spans; the words are the same.
-    expect(html.replace(/<[^>]+>/g, "")).toContain("EPUB, pa DRM. Lexojeni në telefon, tablet ose lexues elektronik.");
-    expect(html).toContain("Shkarkojeni kurdo nga Biblioteka juaj në Librum.");
+    // Amazon page (Renato 10:46): his three lines; EPUB sits in its own
+    // smaller span. "pa DRM" moved to the Formati detail line.
+    expect(html.replace(/<[^>]+>/g, "")).toContain("EPUB mund ta lexoni në telefon, tablet ose lexues elektronik.");
+    expect(html).toContain("Shkarkojeni nga Biblioteka juaj në Librum.");
     expect(html).toContain("Paguani me kartë.");
     expect(html).not.toContain("POK app");
     expect(html).toMatch(/Pagesë e sigurt( me POK)?\./);
@@ -668,18 +669,18 @@ describe("BookDetailPage: P1 design B", () => {
   });
 
   // DR1 fix 1: on phones the one price box sits under the title block,
-  // by visual order only; DR1 fix 4: serif section headings.
+  // by visual order only. Amazon page (fs1 a): sans 21px bold headings.
   // Patch A: on phones a 7.5rem cover sits beside the title (row 1), the
   // box is row 2 and the rest row 3.
   it("phone order: cover beside the title, then the one price box, then the description", async () => {
     const html = await render({});
     expect(html.match(/id="blerja"/g)).toHaveLength(1);
     expect(html).toContain('grid grid-cols-[7.5rem_minmax(0,1fr)]');
-    expect(html).toContain('<div class="min-w-0 max-md:contents"><div class="max-md:col-start-2 max-md:row-start-1 max-md:self-center"><h1');
-    expect(html).toMatch(/<div class="max-md:col-span-2 max-md:row-start-3"><hr class="my-4 max-md:mt-0 /);
+    expect(html).toContain('<div class="min-w-0 max-md:contents lg:pr-5 lg:pl-[3.125rem]"><div class="max-md:col-start-2 max-md:row-start-1 max-md:self-center"><h1');
+    expect(html).toMatch(/<div class="max-md:col-span-2 max-md:row-start-3"><hr class="my-3.5 /);
     expect(html).toMatch(/<aside aria-label="Çmimi dhe marrja e librit" class="w-full max-md:col-span-2 max-md:row-start-2 md:col-start-2 lg:col-start-3 lg:row-start-1">/);
-    expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Rreth autorit</h2>');
-    expect(html).toContain('<h2 class="font-serif text-2xl font-normal text-primary">Vlerësimet</h2>');
+    expect(html).toContain('<h2 class="text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]">Rreth autorit</h2>');
+    expect(html).toContain('<h2 class="text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]">Vlerësimet</h2>');
   });
 
   it("an ordinary book: the pen name, linked to its page, then (Autor)", async () => {
@@ -688,12 +689,18 @@ describe("BookDetailPage: P1 design B", () => {
     expect(html).toMatch(/href="\/autore\/pen-an-author"[^>]*>An Author<\/a> <span class="text-muted">\(Autor\)<\/span>/);
   });
 
-  it("the price box: a gold pill main action (patch A, 1a), the sample as an outline pill and on the cover, WhatsApp and copy link", async () => {
+  // Amazon page (items 28, 29): the sample left the box for under the
+  // cover; save-for-later is the heart on the cover.
+  it("the price box: a gold pill main action (patch A, 1a), the sample under the cover, the heart on it, WhatsApp and copy link", async () => {
     const html = await render({ user: { id: "reader" } });
     const box = html.slice(html.indexOf('id="blerja"'), html.indexOf("</aside>"));
     expect(box).toMatch(/<button type="submit" class="[^"]*rounded-full bg-accent [^"]*text-accent-foreground[^"]*">Blej librin<\/button>/);
-    expect(box).toMatch(/<button type="button" class="[^"]*rounded-full border border-primary[^"]*">Lexo një pjesë<\/button>/);
-    expect(box).toContain(">Ruaje për më vonë</button>");
+    expect(box).not.toContain("Lexo një pjesë");
+    expect(box).not.toContain("Ruaje për më vonë");
+    const cover = html.slice(html.indexOf('data-cover-column=""'), html.indexOf("max-md:contents"));
+    expect(cover).toMatch(/<button type="button" class="[^"]*rounded-full border border-foreground[^"]*">Lexo një pjesë<\/button>/);
+    expect(cover).toMatch(/<button type="submit" aria-label="Ruaje për më vonë" aria-pressed="false"/);
+    expect(cover).toContain('aria-label="Ndajeni librin"');
     // SOCIAL (soc2): logos only -- WhatsApp, Facebook, X, LinkedIn, then
     // Copy link (a plain link to this page without JavaScript). The phone
     // menu button is never in the server HTML.
@@ -703,7 +710,7 @@ describe("BookDetailPage: P1 design B", () => {
     ]);
     expect(box).toMatch(/<a href="[^"]*\/libra\/11111111-1111-4111-8111-111111111111" aria-label="Kopjo lidhjen"/);
     expect(box).not.toContain("Më shumë mënyra për ta ndarë");
-    expect(html).toMatch(/<button type="button" class="[^"]*rounded-full[^"]*">Shiko brenda<\/button>/);
+    expect(html).not.toContain("Shiko brenda");
   });
 
   it("an owner gets no sample anywhere (unchanged rule)", async () => {
@@ -836,6 +843,6 @@ describe("BookDetailPage: patch A buy box and sticky bar", () => {
 
   it("the page leaves room for the bar on phones and sizes card genre labels on this page only", async () => {
     const html = await render({ user: { id: "reader" } });
-    expect(html).toMatch(/^<div class="flex flex-1 flex-col bg-surface max-md:pb-20 \[&amp;_\[data-card-genre\]\]:text-\[0.8125rem\]/);
+    expect(html).toMatch(/^<div class="flex flex-1 flex-col bg-surface max-md:pb-20 \[&amp;_.font-serif\]:font-sans \[&amp;_\[data-card-genre\]\]:text-\[0.8125rem\]/);
   });
 });

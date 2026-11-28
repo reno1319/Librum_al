@@ -152,7 +152,10 @@ function expectNoPaidCheckoutSurface(html: string) {
   expect(html).not.toMatch(/href="\/login\?next=\/libra\/[^"]+"[^>]*>Blej librin</);
   // CART (item 32): a signed-out visitor's sign-in links lead only to
   // the cart's two buttons.
-  for (const m of html.matchAll(/href="\/login\?next=\/libra\/[^"]+"[^>]*>([^<]*)</g)) {
+  // Amazon page (bp1 a): plus the heart on the cover, which only saves
+  // the book for later.
+  for (const m of html.matchAll(/<a [^>]*href="\/login\?next=\/libra\/[^"]+"[^>]*>([^<]*)</g)) {
+    if (m[0].includes('aria-label="Ruaje për më vonë"')) continue;
     expect(["Shto në shportë", "Dhuroje"]).toContain(m[1]);
   }
   expect(html).not.toContain('name="code"');

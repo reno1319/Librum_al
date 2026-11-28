@@ -90,15 +90,15 @@ describe("null-priced books are excluded from every discovery surface", () => {
     expect(source).toContain('.not("price_all", "is", null)');
   });
 
-  it("book detail excludes them from ALL THREE of its rails, not just one", () => {
-    // series neighbours, more-by-author, and you-might-like. One rail
-    // left unfiltered would keep surfacing unbuyable books from the
-    // page of a book the reader is already looking at.
+  it("book detail excludes them from BOTH of its rails, not just one", () => {
+    // series neighbours and you-might-like (Amazon page, md1 a: the
+    // more-by-author shelf is gone). One rail left unfiltered would keep
+    // surfacing unbuyable books from the page of a book the reader is
+    // already looking at.
     const source = code(read("libra/[id]/page.tsx"));
-    // P1: plus the "N libra në Librum" count, which counts exactly the
-    // books "More by" may list.
+    // P1: plus the "N libra në Librum" count.
     const occurrences = source.split('.not("price_all", "is", null)').length - 1;
-    expect(occurrences).toBe(4);
+    expect(occurrences).toBe(3);
   });
 
   // LR1 (lr1-6 c): Libraria has no price filter and no sort any more;

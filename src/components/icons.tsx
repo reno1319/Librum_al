@@ -232,3 +232,25 @@ export function IconDevice({ className, style }: IconProps) {
     </svg>
   );
 }
+
+// Amazon book page (item 29): share, on the cover.
+export function IconShare({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M12 3v12" />
+      <path d="M8 7l4-4 4 4" />
+      <path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8" />
+    </svg>
+  );
+}
+
+// Amazon book page (item 5): the publisher tile.
+export function IconBuilding({ className, style }: IconProps) {
+  return (
+    <svg {...base} className={className} style={style}>
+      <path d="M4 10.5 12 4l8 6.5" />
+      <path d="M6 9v11h12V9" />
+      <path d="M10 20v-5h4v5" />
+    </svg>
+  );
+}

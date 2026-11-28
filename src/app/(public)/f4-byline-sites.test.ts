@@ -79,14 +79,16 @@ describe("F4 / PEN-NAMES-1: book bylines", () => {
 });
 
 describe("PEN-NAMES-1: places that named the author now name the pen name", () => {
-  it("book page: Rreth autorit and More by ... use the pen name and link to its page (3a)", () => {
+  // Amazon page (md1 a, 11-28): the "Më shumë nga" shelf is gone; the
+  // author's book count still reads this pen name's books only.
+  it("book page: Rreth autorit uses the pen name and links to its page (3a)", () => {
     const source = readSrc("app/(public)/libra/[id]/page.tsx");
     // BD3 patch 4: the byline can be an original author; these two
     // stay on the pen name.
     expect(source).toContain("const authorName = resolveBookPenName(book);");
     // P1 (design B): the name links to the pen name's page.
     expect(source).toMatch(/<Link href=\{penNamePath\} className="[^"]*">\s*\{authorName\}\s*<\/Link>/);
-    expect(source).toContain("title={authorName ? `Më shumë nga ${authorName}` : \"Më shumë nga ky autor\"}");
+    expect(source).not.toContain("`Më shumë nga ${authorName}`");
     expect(source).toContain('.eq("pen_name_id", book.pen_name_id)');
     expect(source).toMatch(/<Link href=\{penNamePath\} className=\{INLINE_LINK_CLASSES\}>\s*\{bookByline\}/);
     expect(source).not.toMatch(/\/autore\/\$\{book\.author_id\}/);
