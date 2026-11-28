@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { IconClose } from "@/components/icons";
+import { IconClose, IconShare } from "@/components/icons";
 
 // P1 book page (design B, 2026-11-10): the small browser-side
 // pieces of the new book page. Each one renders the plain, complete
@@ -10,6 +10,11 @@ import { IconClose } from "@/components/icons";
 //   it is taller than `lines` lines, it folds and "Lexo më shumë" opens it.
 // - CoverZoom: a link to the cover image itself; with JavaScript it opens
 //   the large cover in a popup instead.
+// - ShareIconButton (Amazon page, item 29): the round share button on the
+//   cover -- the phone's own share sheet where there is one, otherwise it
+//   copies the link ("U kopjua").
+// - TileStrip (item 5): the quick-fact tiles in one row, five at a time
+//   on a computer with an arrow for the rest; phones swipe.
 // (CopyLinkButton moved into the share row, src/components/share-buttons.tsx.)
 
 export function ExpandableText({
@@ -119,5 +124,94 @@ export function CoverZoom({
         </div>
       </dialog>
     </>
+  );
+}
+
+export function ShareIconButton({
+  url,
+  title,
+  className,
+}: {
+  url: string;
+  title: string;
+  className?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Ndajeni librin"
+        title="Ndajeni librin"
+        className={className}
+        onClick={() => {
+          if (typeof navigator.share === "function") {
+            // A cancelled share sheet rejects; nothing to report.
+            navigator.share({ title, url }).catch(() => {});
+            return;
+          }
+          if (!navigator.clipboard?.writeText) {
+            setState("failed");
+            return;
+          }
+          navigator.clipboard.writeText(url).then(
+            () => setState("copied"),
+            () => setState("failed"),
+          );
+        }}
+      >
+        <IconShare className="size-[0.9375rem] md:size-5" />
+      </button>
+      <span role="status" className="sr-only">
+        {state === "copied" ? "U kopjua" : state === "failed" ? "Kopjojeni nga shiriti i adresës" : ""}
+      </span>
+      {state === "copied" && (
+        <span aria-hidden="true" className="absolute top-full right-0 mt-1 rounded-[3px] bg-foreground px-2 py-0.5 text-xs whitespace-nowrap text-surface">
+          U kopjua
+        </span>
+      )}
+    </>
+  );
+}
+
+export function TileStrip({ children }: { children: ReactNode }) {
+  const listRef = useRef<HTMLDListElement>(null);
+  // True once the browser has measured more tiles than fit.
+  const [more, setMore] = useState(false);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setMore(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  return (
+    <div className="relative md:pr-10">
+      <dl
+        ref={listRef}
+        data-detail-tiles=""
+        className="flex snap-x overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {children}
+      </dl>
+      {more && (
+        <button
+          type="button"
+          aria-label="Më shumë të dhëna"
+          onClick={() => {
+            const el = listRef.current;
+            if (!el) return;
+            const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+            el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + el.clientWidth, behavior: "smooth" });
+          }}
+          className="focus-ring absolute top-1/2 right-0 flex size-[1.875rem] -translate-y-1/2 items-center justify-center rounded-full border border-[#d9d3c3] bg-surface text-base text-foreground shadow-[0_2px_6px_rgba(0,0,0,0.1)] hover:bg-surface-hover max-md:hidden"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
+    </div>
   );
 }

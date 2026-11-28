@@ -27,23 +27,25 @@ describe("Book Detail: Subtitle near the Title", () => {
     expect(heroBlock).not.toContain("${book.subtitle}");
   });
 
-  // REDESIGN STEP 3 (brief P2): the subtitle is now a muted italic
-  // serif line, as in the A2 mockup -- still visually secondary: muted,
-  // italic and smaller, never the h1's own green upright display size.
-  it("is visually secondary (muted italic, not the h1's own treatment)", () => {
+  // Amazon page (fs1 a, 11-28): one sans font, so the subtitle is a plain
+  // muted line -- still visually secondary: muted and smaller, never the
+  // h1's own display size.
+  it("is visually secondary (muted, smaller, not the h1's own treatment)", () => {
     const subtitleLine = source.match(/\{book\.subtitle && \([\s\S]*?\)\)?\}/)![0];
     expect(subtitleLine).toContain("text-muted");
-    expect(subtitleLine).toContain("italic");
+    expect(subtitleLine).toContain("text-base");
+    expect(subtitleLine).not.toContain("font-serif");
     expect(subtitleLine).not.toContain("text-primary");
     expect(subtitleLine).not.toMatch(/text-(4xl|5xl)|font-(semibold|bold)/);
   });
 });
 
-// P1 (design B, 2026-11-10): the details are now two lists -- a row of
-// tiles (Faqe, Kohë leximi, Gjuha, Botuar, Formati) and plain
-// "Label: value" lines for the rest. Every rule below is the old one.
+// P1 (design B, 2026-11-10): the details are two lists -- a row of
+// tiles and "Label: value" lines. Amazon page (items 5, 6): the tiles
+// add Botuesi and Mosha (Faqe, Kohë leximi, Gjuha, Botuesi, Botuar,
+// Mosha, Formati) and the lines moved lower on the page.
 describe("Book Detail: metadata tiles and rows, order and conditional rendering", () => {
-  const tiles = block('<dl data-detail-tiles=""', "</dl>");
+  const tiles = block("<TileStrip>", "</TileStrip>");
   const rows = block('<dl data-detail-rows=""', "</dl>");
 
   it("Format remains always visible, unconditional (the last tile)", () => {
@@ -51,8 +53,8 @@ describe("Book Detail: metadata tiles and rows, order and conditional rendering"
     expect(tiles).not.toContain("E-libër");
   });
 
-  it("tiles in the exact order: Faqe, Kohë leximi, Gjuha, Botuar, Formati", () => {
-    const labels = ["PAGE_ESTIMATE_LABEL", "READING_TIME_LABEL", 'label="Gjuha"', 'label="Botuar"', 'label="Formati"'];
+  it("tiles in the exact order: Faqe, Kohë leximi, Gjuha, Botuesi, Botuar, Mosha, Formati", () => {
+    const labels = ["PAGE_ESTIMATE_LABEL", "READING_TIME_LABEL", 'label="Gjuha"', 'label="Botuesi"', 'label="Botuar"', "READING_AGE_LABEL", 'label="Formati"'];
     const positions = labels.map((label) => {
       const idx = tiles.indexOf(label);
       expect(idx, `expected to find tile "${label}"`).toBeGreaterThan(-1);
@@ -147,7 +149,7 @@ describe("Book Detail: metadata tiles and rows, order and conditional rendering"
 
 describe("Book Detail: no exposure of internal/private fields", () => {
   it("never renders a storage path, only public-URL-derived image src or plain text metadata", () => {
-    for (const dl of [block('<dl data-detail-tiles=""', "</dl>"), block('<dl data-detail-rows=""', "</dl>")]) {
+    for (const dl of [block("<TileStrip>", "</TileStrip>"), block('<dl data-detail-rows=""', "</dl>")]) {
       expect(dl).not.toContain("file_path");
       expect(dl).not.toContain("cover_path");
     }
@@ -184,10 +186,10 @@ describe("Book Detail: format wording", () => {
     expect(source).not.toMatch(/E-lib[eë]r/i);
   });
 
-  // P1 (design B): plain words under the byline, no capitals.
+  // Amazon page: the type, plain, right under the title.
   it("the eyebrow is the type only, and only when there is one", () => {
     expect(source).toContain(
-      '{bookTypeOf(book) && (\n            <p className="mt-1 text-[0.8125rem] text-muted">{bookTypeOf(book)}</p>',
+      '{bookTypeOf(book) && (\n            <p data-book-type="" className="mt-0.5 text-base text-muted">{bookTypeOf(book)}</p>',
     );
     expect(source).not.toContain("bookEyebrow");
   });
@@ -206,7 +208,7 @@ describe("Book Detail: format wording", () => {
 // Kohë leximi (Renato 11-10 a) comes from the same count.
 describe("Book Detail: page estimate and reading time", () => {
   it("shows the Faqe tile first, and only with a count", () => {
-    const tiles = block('<dl data-detail-tiles=""', "</dl>");
+    const tiles = block("<TileStrip>", "</TileStrip>");
     expect(source).toContain("const pagesText = pageEstimateText(book.word_count);");
     expect(source).toContain("const readingTime = readingTimeText(book.word_count);");
     expect(tiles.indexOf("{pagesText && (")).toBeGreaterThan(0);
