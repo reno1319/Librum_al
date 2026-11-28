@@ -28,15 +28,3 @@ export function isBookType(value: unknown): value is BookType {
 export function bookTypeOf(book: { book_type?: string | null }): BookType | null {
   return isBookType(book.book_type) ? book.book_type : null;
 }
-
-/**
- * The book page's eyebrow: "ROMAN · HORROR" (uppercased by the page).
- * The genre is left out when it says the same thing as the type
- * ("Poezi" twice; "Biografi & kujtime" twice). With neither, null.
- */
-export function bookEyebrow(book: { book_type?: string | null; genre?: string | null }): string | null {
-  const type = bookTypeOf(book);
-  const genre = book.genre?.trim() || null;
-  if (type && genre && type.toLocaleLowerCase("sq") !== genre.toLocaleLowerCase("sq")) return `${type} · ${genre}`;
-  return type ?? genre;
-}

@@ -177,18 +177,19 @@ describe("Book Detail: review date", () => {
 });
 
 // Upload notes 3a (Enkelejd 11-06): no "E-libër" on the book page.
-// Upload notes C: the eyebrow is bookEyebrow() (type, then genre; tested
-// in src/lib/book-types.test.ts), shown only when it has something.
+// Upload notes C: the eyebrow is the book's type; BK3 (bk3 a): no genre
+// there any more, the breadcrumb shows it.
 describe("Book Detail: format wording", () => {
   it("never says E-libër", () => {
     expect(source).not.toMatch(/E-lib[eë]r/i);
   });
 
   // P1 (design B): plain words under the byline, no capitals.
-  it("the eyebrow is the type and genre, and only when there is one", () => {
+  it("the eyebrow is the type only, and only when there is one", () => {
     expect(source).toContain(
-      '{bookEyebrow(book) && (\n            <p className="mt-1 text-[0.8125rem] text-muted">{bookEyebrow(book)}</p>',
+      '{bookTypeOf(book) && (\n            <p className="mt-1 text-[0.8125rem] text-muted">{bookTypeOf(book)}</p>',
     );
+    expect(source).not.toContain("bookEyebrow");
   });
 
   it("Të dhënat e librit shows the type before the genres", () => {

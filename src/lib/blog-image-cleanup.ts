@@ -19,7 +19,8 @@
 //   * At most BLOG_IMAGE_MAX_DELETES_PER_RUN removals per run.
 //   * n2 a (Renato 11-24): the summary names every removed key
 //     ("inline/<uuid>.jpg", random ids, no personal data), so the job log
-//     shows what was removed and a mistake can be traced and restored.
+//     shows what was removed. A removed picture cannot be restored; the
+//     log only shows which picture to upload again.
 //
 // Only reads blog_posts.content_markdown; never writes a table.
 

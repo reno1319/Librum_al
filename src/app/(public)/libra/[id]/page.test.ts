@@ -536,6 +536,30 @@ describe("BookDetailPage: redesign step 3", () => {
     expect(html).toContain('href="/librari?genre=Poezi"');
   });
 
+  // BK2 (bk2 a): Libraria › Ebook › genre › title, "Ebook" as plain text.
+  it("BK2: the breadcrumb reads Libraria, Ebook, the genre, the title", async () => {
+    const html = await render({ user: null, book: { ...BOOK_ROW, genre: "Poezi" } });
+    const nav = html.slice(html.indexOf('aria-label="Rruga e navigimit"'), html.indexOf("</nav>"));
+    const at = (t: string) => nav.indexOf(t);
+    expect(at(">Libraria</a>")).toBeGreaterThan(0);
+    expect(at("<li>Ebook</li>")).toBeGreaterThan(at(">Libraria</a>"));
+    expect(at(">Poezi</a>")).toBeGreaterThan(at("<li>Ebook</li>"));
+    expect(at('aria-current="page"')).toBeGreaterThan(at(">Poezi</a>"));
+  });
+
+  it("BK2: with no genre the breadcrumb is Libraria, Ebook, the title", async () => {
+    const html = await render({ user: null, book: { ...BOOK_ROW, genre: null } });
+    const nav = html.slice(html.indexOf('aria-label="Rruga e navigimit"'), html.indexOf("</nav>"));
+    expect(nav).toContain("<li>Ebook</li>");
+    expect(nav).not.toContain("?genre=");
+  });
+
+  // BK1: no "click the cover" hint.
+  it("BK1: no 'Klikoni ballinën' hint under the cover", async () => {
+    const html = await render({ user: null });
+    expect(html).not.toContain("Klikoni ballinën");
+  });
+
   // FIX1 (X4): no star row until the first review.
   it("shows no stars and no '0 out of 5 stars' before the first review, and keeps the words", async () => {
     const html = await render({ user: null });
