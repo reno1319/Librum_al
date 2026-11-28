@@ -96,9 +96,10 @@ describe("null-priced books are excluded from every discovery surface", () => {
     // surfacing unbuyable books from the page of a book the reader is
     // already looking at.
     const source = code(read("libra/[id]/page.tsx"));
-    // P1: plus the "N libra në Librum" count.
+    // P1: plus the "N libra në Librum" count. Amazon page P2: plus the
+    // shelf's "Nga <autori>" and category chips, and the bundle list.
     const occurrences = source.split('.not("price_all", "is", null)').length - 1;
-    expect(occurrences).toBe(3);
+    expect(occurrences).toBe(6);
   });
 
   // LR1 (lr1-6 c): Libraria has no price filter and no sort any more;

@@ -6,7 +6,17 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } fr
 // a time, with arrows that slide the row one page sideways. The row
 // itself is a normal sideways-scrolling list, so phones keep swiping it
 // (the arrows show from sm up) and it still works with no JavaScript.
-export function ShelfSlider({ label, children }: { label: string; children: ReactNode }) {
+// Book page (Amazon page, item 23): `onPageChange` hears which page of
+// the row shows ("Faqja 1 nga 3"); Libraria passes none.
+export function ShelfSlider({
+  label,
+  children,
+  onPageChange,
+}: {
+  label: string;
+  children: ReactNode;
+  onPageChange?: (scrollLeft: number, visibleWidth: number, scrollWidth: number) => void;
+}) {
   const rowRef = useRef<HTMLUListElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
@@ -23,7 +33,13 @@ export function ShelfSlider({ label, children }: { label: string; children: Reac
     const first = row.firstElementChild as HTMLElement | null;
     const paddingTop = parseFloat(getComputedStyle(row).paddingTop) || 0;
     if (first) setArrowTop(row.offsetTop + paddingTop + (first.offsetWidth * 8) / 5 / 2);
-  }, []);
+    if (onPageChange) {
+      const style = getComputedStyle(row);
+      const gap = parseFloat(style.columnGap) || 0;
+      const inner = row.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+      onPageChange(row.scrollLeft, inner + gap, row.scrollWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0) + gap);
+    }
+  }, [onPageChange]);
 
   useEffect(() => {
     const row = rowRef.current;

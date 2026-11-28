@@ -30,7 +30,13 @@ import {
 } from "@/lib/preorder-reader";
 import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
-import { BookShelf } from "@/components/book-shelf";
+import { BookPageShelf } from "@/components/book-page-shelf";
+import { BookPageCard } from "@/components/book-page-card";
+import { BookPageSectionBar } from "@/components/book-page-section-bar";
+import { AdultTag } from "@/components/adult-tag";
+import { isNewOnLibrum, sameBookIds, SHELF_ROW_LIMIT } from "@/lib/book-page-shelf";
+import { fetchRatings } from "@/lib/libraria-picks-read";
+import { formatBundleSavingsAll, resolveBundleSavingsAll } from "@/lib/bundle-catalog";
 import { BookSampleReader } from "@/components/book-sample-reader";
 import { latestApprovedReview, readReviewSnapshots } from "@/lib/book-reviews";
 import { initialReviewStars, parseRateStars } from "@/lib/rate-prompt";
@@ -72,7 +78,7 @@ import {
 import { buttonClasses } from "@/components/ui/button";
 import { resolveMaintenanceMode } from "@/lib/maintenance-mode";
 import { MaintenanceNotice } from "@/components/maintenance-notice";
-import type { PublicBook, PublicReview, PublicSeries, Contributor } from "@/lib/types";
+import type { PublicBook, PublicBundle, PublicReview, PublicSeries, Contributor } from "@/lib/types";
 import { CoverPlaceholder } from "@/components/cover-placeholder";
 import { classicAuthorPath, formatClassicYears, loadClassicAuthorsByWork } from "@/lib/classic-authors";
 import { buyerDownloadNote, readMyDownloadStates, SHARING_REMINDER, DOWNLOAD_CANCEL_WARNING } from "@/lib/book-downloads";
@@ -87,6 +93,7 @@ import {
   EDITION_LABEL,
   READING_AGE_LABEL,
   bookCategories,
+  bundleIsAdult,
   categoriesLabel,
   descriptionSnippet,
   editionValue,
@@ -184,6 +191,12 @@ type BookWithAuthorBio = PublicBook & {
 };
 type BookWithAuthor = PublicBook & {
   pen: PenNameRef | null;
+};
+// Amazon page P2 (item 9): a bundle that holds this book, with its books.
+type BookPageBundle = Pick<PublicBundle, "id" | "title" | "price_all"> & {
+  bundle_books:
+    | { books: Pick<PublicBook, "id" | "title" | "cover_path" | "price_all" | "status" | "is_adult"> | null }[]
+    | null;
 };
 // LIBRUM 2.0 PRODUCT-3: `created_at` added to what this already-existing
 // query selects (no new query, no new PERF-1 batch member) so
@@ -531,6 +544,9 @@ export default async function BookDetailPage({
     { count: penBookCount },
     ,
     classicsByWork,
+    { data: moreByAuthorData },
+    categoryRows,
+    { data: bundleLinks },
   ] = await Promise.all([
     // PEN-NAMES-2 (22a): reviews come from public_reviews -- no reader_id.
     // BD13: approved reviews only; reviewer_name is the chosen review name
@@ -600,7 +616,8 @@ export default async function BookDetailPage({
           return book.pen_name_id ? sameGenre.neq("pen_name_id", book.pen_name_id) : sameGenre;
         })()
           .order("created_at", { ascending: false })
-          .limit(8)
+          // Amazon page P2 (item 11): up to three pages of seven.
+          .limit(SHELF_ROW_LIMIT)
           .returns<BookWithAuthor[]>()
       : Promise.resolve({ data: null }),
     // REDESIGN STEP 3 (B5): whether this reader already follows the
@@ -639,6 +656,49 @@ export default async function BookDetailPage({
     // K6 (Q1 b): a public-domain edition whose work is linked to a live
     // classic author: the byline links to their page, with the years.
     loadClassicAuthorsByWork(supabase, [book.pd_work_id]),
+    // Amazon page P2 (chip 24): "Nga <autori>" -- the other books under
+    // this book's pen name (the same rows the old "More by" listed).
+    // Not on a book whose byline is an original author: the pen name
+    // there is the translator or editor, not the author.
+    book.pen_name_id && !resolveOriginalAuthor(book)
+      ? supabase
+          .from("public_books")
+          .select("*, pen:public_pen_names(id, name)")
+          .in("status", LISTED_BOOK_STATUSES)
+          .not("price_all", "is", null)
+          .eq("pen_name_id", book.pen_name_id)
+          .neq("id", id)
+          .order("created_at", { ascending: false })
+          .limit(SHELF_ROW_LIMIT)
+          .returns<BookWithAuthor[]>()
+      : Promise.resolve({ data: null }),
+    // Amazon page P2 (item 11): one chip per category of this book --
+    // its listed, priced books (any author; never an 18+ book on a book
+    // for children or teens).
+    Promise.all(
+      bookCategories(book).map(async (category) => {
+        let inCategory = supabase
+          .from("public_books")
+          .select("*, pen:public_pen_names(id, name)")
+          .in("status", LISTED_BOOK_STATUSES)
+          .not("price_all", "is", null)
+          .contains("categories", [category])
+          .neq("id", id);
+        if (isYoungReaderBook(book)) inCategory = inCategory.eq("is_adult", false);
+        const { data } = await inCategory
+          .order("created_at", { ascending: false })
+          .limit(SHELF_ROW_LIMIT)
+          .returns<BookWithAuthor[]>();
+        return { category, books: data ?? [] };
+      }),
+    ),
+    // Amazon page P2 (item 9): the bundles this book is in (ids only;
+    // the row rules show only rows of published bundles).
+    supabase
+      .from("bundle_books")
+      .select("bundle_id")
+      .eq("book_id", id)
+      .returns<{ bundle_id: string }[]>(),
   ]);
   const classicAuthor = book.pd_work_id ? (classicsByWork.get(book.pd_work_id) ?? null) : null;
 
@@ -678,7 +738,54 @@ export default async function BookDetailPage({
     ? resolveSeriesNeighbors(seriesEntries, book.id)
     : { previous: null, next: null };
   const youMightLike: BookWithAuthor[] = youMightLikeData ?? [];
+  const moreByAuthor: BookWithAuthor[] = moreByAuthorData ?? [];
   const isFollowingAuthor = !!followRow;
+
+  // Amazon page P2 (item 9): "Edhe në paketë" -- the published bundles
+  // with an ALL price that hold this book (the same terms as the author
+  // page's bundle list), newest first, at most three.
+  const bundleIds = [...new Set((bundleLinks ?? []).map((row) => row.bundle_id))];
+  const { data: bundlesData } =
+    bundleIds.length > 0
+      ? await supabase
+          .from("public_bundles")
+          .select("id, title, price_all, bundle_books(books:public_books(id, title, cover_path, price_all, status, is_adult))")
+          .in("id", bundleIds)
+          .eq("status", "published")
+          .not("price_all", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(3)
+          .returns<BookPageBundle[]>()
+      : { data: null };
+  const bundles: BookPageBundle[] = bundlesData ?? [];
+
+  // Amazon page P2 (item 11): the shelf's chips. "Libra të ngjashëm"
+  // first, then "Nga <autori>", then one per category -- a chip whose
+  // books are exactly the first chip's is left out, and so is an empty one.
+  const shelfRows: { kind: "similar" | "author" | "category"; label: string; href: string; books: BookWithAuthor[] }[] = [];
+  if (youMightLike.length > 0) {
+    shelfRows.push({
+      kind: "similar",
+      label: "Libra të ngjashëm",
+      href: book.genre ? buildBookstoreHref({}, { genre: book.genre }) : "/librari",
+      books: youMightLike,
+    });
+  }
+  if (moreByAuthor.length > 0 && book.pen) {
+    shelfRows.push({
+      kind: "author",
+      label: `Nga ${book.pen.name}`,
+      href: authorPagePath(book.pen.id),
+      books: moreByAuthor,
+    });
+  }
+  for (const { category, books } of categoryRows) {
+    if (books.length === 0 || sameBookIds(books, youMightLike)) continue;
+    shelfRows.push({ kind: "category", label: category, href: buildBookstoreHref({}, { genre: category }), books });
+  }
+  const shelfBookIds = [...new Set(shelfRows.flatMap((row) => row.books.map((b) => b.id)))];
+  const shelfRatings = await fetchRatings(supabase, shelfBookIds);
+  const shelfNow = new Date();
 
   // PAID-CHECKOUT-SURFACE-1: read once, from the one server-only
   // interpretation of PAID_CHECKOUT_MODE buyBook itself uses. Nothing
@@ -1399,7 +1506,7 @@ export default async function BookDetailPage({
               whole text without JavaScript). */}
           {book.description && (
             <section aria-labelledby="rreth-librit">
-              <h2 id="rreth-librit" className="sr-only">Rreth librit</h2>
+              <h2 id="rreth-librit" className="sr-only scroll-mt-20">Rreth librit</h2>
               <ExpandableText lines={4} className="max-w-[42.5rem] text-sm leading-5 text-foreground">
                 <BookDescriptionView stored={book.description} />
               </ExpandableText>
@@ -1554,8 +1661,128 @@ export default async function BookDetailPage({
               <ShareButtons url={shareTarget.url} text={shareTarget.text} className="border-t border-border pt-1 text-xs" />
             )}
           </div>
+
+          {/* Item 9: "Edhe në paketë" -- the bundles this book is in,
+              each a link to its page, with what it saves (only when the
+              saving can be stated honestly, as on the bundle page). */}
+          {bundles.length > 0 && (
+            <section data-bundle-box="" aria-labelledby="ne-pakete" className="mt-3.5 rounded-[8px] border border-[#d9d3c3] px-[1.125rem] py-3.5">
+              <h2 id="ne-pakete" className="text-sm font-bold text-foreground">Edhe në paketë</h2>
+              <ul className="mt-2 flex flex-col gap-3">
+                {bundles.map((bundle) => {
+                  const members = bundle.bundle_books ?? [];
+                  const memberBooks = members
+                    .map((m) => m.books)
+                    .filter((b): b is NonNullable<typeof b> => !!b);
+                  const savings = formatBundleSavingsAll(resolveBundleSavingsAll(bundle.price_all, members.map((m) => m.books)));
+                  return (
+                    <li key={bundle.id}>
+                      <Link href={`/paketa/${bundle.id}`} className="focus-ring group flex items-center gap-3.5 rounded-sm">
+                        <span aria-hidden="true" className="flex shrink-0 pr-3">
+                          {memberBooks.slice(0, 3).map((member) => {
+                            const memberCover = member.cover_path
+                              ? supabase.storage.from("covers").getPublicUrl(member.cover_path).data.publicUrl
+                              : null;
+                            return memberCover ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                key={member.id}
+                                src={memberCover}
+                                alt=""
+                                loading="lazy"
+                                className="-mr-3 aspect-[5/8] w-[2.125rem] rounded-[2px] border border-white bg-surface object-contain object-bottom shadow-[0_1px_3px_rgba(0,0,0,0.25)]"
+                              />
+                            ) : (
+                              <span
+                                key={member.id}
+                                className="-mr-3 aspect-[5/8] w-[2.125rem] rounded-[2px] border border-white bg-primary shadow-[0_1px_3px_rgba(0,0,0,0.25)]"
+                              />
+                            );
+                          })}
+                        </span>
+                        <span className="min-w-0 text-[0.8125rem] text-foreground">
+                          <span className="block text-sm font-semibold group-hover:underline">
+                            {bundle.title}
+                            {bundleIsAdult(bundle.bundle_books) && (
+                              <>
+                                {" "}
+                                <AdultTag />
+                              </>
+                            )}
+                          </span>
+                          {members.length} {members.length === 1 ? "libër" : "libra"} · {formatCatalogPriceLabel(bundle.price_all)}
+                          {savings && (
+                            <span className="block text-[#a3261c]">Kurseni {savings.savings}</span>
+                          )}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
         </aside>
       </div>
+
+      {/* Item 13: the section bar (computer and tablet), right under the
+          top of the page; it then stays at the top of the screen. */}
+      <BookPageSectionBar
+        title={book.title}
+        coverUrl={coverUrl}
+        links={[
+          ...(book.description ? [{ id: "rreth-librit", label: "Rreth librit" }] : []),
+          ...(shelfRows.length > 0 ? [{ id: "te-ngjashem", label: "Të ngjashëm" }] : []),
+          ...(book.pen ? [{ id: "rreth-autorit", label: "Rreth autorit" }] : []),
+          { id: "vleresimet", label: "Vlerësimet" },
+        ]}
+      />
+
+      {/* ============================================================
+          Item 11 (+ 12, 20, 23, 24): the shelf of other books, with a
+          chip per list, cards with stars and "I ri". It replaces the old
+          "Mund t'ju pëlqejnë edhe" row at the bottom of the page.
+          ============================================================ */}
+      {shelfRows.length > 0 && (
+        <div className="mt-9 border-t border-border pt-5 md:mt-8 md:border-t-0 md:pt-0">
+          <BookPageShelf
+            id="te-ngjashem"
+            heading={SHELF_HEADING}
+            headingClassName={SECTION_HEADING}
+            tabs={shelfRows.map((row) => ({
+              label: row.label,
+              href: row.href,
+              leading:
+                row.kind === "author" ? (
+                  authorAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={authorAvatarUrl} alt="" className="size-6 shrink-0 rounded-full object-cover" />
+                  ) : (
+                    <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#d9e2dc] text-[0.625rem] font-semibold text-foreground/70">
+                      {getAuthorInitials(book.pen?.name ?? "")}
+                    </span>
+                  )
+                ) : undefined,
+              items: row.books.map((shelfBook) => ({
+                key: shelfBook.id,
+                node: (
+                  <BookPageCard
+                    book={shelfBook}
+                    coverUrl={
+                      shelfBook.cover_path
+                        ? supabase.storage.from("covers").getPublicUrl(shelfBook.cover_path).data.publicUrl
+                        : null
+                    }
+                    authorName={resolveBookByline(shelfBook)}
+                    rating={shelfRatings.get(shelfBook.id) ?? null}
+                    isNew={isNewOnLibrum(shelfBook, shelfNow)}
+                  />
+                ),
+              })),
+            }))}
+          />
+        </div>
+      )}
 
       {/* ============================================================
           Book Details (item 6): all the facts as "Label: value" lines,
@@ -1662,8 +1889,8 @@ export default async function BookDetailPage({
       {/* BD15 P7: not on a public-domain edition without the editor
           mention -- the page has no pen name for it. */}
       {book.pen && (
-      <section className={PAGE_SECTION_CLASSES}>
-        <h2 className={SECTION_HEADING}>Rreth autorit</h2>
+      <section id="rreth-autorit" aria-labelledby="rreth-autorit-titulli" className={`${PAGE_SECTION_CLASSES} scroll-mt-20`}>
+        <h2 id="rreth-autorit-titulli" className={SECTION_HEADING}>Rreth autorit</h2>
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-8 lg:gap-[3.125rem]">
           <div data-author-column="" className="grid shrink-0 grid-cols-[6rem_minmax(0,1fr)] items-center justify-items-start gap-x-4 gap-y-1.5 sm:flex sm:w-48 sm:flex-col sm:items-start sm:gap-2 lg:w-[17.875rem]">
             {authorAvatarUrl ? (
@@ -1742,6 +1969,24 @@ export default async function BookDetailPage({
             )}
           </div>
           <div className="min-w-0 flex-1">
+            {/* Items 14 + 27: why follow, and (signed in) where the
+                followed authors are. Not for the author. */}
+            {!isAuthor && penNamePath && (
+              <p data-follow-why="" className="mb-3 text-sm text-muted">
+                Ndiqni autorin dhe ju dërgojmë email kur del një libër i ri.
+                {user && (
+                  <>
+                    {" "}
+                    <Link
+                      href="/following"
+                      className="focus-ring rounded-sm text-primary underline underline-offset-2 hover:decoration-2"
+                    >
+                      Shikoni autorët që ndiqni
+                    </Link>
+                  </>
+                )}
+              </p>
+            )}
             {book.pen?.bio && (
               <ExpandableText lines={3} className="max-w-[42.5rem] text-sm leading-5 text-foreground">
                 <p className="whitespace-pre-line">{book.pen.bio}</p>
@@ -1987,17 +2232,6 @@ export default async function BookDetailPage({
         </section>
       )}
 
-      {/* ============================================================
-          More by this author / You might also like
-          ============================================================ */}
-      <BookShelf
-        headingClassName={SECTION_HEADING}
-        title="Mund t'ju pëlqejnë edhe"
-        books={youMightLike.slice(0, 5)}
-        seeAllHref={book.genre ? buildBookstoreHref({}, { genre: book.genre }) : "/librari"}
-        supabase={supabase}
-      />
-
     </main>
     {stickyAction && (
       <StickyBuyBar targetId="blerja" title={book.title} price={formattedPrice}>
@@ -2015,6 +2249,9 @@ export default async function BookDetailPage({
 // fs1 a (Amazon sizes): headings 21px bold, one sans font.
 const SECTION_HEADING = "text-xl leading-7 font-bold text-foreground md:text-[1.3125rem]";
 const PAGE_SECTION_CLASSES = "mt-9 border-t border-border pt-5";
+// Item 11 heading (bp16 a, Renato 11-28): today's honest heading
+// until patch 5 brings real "readers also bought" data.
+const SHELF_HEADING = "Mund t'ju pëlqejnë edhe";
 const DETAIL_LINK_CLASSES =
   "focus-ring rounded-sm text-foreground underline underline-offset-2 hover:text-primary hover:decoration-2";
 const INLINE_LINK_CLASSES =
@@ -2122,8 +2359,10 @@ const SECONDARY_ACTION_CLASSES =
 const UNDER_COVER_SAMPLE_CLASSES =
   "focus-ring inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-full border border-foreground bg-surface px-1.5 text-center text-[0.8125rem] font-medium text-foreground transition-colors hover:bg-surface-hover md:min-h-8 md:w-[10.9375rem] md:text-sm";
 // Item 29: the round share / heart buttons on the cover.
+// P1 audit note 1: on phones the 30px circle gets an invisible 44px tap
+// area around it (nothing changes on screen).
 const COVER_ICON_CLASSES =
-  "focus-ring flex size-[1.875rem] items-center justify-center rounded-full bg-surface text-foreground shadow-[0_1px_4px_rgba(0,0,0,0.25)] hover:bg-surface-hover md:size-[2.625rem]";
+  "focus-ring relative flex size-[1.875rem] items-center justify-center rounded-full bg-surface text-foreground shadow-[0_1px_4px_rgba(0,0,0,0.25)] before:absolute before:-inset-[0.4375rem] before:rounded-full before:content-[''] hover:bg-surface-hover md:size-[2.625rem] md:before:hidden";
 const COVER_ICON_SVG_CLASSES = "size-[0.9375rem] md:size-5";
 const WISHLIST_ADD_LABEL = "Ruaje për më vonë";
 const WISHLIST_REMOVE_LABEL = "Hiqe nga Lista e dëshirave";
