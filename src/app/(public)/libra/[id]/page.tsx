@@ -30,6 +30,18 @@ import {
 } from "@/lib/preorder-reader";
 import { buildBookstoreHref } from "@/lib/bookstore";
 import { StarRating } from "@/components/star-rating";
+import { RatingPopover } from "@/components/rating-popover";
+import { ReviewHistogram } from "@/components/review-histogram";
+import { ReviewListItem } from "@/components/review-list-item";
+import {
+  BOOK_PAGE_REVIEW_COUNT,
+  HOW_REVIEWS_WORK_LINES,
+  REVIEW_OWNERS_ONLY_NOTE,
+  reviewCountLabel,
+  reviewFormStartsOpen,
+  reviewsPageHref,
+  summarizeReviews,
+} from "@/lib/review-summary";
 import { BookPageShelf } from "@/components/book-page-shelf";
 import { BookPageCard } from "@/components/book-page-card";
 import { BookPageSectionBar } from "@/components/book-page-section-bar";
@@ -118,14 +130,11 @@ import {
   IconPerson,
 } from "@/components/icons";
 import {
-  ANONYMOUS_REVIEWER_NAME,
-  AUTHOR_REVIEWER_LABEL,
   REVIEW_BODY_MAX,
   REVIEW_EDIT_WARNING,
   REVIEW_NAME_HELP,
   REVIEW_NAME_MAX,
   REVIEW_RULES_NOTE,
-  VERIFIED_PURCHASE_LABEL,
   ownReviewNotice,
   savedReviewNotice,
   type OwnReview,
@@ -709,6 +718,14 @@ export default async function BookDetailPage({
       ? allReviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
       : 0;
   const myReview: MyReview | null = myReviewRow ?? null;
+  // Amazon book page P3: the 5 -> 1 rows from the same approved reviews.
+  const reviewSummary = summarizeReviews(allReviews.map((r) => r.rating));
+  const reviewFormOpen = reviewFormStartsOpen({
+    rateStars,
+    reviewStatus,
+    error,
+    ownStatus: myReview?.status ?? null,
+  });
   const myReviewNotice = ownReviewNotice(myReview);
   // BD13a: the after-save box (only "unchanged"; see savedReviewNotice).
   const savedNotice = savedReviewNotice(reviewStatus);
@@ -1460,16 +1477,17 @@ export default async function BookDetailPage({
           )}
 
           {/* Item 3: the rating number first, then the stars and the
-              count ("(128)" on phones). */}
+              count ("(128)" on phones). P3 item 21: the stars open the
+              star pop-up; the count still jumps to the reviews. */}
           {reviewCount > 0 && (
-            <a href="#vleresimet" data-rating-line="" className="focus-ring mt-1 inline-flex min-h-11 items-center gap-2 rounded-sm text-sm whitespace-nowrap md:min-h-8">
-              <span className="font-semibold text-foreground">{ratingText}</span>
-              <StarRating rating={averageRating} />
-              <span className="text-muted underline underline-offset-2">
-                <span className="max-md:hidden">{`${reviewCount} ${reviewCount === 1 ? "vlerësim" : "vlerësime"}`}</span>
-                <span className="md:hidden">{`(${reviewCount})`}</span>
-              </span>
-            </a>
+            <RatingPopover
+              ratingText={ratingText}
+              rating={averageRating}
+              countLong={reviewCountLabel(reviewCount)}
+              countShort={`(${reviewCount})`}
+            >
+              <ReviewHistogram bookId={book.id} summary={reviewSummary} />
+            </RatingPopover>
           )}
 
           {seriesInfo && (
@@ -2010,8 +2028,12 @@ export default async function BookDetailPage({
           Reviews
           ============================================================ */}
       {/* BD13: id="vleresimet" is where the end page's review link
-          (BD4b) and the after-save redirect land. */}
-      <section id="vleresimet" className={`${allReviews.length === 0 && !owned ? "mt-10 border-t border-border pt-5" : PAGE_SECTION_CLASSES} scroll-mt-24`}>
+          (BD4b) and the after-save redirect land.
+          Amazon book page P3 (design r7): left, the average, the 5 -> 1
+          rows (15, 26), "Si funksionojnë vlerësimet" (25) and "Vlerësoni
+          këtë libër" (16); right, the newest 3 (18, 19) and "Shiko të
+          gjitha vlerësimet (N)" (bp4 a). Stacked on phones. */}
+      <section id="vleresimet" className={`${PAGE_SECTION_CLASSES} scroll-mt-24`}>
         <h2 className={SECTION_HEADING}>Vlerësimet</h2>
 
         {savedNotice && (
@@ -2023,130 +2045,172 @@ export default async function BookDetailPage({
           </p>
         )}
 
-        {owned && (
-          <form
-            action={submitReview.bind(null, book.id)}
-            className="mt-4 flex max-w-[42.5rem] flex-col gap-3 rounded-[8px] border border-border p-5"
-          >
-            <p className="text-sm font-medium">
-              {myReview ? "Përditësoni vlerësimin tuaj" : "Lini një vlerësim"}
-            </p>
-            {myReviewNotice && (
-              <div
-                className={`rounded-[3px] px-3 py-2 text-sm ${
-                  myReviewNotice.tone === "warning" ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"
-                }`}
-              >
-                {myReviewNotice.lines.map((line) => (
-                  <p key={line}>{line}</p>
+        <div className="mt-4 grid gap-8 lg:grid-cols-[17.875rem_minmax(0,1fr)] lg:gap-x-[3.125rem]">
+          <div data-review-summary="">
+            {reviewCount > 0 && (
+              <>
+                <p className="flex items-center gap-2.5 text-xl leading-7">
+                  <span className="text-[1.375rem]"><StarRating rating={averageRating} /></span>
+                  <b className="font-bold text-foreground">{`${ratingText} nga 5`}</b>
+                </p>
+                <p className="mt-1 text-sm text-muted">{reviewCountLabel(reviewCount)}</p>
+                <ReviewHistogram bookId={book.id} summary={reviewSummary} className="mt-3.5" />
+              </>
+            )}
+            <details className="group mt-3.5 text-sm">
+              <summary className="focus-ring inline-flex min-h-8 cursor-pointer list-none items-center gap-1 rounded-sm text-primary underline underline-offset-2 hover:decoration-2 [&::-webkit-details-marker]:hidden">
+                Si funksionojnë vlerësimet
+                <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M2.5 4.5 6 8l3.5-3.5" />
+                </svg>
+              </summary>
+              <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-[0.8125rem] leading-5 text-muted">
+                {HOW_REVIEWS_WORK_LINES.map((line) => (
+                  <li key={line}>{line}</li>
                 ))}
+              </ul>
+            </details>
+            {reviewCount > 0 && (
+              <p className="mt-1.5 text-[0.8125rem] leading-5 text-muted">
+                Klikoni një rresht yjesh për të parë vetëm ato vlerësime.
+              </p>
+            )}
+
+            {/* Item 16 (bp3 a): "Shkruani një vlerësim" for everyone but
+                the book's author (who cannot review their own book).
+                Owner: opens the form (rv1 a). Signed in without the
+                book: the one-line rule. Signed out: log in first. */}
+            {!isAuthor && (
+              <div data-review-write="" className="mt-5 border-t border-border pt-4">
+                <h3 className="text-lg leading-6 font-bold text-foreground">Vlerësoni këtë libër</h3>
+                <p className="mt-1 text-sm text-muted">Tregojuni lexuesve të tjerë si ju duk.</p>
+                {owned && myReviewNotice && (
+                  <div
+                    className={`mt-3 rounded-[3px] px-3 py-2 text-sm ${
+                      myReviewNotice.tone === "warning" ? "bg-amber-50 text-amber-800" : "bg-blue-50 text-blue-800"
+                    }`}
+                  >
+                    {myReviewNotice.lines.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                )}
+                {!user ? (
+                  <Link
+                    href={`/login?next=/libra/${book.id}`}
+                    className={`${REVIEW_PILL_CLASSES} mt-3 w-full`}
+                  >
+                    Shkruani një vlerësim
+                  </Link>
+                ) : (
+                  <details className="mt-3" open={owned ? reviewFormOpen : undefined}>
+                    <summary className={`${REVIEW_PILL_CLASSES} w-full cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
+                      {owned && myReview ? "Përditësoni vlerësimin tuaj" : "Shkruani një vlerësim"}
+                    </summary>
+                    {owned ? (
+                      <form
+                        action={submitReview.bind(null, book.id)}
+                        className="mt-3 flex flex-col gap-3 rounded-[8px] border border-border p-4"
+                      >
+                        <p className="text-sm font-medium">
+                          {myReview ? "Përditësoni vlerësimin tuaj" : "Lini një vlerësim"}
+                        </p>
+                        {myReviewName ? (
+                          <p className="text-sm text-muted">
+                            Shfaqeni si: <span className="font-medium text-foreground">{myReviewName}</span>
+                          </p>
+                        ) : (
+                          <label className="flex flex-col gap-1 text-sm">
+                            Emri që shfaqet
+                            <input
+                              type="text"
+                              name="review_name"
+                              required
+                              minLength={2}
+                              maxLength={REVIEW_NAME_MAX}
+                              autoComplete="nickname"
+                              className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
+                            />
+                            <span className="text-xs text-muted">{REVIEW_NAME_HELP}</span>
+                          </label>
+                        )}
+                        <label className="flex flex-col gap-1 text-sm">
+                          Yjet
+                          <select
+                            name="rating"
+                            required
+                            defaultValue={initialReviewStars(myReview?.rating, rateStars)}
+                            className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
+                          >
+                            <option value="" disabled>
+                              Zgjidhni yjet
+                            </option>
+                            <option value="5">★★★★★</option>
+                            <option value="4">★★★★☆</option>
+                            <option value="3">★★★☆☆</option>
+                            <option value="2">★★☆☆☆</option>
+                            <option value="1">★☆☆☆☆</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1 text-sm">
+                          Komenti (opsional)
+                          <textarea
+                            name="body"
+                            rows={3}
+                            maxLength={REVIEW_BODY_MAX}
+                            defaultValue={myReview?.body ?? ""}
+                            className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
+                          />
+                        </label>
+                        {myReview?.status === "approved" && (
+                          <p className="text-xs text-muted">{REVIEW_EDIT_WARNING}</p>
+                        )}
+                        <button
+                          type="submit"
+                          className={buttonClasses("primary", "md", "w-fit rounded-full")}
+                        >
+                          {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
+                        </button>
+                        <p className="text-xs text-muted">{REVIEW_RULES_NOTE}</p>
+                      </form>
+                    ) : (
+                      <p data-review-owners-only="" className="mt-2 text-sm text-foreground">
+                        {REVIEW_OWNERS_ONLY_NOTE}
+                      </p>
+                    )}
+                  </details>
+                )}
               </div>
             )}
-            {myReviewName ? (
-              <p className="text-sm text-muted">
-                Shfaqeni si: <span className="font-medium text-foreground">{myReviewName}</span>
+          </div>
+
+          <div data-review-list="">
+            {allReviews.length === 0 ? (
+              <p className="text-[0.9375rem] text-muted">
+                {owned ? "Ende pa vlerësime." : "Ende pa vlerësime. Vlerësimi i parë mund të jetë i juaji, pasi ta lexoni librin."}
               </p>
             ) : (
-              <label className="flex flex-col gap-1 text-sm">
-                Emri që shfaqet
-                <input
-                  type="text"
-                  name="review_name"
-                  required
-                  minLength={2}
-                  maxLength={REVIEW_NAME_MAX}
-                  autoComplete="nickname"
-                  className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
-                />
-                <span className="text-xs text-muted">{REVIEW_NAME_HELP}</span>
-              </label>
-            )}
-            <label className="flex flex-col gap-1 text-sm">
-              Yjet
-              <select
-                name="rating"
-                required
-                defaultValue={initialReviewStars(myReview?.rating, rateStars)}
-                className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
-              >
-                <option value="" disabled>
-                  Zgjidhni yjet
-                </option>
-                <option value="5">★★★★★</option>
-                <option value="4">★★★★☆</option>
-                <option value="3">★★★☆☆</option>
-                <option value="2">★★☆☆☆</option>
-                <option value="1">★☆☆☆☆</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              Komenti (opsional)
-              <textarea
-                name="body"
-                rows={3}
-                maxLength={REVIEW_BODY_MAX}
-                defaultValue={myReview?.body ?? ""}
-                className="focus-ring rounded-[3px] border border-[#8c8472] bg-surface px-3 py-2"
-              />
-            </label>
-            {myReview?.status === "approved" && (
-              <p className="text-xs text-muted">{REVIEW_EDIT_WARNING}</p>
-            )}
-            <button
-              type="submit"
-              className={buttonClasses("primary", "md", "w-fit rounded-full")}
-            >
-              {myReview ? "Përditësoni vlerësimin" : "Dërgoni vlerësimin"}
-            </button>
-            <p className="text-xs text-muted">{REVIEW_RULES_NOTE}</p>
-          </form>
-        )}
-
-        {allReviews.length === 0 ? (
-          !owned && (
-            <p className="mt-2 text-[0.9375rem] text-muted">
-              Ende pa vlerësime. Vlerësimi i parë mund të jetë i juaji, pasi ta lexoni librin.
-            </p>
-          )
-        ) : (
-          <ul className="mt-6 flex max-w-[42.5rem] flex-col gap-4">
-            {allReviews.map((review) => (
-              <li key={review.id} className="border-t border-border pt-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <StarRating rating={review.rating} />
-                  <span className="text-sm font-medium">
-                    {review.reviewer_name ?? ANONYMOUS_REVIEWER_NAME}
-                  </span>
-                  {review.verified && (
-                    <span className="rounded-[3px] bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-800">
-                      {VERIFIED_PURCHASE_LABEL}
-                    </span>
-                  )}
-                  {review.reviewer_is_author && (
-                    <span className="rounded-[3px] border border-border px-1.5 py-0.5 text-xs font-medium text-muted">
-                      {AUTHOR_REVIEWER_LABEL}
-                    </span>
-                  )}
-                  {/* REVIEW-DATE: the day the reader first wrote it
-                      (created_at, already in public_reviews), in Tirana,
-                      same Albanian format as "Botuar në Librum". An edit
-                      keeps this date. */}
-                  <time
-                    dateTime={review.created_at}
-                    className="text-xs text-muted"
+              <>
+                <p className="mb-3.5 text-sm text-muted">
+                  {`Më të rejat · ${Math.min(BOOK_PAGE_REVIEW_COUNT, reviewCount)} nga ${reviewCount}`}
+                </p>
+                <ul className="flex flex-col">
+                  {allReviews.slice(0, BOOK_PAGE_REVIEW_COUNT).map((review) => (
+                    <ReviewListItem key={review.id} review={review} />
+                  ))}
+                </ul>
+                {reviewCount > BOOK_PAGE_REVIEW_COUNT && (
+                  <Link
+                    href={reviewsPageHref(book.id)}
+                    className={`${REVIEW_PILL_CLASSES} mt-2 px-6`}
                   >
-                    {formatTimestampAsDate(review.created_at)}
-                  </time>
-                </div>
-                {review.body && (
-                  <p className="mt-1 text-sm text-foreground/90">
-                    {review.body}
-                  </p>
+                    {`Shiko të gjitha vlerësimet (${reviewCount})`}
+                  </Link>
                 )}
-              </li>
-            ))}
-          </ul>
-        )}
+              </>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* ============================================================
@@ -2376,6 +2440,10 @@ const FOLLOW_PILL_CLASSES =
   "focus-ring inline-flex items-center justify-center rounded-full bg-primary px-5 py-1.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary-hover";
 const FOLLOWING_PILL_CLASSES =
   "focus-ring inline-flex items-center justify-center rounded-full border border-primary px-4 py-1.5 text-sm font-semibold text-primary transition-colors hover:bg-surface-hover";
+// P3 (design r7): the outlined pills in the reviews block, 32px tall
+// (44px on phones), like the box's buttons.
+const REVIEW_PILL_CLASSES =
+  "focus-ring inline-flex min-h-11 items-center justify-center rounded-full border border-foreground bg-surface px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover md:min-h-8";
 const STATUS_PILL_CLASSES = "rounded-[8px] bg-surface-hover px-3 py-2.5 text-center text-sm font-medium";
 const PREORDER_BADGE_CLASSES =
   "inline-block rounded-[3px] border border-[#806510] bg-[#fbf6e8] px-2.5 py-1 text-sm font-semibold text-[#5c480b]";

@@ -160,9 +160,12 @@ describe("Book Detail: no exposure of internal/private fields", () => {
 // first written, from public_reviews.created_at, via the shared Tirana
 // date helper -- never a raw ISO string or the runtime's own locale.
 describe("Book Detail: review date", () => {
-  const reviewItem = block("{allReviews.map((review) => (", "</li>");
+  // Amazon page P3: one review is drawn by ReviewListItem.
+  const itemSource = readFileSync(path.join(__dirname, "../../../../components/review-list-item.tsx"), "utf8");
+  const reviewItem = itemSource.slice(itemSource.indexOf("<li data-review"), itemSource.indexOf("</li>"));
 
   it("renders the review's created_at through formatTimestampAsDate inside a <time>", () => {
+    expect(source).toContain("<ReviewListItem key={review.id} review={review} />");
     expect(reviewItem).toContain("<time");
     expect(reviewItem).toContain("dateTime={review.created_at}");
     expect(reviewItem).toContain("{formatTimestampAsDate(review.created_at)}");

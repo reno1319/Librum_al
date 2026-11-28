@@ -176,11 +176,16 @@ describe("AUTHOR-1C privacy contract: books/[id]/page.tsx's reviewer join no lon
   });
 
   it("review names show reviewer_name with a generic fallback, never a profiles field", () => {
+    // Amazon page P3: one review is drawn by ReviewListItem (book page
+    // and the all-reviews page), so the rule is checked there.
+    const item = readSrc("components/review-list-item.tsx");
+    expect(source).toContain("<ReviewListItem key={review.id} review={review} />");
     // BD13: the fallback text moved to src/lib/reader-reviews.ts.
-    expect(source).toContain("review.reviewer_name ?? ANONYMOUS_REVIEWER_NAME");
+    expect(item).toContain("review.reviewer_name ?? ANONYMOUS_REVIEWER_NAME");
     // BD13: an author reviewer gets only the neutral tag, never a pen name.
-    expect(source).toContain("{review.reviewer_is_author && (");
-    expect(source).toContain("{AUTHOR_REVIEWER_LABEL}");
+    expect(item).toContain("{review.reviewer_is_author && (");
+    expect(item).toContain("{AUTHOR_REVIEWER_LABEL}");
+    expect(item).not.toMatch(/review\.profiles/);
     expect(source).not.toMatch(/review\.profiles[^`]/); // the one hit left is a backticked comment
   });
 

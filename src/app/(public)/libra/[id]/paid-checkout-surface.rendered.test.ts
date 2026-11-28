@@ -153,10 +153,11 @@ function expectNoPaidCheckoutSurface(html: string) {
   // CART (item 32): a signed-out visitor's sign-in links lead only to
   // the cart's two buttons.
   // Amazon page (bp1 a): plus the heart on the cover, which only saves
-  // the book for later.
+  // the book for later. Amazon page P3 (bp3 a): plus "Shkruani një
+  // vlerësim" in the reviews block, which only signs in to review.
   for (const m of html.matchAll(/<a [^>]*href="\/login\?next=\/libra\/[^"]+"[^>]*>([^<]*)</g)) {
     if (m[0].includes('aria-label="Ruaje për më vonë"')) continue;
-    expect(["Shto në shportë", "Dhuroje"]).toContain(m[1]);
+    expect(["Shto në shportë", "Dhuroje", "Shkruani një vlerësim"]).toContain(m[1]);
   }
   expect(html).not.toContain('name="code"');
   expect(html).not.toContain("Kodi promocional");
